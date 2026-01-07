@@ -1,0 +1,196 @@
+/* ==================== SIGNUP PAGE ==================== */
+.signup-page {
+  display: flex;
+  justify-content: center;
+  /* column for copyright below login card */
+  flex-direction: column;
+  
+  align-items: center;
+  min-height: 100vh;
+  background: var(--bg-main);
+  padding: var(--space-4);
+}
+
+/* ==================== SIGNUP CARD ==================== */
+.signup-card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--bg-card);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+}
+
+/* ==================== CARD HEADER ==================== */
+.signup-card__header {
+  background: var(--bg-card);
+  padding: var(--space-6);
+  text-align: center;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.signup-card__title {
+  margin: 0 0 var(--space-2) 0;
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--text-main);
+  letter-spacing: -0.02em;
+}
+
+.signup-card__subtitle {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+}
+
+/* ==================== SIGNUP FORM ==================== */
+.signup-form {
+  padding: var(--space-6);
+}
+
+/* ==================== FORM FIELD ==================== */
+.signup-form__field {
+  display: flex;
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: all 0.2s;
+  background: var(--bg-card);
+}
+
+.signup-form__field:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+/* ==================== INPUT ==================== */
+.signup-form__input {
+  flex: 1;
+  padding: var(--space-3);
+  border: none;
+  font-size: 0.9375rem;
+  outline: none;
+  background: transparent;
+  color: var(--text-main);
+}
+
+.signup-form__input::placeholder {
+  color: var(--text-muted);
+}
+
+/* ==================== ICON ==================== */
+.signup-form__icon {
+  padding: var(--space-3);
+  background: var(--border-light);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid var(--border-color);
+  min-width: 48px;
+}
+
+/* ==================== FORM ACTIONS ==================== */
+.signup-form__actions {
+  margin-top: var(--space-6);
+}
+
+/* ==================== SUBMIT BUTTON ==================== */
+.signup-form__submit {
+  display: block;
+  width: 100%;
+  padding: var(--space-3);
+  background: var(--primary);
+  color: white;
+  text-align: center;
+  border-radius: var(--radius-md);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  transition: all 0.2s;
+  border: none;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+}
+
+.signup-form__submit:hover {
+  background: var(--primary-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.signup-form__submit:active {
+  transform: translateY(0);
+}
+
+/* ==================== MESSAGES ==================== */
+.signup-form__error {
+  color: #b91c1c;
+  background: var(--danger-light);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-4);
+  font-size: 0.875rem;
+  border: 1px solid #fca5a5;
+}
+
+.signup-form__success {
+  color: var(--success-dark);
+  background: var(--success-light);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-4);
+  font-size: 0.875rem;
+  border: 1px solid #86efac;
+}
+
+/* ==================== FOOTER ==================== */
+.signup-form__footer {
+  text-align: center;
+  margin-top: var(--space-5);
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.signup-form__footer a {
+  color: var(--primary);
+  font-weight: 500;
+  transition: color 0.2s;
+}
+
+.signup-form__footer a:hover {
+  color: var(--primary-hover);
+  text-decoration: underline;
+}
+
+/* ==================== RESPONSIVE ==================== */
+@media (max-width: 480px) {
+  .signup-page {
+    padding: var(--space-3);
+  }
+
+  .signup-card {
+    box-shadow: var(--shadow-sm);
+  }
+
+  .signup-card__header,
+  .signup-form {
+    padding: var(--space-4);
+  }
+
+  .signup-card__title {
+    font-size: 1.5rem;
+  }
+
+  .signup-form__input,
+  .signup-form__icon {
+    padding: var(--space-3);
+    font-size: 16px; /* Prevents iOS zoom */
+  }
+
+  .signup-form__submit {
+    padding: var(--space-3);
+    font-size: 16px;
+  }
+}

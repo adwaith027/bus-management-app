@@ -1,0 +1,306 @@
+/* ==================================================
+   Branch Listing - Shared Style System (Matches Company Listing)
+   ================================================== */
+
+/* ==================== PAGE LAYOUT ==================== */
+.branch-page {
+  background-color: transparent;
+  min-height: auto;
+  padding: 0;
+}
+
+.branch-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-6);
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.branch-header h1 {
+  color: var(--text-main);
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+/* ==================== BUTTONS ==================== */
+.branch-btn-add {
+  background: var(--primary);
+  color: white;
+  border: none;
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9375rem;
+  transition: all 0.2s;
+  box-shadow: var(--shadow-sm);
+}
+
+.branch-btn-add:hover {
+  background: var(--primary-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.branch-btn-cancel {
+  background: var(--text-secondary);
+  color: white;
+  border: none;
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.branch-btn-cancel:hover {
+  background: var(--text-main);
+}
+
+.branch-btn-submit {
+  background: var(--success);
+  color: white;
+  border: none;
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s;
+  box-shadow: var(--shadow-sm);
+}
+
+.branch-btn-submit:hover {
+  background: var(--success-dark);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.branch-btn-submit:disabled {
+  background: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+
+/* ==================== TABLE ==================== */
+.branch-table-container {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+}
+
+.branch-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 800px;
+}
+
+.branch-table th,
+.branch-table td {
+  padding: var(--space-4);
+  text-align: left;
+}
+
+.branch-table th {
+  background: var(--border-light);
+  font-weight: 600;
+  color: var(--text-main);
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 2px solid var(--border-color);
+}
+
+.branch-table tbody tr {
+  border-bottom: 1px solid var(--border-light);
+  transition: background 0.2s;
+  animation: fadeIn 0.3s ease;
+}
+
+.branch-table tbody tr:hover {
+  background: var(--primary-light);
+}
+
+.branch-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.branch-table td {
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+}
+
+.text-center {
+  text-align: center;
+  padding: var(--space-6) !important;
+  color: var(--text-muted);
+}
+
+/* ==================== STATUS BADGES ==================== */
+.branch-status-badge {
+  display: inline-block;
+  padding: var(--space-1) var(--space-3);
+  border-radius: 9999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-transform: capitalize;
+  letter-spacing: 0.02em;
+}
+
+.branch-status-active {
+  background: var(--success-light);
+  color: var(--success-dark);
+}
+
+.branch-status-inactive {
+  background: var(--danger-light);
+  color: var(--danger);
+}
+
+/* ==================== ACTION BUTTONS ==================== */
+.branch-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.branch-btn-view,
+.branch-btn-edit {
+  padding: var(--space-2) var(--space-4);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  min-width: 70px;
+}
+
+.branch-btn-view {
+  background: var(--info);
+  color: white;
+}
+
+.branch-btn-view:hover {
+  background: #2563eb;
+  transform: translateY(-1px);
+}
+
+.branch-btn-edit {
+  background: var(--success);
+  color: white;
+}
+
+.branch-btn-edit:hover {
+  background: var(--success-dark);
+  transform: translateY(-1px);
+}
+
+/* ==================== FORM ==================== */
+.branch-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.branch-form-row {
+  display: flex;
+  gap: var(--space-4);
+}
+
+.branch-form-group {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.branch-form-group label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.branch-form-group input,
+.branch-form-group textarea {
+  padding: var(--space-3);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: 0.9375rem;
+  width: 100%;
+  background: var(--bg-card);
+  color: var(--text-main);
+  transition: all 0.2s;
+}
+
+.branch-form-group input:focus,
+.branch-form-group textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+.branch-form-group textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.branch-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+/* ==================== LOCATION ==================== */
+.branch-form-row--location {
+  display: grid;
+  grid-template-columns: 2fr 1.75fr 1.25fr;
+  gap: var(--space-4);
+}
+
+/* ==================== RESPONSIVE ==================== */
+@media (max-width: 768px) {
+  .branch-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .branch-btn-add {
+    width: 100%;
+  }
+
+  .branch-form-row,
+  .branch-form-row--location {
+    flex-direction: column;
+    grid-template-columns: 1fr;
+  }
+
+  .branch-actions {
+    flex-direction: column;
+  }
+
+  .branch-btn-view,
+  .branch-btn-edit,
+  .branch-btn-submit,
+  .branch-btn-cancel {
+    width: 100%;
+  }
+
+  .branch-form-actions {
+    flex-direction: column-reverse;
+    width: 100%;
+  }
+
+  .branch-table-container {
+    overflow-x: auto;
+  }
+}

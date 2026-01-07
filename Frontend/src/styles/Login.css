@@ -1,0 +1,185 @@
+/* ==================== LOGIN PAGE ==================== */
+.login-page {
+  display: flex;
+  /* column for copyright below login card */
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background: var(--bg-main);
+  padding: var(--space-4);
+}
+
+/* ==================== LOGIN CARD ==================== */
+.login-card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--bg-card);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+}
+
+/* ==================== CARD HEADER ==================== */
+.login-card__header {
+  background: var(--bg-card);
+  padding: var(--space-6);
+  text-align: center;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.login-card__title {
+  margin: 0 0 var(--space-2) 0;
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--text-main);
+  letter-spacing: -0.02em;
+}
+
+.login-card__subtitle {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+}
+
+/* ==================== LOGIN FORM ==================== */
+.login-form {
+  padding: var(--space-6);
+}
+
+/* ==================== FORM FIELD ==================== */
+.login-form__field {
+  display: flex;
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: all 0.2s;
+  background: var(--bg-card);
+}
+
+.login-form__field:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+/* ==================== INPUT ==================== */
+.login-form__input {
+  flex: 1;
+  padding: var(--space-3);
+  border: none;
+  font-size: 0.9375rem;
+  outline: none;
+  background: transparent;
+  color: var(--text-main);
+}
+
+.login-form__input::placeholder {
+  color: var(--text-muted);
+}
+
+/* ==================== ICON ==================== */
+.login-form__icon {
+  padding: var(--space-3);
+  background: var(--border-light);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid var(--border-color);
+  min-width: 48px;
+}
+
+/* ==================== FORM ACTIONS ==================== */
+.login-form__actions {
+  margin-top: var(--space-6);
+}
+
+/* ==================== SUBMIT BUTTON ==================== */
+.login-form__submit {
+  display: block;
+  width: 100%;
+  padding: var(--space-3);
+  background: var(--primary);
+  color: white;
+  text-align: center;
+  border-radius: var(--radius-md);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  transition: all 0.2s;
+  border: none;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+}
+
+.login-form__submit:hover {
+  background: var(--primary-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.login-form__submit:active {
+  transform: translateY(0);
+}
+
+/* ==================== ERROR MESSAGE ==================== */
+.login-form__error {
+  color: #b91c1c;
+  background: var(--danger-light);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-4);
+  font-size: 0.875rem;
+  border: 1px solid #fca5a5;
+}
+
+/* ==================== FOOTER ==================== */
+.login-form__footer {
+  text-align: center;
+  margin-top: var(--space-5);
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.login-form__footer a {
+  color: var(--primary);
+  font-weight: 500;
+  transition: color 0.2s;
+}
+
+.login-form__footer a:hover {
+  color: var(--primary-hover);
+  text-decoration: underline;
+}
+
+/* ==================== RESPONSIVE ==================== */
+@media (max-width: 480px) {
+  .login-page {
+    padding: var(--space-3);
+  }
+
+  .login-card {
+    box-shadow: var(--shadow-sm);
+  }
+
+  .login-card__header,
+  .login-form {
+    padding: var(--space-4);
+  }
+
+  .login-card__title {
+    font-size: 1.5rem;
+  }
+
+  .login-form__input,
+  .login-form__icon {
+    padding: var(--space-3);
+    font-size: 16px; /* Prevents iOS zoom */
+  }
+
+  .login-form__submit {
+    padding: var(--space-3);
+    font-size: 16px;
+  }
+}

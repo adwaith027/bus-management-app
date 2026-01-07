@@ -1,0 +1,320 @@
+/* ==================== PAGE LAYOUT ==================== */
+.ticketReport {
+  /* Remove padding - Dashboard handles it */
+  max-width: 100%;
+  margin: 0;
+  background: transparent;
+  min-height: auto;
+}
+
+/* ==================== HEADER ==================== */
+.ticketReport__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--space-6);
+  background: var(--bg-card);
+  padding: var(--space-6);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-color);
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.ticketReport__title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-main);
+  letter-spacing: -0.02em;
+}
+
+.ticketReport__subtitle {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+}
+
+/* ==================== BUTTONS ==================== */
+.ticketReport__button {
+  padding: var(--space-3) var(--space-5);
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.ticketReport__button--primary {
+  background: var(--primary);
+  color: white;
+  box-shadow: var(--shadow-sm);
+}
+
+.ticketReport__button--primary:hover {
+  background: var(--primary-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.ticketReport__button--secondary {
+  background: var(--border-light);
+  color: var(--text-main);
+}
+
+.ticketReport__button--secondary:hover {
+  background: var(--border-color);
+}
+
+/* ==================== FILTERS ==================== */
+.ticketReport__filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-4);
+  background: var(--bg-card);
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  margin-bottom: var(--space-5);
+  border: 1px solid var(--border-color);
+}
+
+.ticketReport__filterGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ticketReport__filterLabel {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.ticketReport__filterInput {
+  padding: var(--space-3);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: 0.9375rem;
+  transition: all 0.2s;
+  background: var(--bg-card);
+  color: var(--text-main);
+}
+
+.ticketReport__filterInput:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+/* ==================== SUMMARY ==================== */
+.ticketReport__summary {
+  background: var(--bg-card);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-5);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-color);
+}
+
+.ticketReport__summaryText {
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+  margin: 0;
+}
+
+/* ==================== TABLE WITH SCROLLING ==================== */
+.ticketReport__tableWrapper {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-color);
+  margin-bottom: var(--space-5);
+  /* Enable horizontal scrolling for wide tables */
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+/* Custom scrollbar styling for table wrapper */
+.ticketReport__tableWrapper::-webkit-scrollbar {
+  height: 8px;
+}
+
+.ticketReport__tableWrapper::-webkit-scrollbar-track {
+  background: var(--border-light);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.ticketReport__tableWrapper::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+.ticketReport__tableWrapper::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+.ticketReport__table {
+  width: 100%;
+  border-collapse: collapse;
+  /* Ensure table doesn't shrink below this width */
+  min-width: 1200px;
+}
+
+.ticketReport__thead {
+  background: var(--border-light);
+  border-bottom: 2px solid var(--border-color);
+  /* Make header sticky when scrolling vertically */
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.ticketReport__th {
+  padding: var(--space-4) var(--space-3);
+  text-align: left;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-main);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.ticketReport__tbody {
+  background: var(--bg-card);
+}
+
+.ticketReport__row--even {
+  background: var(--bg-card);
+}
+
+.ticketReport__row--odd {
+  background: var(--border-light);
+}
+
+.ticketReport__row:hover {
+  background: var(--primary-light);
+}
+
+.ticketReport__td {
+  padding: var(--space-4) var(--space-3);
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-light);
+  white-space: nowrap;
+}
+
+
+.ticketReport__empty {
+  text-align: center;
+  padding: var(--space-8);
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 0.9375rem;
+}
+
+
+/* ==================== PAGINATION ==================== */
+.ticketReport__pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-6);
+  flex-wrap: wrap;
+}
+
+.ticketReport__paginationButton {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  border-radius: var(--radius-md);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--text-main);
+  cursor: pointer;
+  transition: all 0.2s;
+  min-width: 40px;
+}
+
+.ticketReport__paginationButton:hover:not(:disabled) {
+  background: var(--border-light);
+  border-color: var(--primary);
+}
+
+.ticketReport__paginationButton--active {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+.ticketReport__paginationButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ticketReport__paginationEllipsis {
+  padding: var(--space-3) var(--space-2);
+  color: var(--text-muted);
+}
+
+/* ==================== STATES ==================== */
+.ticketReport__loading,
+.ticketReport__error {
+  text-align: center;
+  padding: var(--space-8);
+  font-size: 1.125rem;
+  color: var(--text-secondary);
+}
+
+.ticketReport__error {
+  color: var(--danger);
+}
+
+/* ==================== RESPONSIVE ==================== */
+@media (max-width: 768px) {
+  .ticketReport__title {
+    font-size: 1.5rem;
+  }
+
+  .ticketReport__header {
+    flex-direction: column;
+    align-items: stretch;
+    padding: var(--space-5);
+  }
+
+  .ticketReport__button {
+    width: 100%;
+  }
+
+  .ticketReport__filters {
+    grid-template-columns: 1fr;
+  }
+
+  /* Table remains horizontally scrollable on mobile */
+  .ticketReport__tableWrapper {
+    /* Add some padding hint for scrollability */
+    position: relative;
+  }
+
+  .ticketReport__tableWrapper::after {
+    content: '← Scroll →';
+    position: absolute;
+    bottom: 8px;
+    right: 16px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    pointer-events: none;
+    opacity: 0.7;
+  }
+
+  .ticketReport__th,
+  .ticketReport__td {
+    padding: var(--space-3) var(--space-2);
+    font-size: 0.875rem;
+  }
+}

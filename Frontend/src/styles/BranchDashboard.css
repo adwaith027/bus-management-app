@@ -1,0 +1,349 @@
+/* ========== BASE CONTAINER ========== */
+.branch-dashboard-page {
+  padding: 24px;
+  background: linear-gradient(to bottom, #f8fafc, #e2e8f0);
+  border-radius: 1rem;
+  min-height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ========== HEADER SECTION ========== */
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 28px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.header-text h1 {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.header-text p {
+  margin: 4px 0 0 0;
+  font-size: 16px;
+  color: #64748b;
+  font-weight: 400;
+}
+
+/* Date Filter Styling - Subtle */
+.date-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background-color: white;
+  padding: 10px 16px;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  transition: box-shadow 0.2s ease;
+  border: 1px solid #e2e8f0;
+}
+
+.date-filter:hover {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+}
+
+.date-filter i {
+  color: #3b82f6;
+  font-size: 16px;
+}
+
+.date-input {
+  border: none;
+  outline: none;
+  font-size: 14px;
+  font-weight: 500;
+  color: #475569;
+  cursor: pointer;
+  background: transparent;
+}
+
+.date-input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+}
+
+/* ========== SECTION HEADERS ========== */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 32px;
+  margin-bottom: 14px;
+  color: #334155;
+  padding: 0;
+}
+
+.section-header:first-of-type {
+  margin-top: 0;
+}
+
+.section-header i {
+  font-size: 18px;
+  width: 22px;
+  text-align: center;
+  color: #64748b;
+}
+
+.section-header h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+/* ========== METRICS GRID ========== */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+/* ========== METRIC CARDS - ELEGANT & COMPACT ========== */
+.metric-card {
+  background: white;
+  border-radius: 12px;
+  padding: 18px 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: 1px solid #e2e8f0;
+}
+
+.metric-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  border-color: #cbd5e1;
+}
+
+.metric-card.loading {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* Card Content Layout */
+.card-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+}
+
+.card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.card-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  line-height: 1.3;
+}
+
+.card-value {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  line-height: 1.1;
+}
+
+/* Icon Container - Subtle & Elegant */
+.icon-container {
+  width: 45px;
+  height: 45px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.metric-card:hover .icon-container {
+  transform: scale(1.05);
+}
+
+.icon-container i {
+  font-size: 24px;
+  color: white;
+}
+
+/* ========== ANIMATIONS ========== */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.branch-dashboard-page {
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* ========== RESPONSIVE DESIGN ========== */
+
+/* Tablet (768px and below) */
+@media (max-width: 768px) {
+  .branch-dashboard-page {
+    padding: 16px;
+  }
+
+  .dashboard-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .header-text h1 {
+    font-size: 26px;
+  }
+
+  .header-text p {
+    font-size: 15px;
+  }
+
+  .metrics-grid {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+  }
+
+  .metric-card {
+    padding: 14px 16px;
+  }
+
+  .card-value {
+    font-size: 24px;
+  }
+
+  .icon-container {
+    width: 48px;
+    height: 48px;
+  }
+
+  .icon-container i {
+    font-size: 22px;
+  }
+
+  .section-header {
+    margin-top: 28px;
+  }
+}
+
+/* Mobile (480px and below) */
+@media (max-width: 480px) {
+  .branch-dashboard-page {
+    padding: 14px;
+  }
+
+  .header-text h1 {
+    font-size: 22px;
+  }
+
+  .header-text p {
+    font-size: 14px;
+  }
+
+  .metrics-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .metric-card {
+    padding: 14px 16px;
+  }
+
+  .card-title {
+    font-size: 11px;
+  }
+
+  .card-value {
+    font-size: 22px;
+  }
+
+  .icon-container {
+    width: 44px;
+    height: 44px;
+  }
+
+  .icon-container i {
+    font-size: 20px;
+  }
+
+  .date-filter {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .section-header h2 {
+    font-size: 16px;
+  }
+
+  .section-header i {
+    font-size: 16px;
+  }
+}
+
+/* ========== LOADING STATE ========== */
+.metric-card.loading .card-value {
+  color: #cbd5e1 !important;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.metric-card.loading .icon-container {
+  opacity: 0.5;
+}
+
+/* ========== PRINT STYLES ========== */
+@media print {
+  .branch-dashboard-page {
+    background: white;
+  }
+
+  .date-filter {
+    display: none;
+  }
+
+  .metric-card {
+    break-inside: avoid;
+    box-shadow: none;
+    border: 1px solid #ddd;
+  }
+
+  .metric-card:hover {
+    transform: none;
+    box-shadow: none;
+  }
+
+  .section-header {
+    color: #2c3e50;
+  }
+
+  .header-text h1,
+  .header-text p {
+    color: #2c3e50;
+  }
+}

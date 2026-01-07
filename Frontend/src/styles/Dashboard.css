@@ -1,0 +1,45 @@
+/* ==================== DASHBOARD LAYOUT ==================== */
+.dashboard {
+  display: flex;
+  max-height: 100vh;
+  background: var(--bg-main);
+}
+
+.dashboard__content {
+  flex: 1;
+  padding: var(--space-6);
+  max-height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Custom Scrollbar */
+.dashboard__content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.dashboard__content::-webkit-scrollbar-track {
+  background: var(--border-light);
+}
+
+.dashboard__content::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+.dashboard__content::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ==================== RESPONSIVE ==================== */
+@media (max-width: 768px) {
+  .dashboard__content {
+    padding: var(--space-4);
+  }
+}
+
+@media (max-width: 480px) {
+  .dashboard__content {
+    padding: var(--space-3);
+  }
+}

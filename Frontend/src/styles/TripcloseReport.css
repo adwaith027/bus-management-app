@@ -1,0 +1,343 @@
+/* ==================== PAGE LAYOUT ==================== */
+.tripReport {
+  /* Remove padding - Dashboard handles it */
+  background: transparent;
+  min-height: auto;
+}
+
+/* ==================== HEADER ==================== */
+.tripReport__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--space-6);
+  background: var(--bg-card);
+  padding: var(--space-6);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-color);
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.tripReport__title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-main);
+  letter-spacing: -0.02em;
+}
+
+.tripReport__subtitle {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+}
+
+/* ==================== BUTTONS ==================== */
+.tripReport__btn {
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.9375rem;
+  border: none;
+  transition: all 0.2s;
+}
+
+.tripReport__btn--primary {
+  background: var(--primary);
+  color: white;
+  box-shadow: var(--shadow-sm);
+}
+
+.tripReport__btn--primary:hover {
+  background: var(--primary-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.tripReport__btn--secondary {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+}
+
+.tripReport__btn--secondary:hover {
+  background: var(--border-light);
+  border-color: var(--primary);
+}
+
+/* ==================== FILTERS ==================== */
+.tripReport__filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-4);
+  background: var(--bg-card);
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  align-items: end;
+  margin-bottom: var(--space-5);
+  border: 1px solid var(--border-color);
+}
+
+.tripReport__filterGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.tripReport__filterGroup label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-main);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.tripReport__filterGroup input {
+  padding: var(--space-3);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: 0.9375rem;
+  outline: none;
+  color: var(--text-main);
+  background: var(--bg-card);
+  transition: all 0.2s;
+}
+
+.tripReport__filterGroup input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+.tripReport__filterActions {
+  display: flex;
+  justify-content: flex-start;
+  gap: var(--space-2);
+}
+
+/* ==================== SUMMARY ==================== */
+.tripReport__summary {
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  background: var(--bg-card);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  font-weight: 500;
+}
+
+/* ==================== TABLE WITH SCROLLING ==================== */
+.tripReport__tableWrapper {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-color);
+  /* Enable horizontal scrolling */
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+/* Custom scrollbar styling */
+.tripReport__tableWrapper::-webkit-scrollbar {
+  height: 8px;
+}
+
+.tripReport__tableWrapper::-webkit-scrollbar-track {
+  background: var(--border-light);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.tripReport__tableWrapper::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+
+.tripReport__tableWrapper::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+.tripReport__table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 1000px; /* Ensures scroll on small screens */
+}
+
+.tripReport__table thead {
+  background: var(--border-light);
+  border-bottom: 2px solid var(--border-color);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.tripReport__table th {
+  padding: var(--space-4);
+  text-align: left;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-main);
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.tripReport__table td {
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border-light);
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.tripReport__table tbody tr {
+  transition: background 0.2s;
+}
+
+.tripReport__table tbody tr:hover {
+  background: var(--primary-light);
+}
+
+/* ==================== SPECIFIC COLUMN STYLING ==================== */
+.tripReport__dateTime {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.tripReport__dateTime small {
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.tripReport__badge {
+  background: var(--info-light);
+  color: var(--info);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  display: inline-block;
+}
+
+.tripReport__amount {
+  font-weight: 600;
+  color: var(--success);
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 1rem;
+}
+
+.text-right {
+  text-align: right;
+}
+
+.tripReport__empty {
+  text-align: center;
+  padding: var(--space-8);
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 0.9375rem;
+}
+
+/* ==================== PAGINATION ==================== */
+.tripReport__pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-6);
+  flex-wrap: wrap;
+}
+
+.tripReport__pagination button {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: var(--text-main);
+  font-weight: 500;
+  transition: all 0.2s;
+  min-width: 40px;
+}
+
+.tripReport__pagination button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--border-light);
+}
+
+.tripReport__pagination button:not(:disabled):hover {
+  border-color: var(--primary);
+  background: var(--border-light);
+  color: var(--primary);
+}
+
+.tripReport__pagination span {
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-size: 0.9375rem;
+}
+
+/* ==================== STATES ==================== */
+.tripReport__loading,
+.tripReport__error {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 400px;
+  font-size: 1.125rem;
+  color: var(--text-secondary);
+}
+
+.tripReport__error {
+  color: var(--danger);
+}
+
+/* ==================== RESPONSIVE ==================== */
+@media (max-width: 768px) {
+  .tripReport__header {
+    flex-direction: column;
+    align-items: stretch;
+    padding: var(--space-5);
+  }
+
+  .tripReport__title {
+    font-size: 1.5rem;
+  }
+
+  .tripReport__filters {
+    grid-template-columns: 1fr;
+  }
+
+  .tripReport__btn {
+    width: 100%;
+  }
+
+  /* Add scroll hint on mobile */
+  .tripReport__tableWrapper::after {
+    content: '← Scroll →';
+    position: absolute;
+    bottom: 8px;
+    right: 16px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    pointer-events: none;
+    opacity: 0.7;
+  }
+
+  .tripReport__table th,
+  .tripReport__table td {
+    padding: var(--space-3) var(--space-2);
+    font-size: 0.875rem;
+  }
+
+  .tripReport__filterActions {
+    flex-direction: column;
+  }
+}
