@@ -1,6 +1,6 @@
 import logging
 from decimal import Decimal,InvalidOperation
-from datetime import datetime
+from datetime import datetime,timezone
 from rest_framework import status
 from ..models import TransactionData,TripCloseData,Company,MosambeeTransaction
 from django.http import HttpResponse,JsonResponse
@@ -9,10 +9,14 @@ from rest_framework.response import Response
 from django.contrib.auth import get_user_model
 from ..serializers import TicketDataSerializer,TripCloseDataSerializer
 from rest_framework.decorators import api_view
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, OperationalError
 from django.views.decorators.csrf import csrf_exempt
 import json
 from django.db.models import Count
+from django.utils.dateparse import parse_datetime
+import pytz
+import hashlib
+from django.conf import settings
 
 
 User=get_user_model()
@@ -73,7 +77,7 @@ def getTransactionDataFromDevice(request):
     response_chars=raw[0:32]
 
     try:
-        company_code = parts[25] if len(parts) > 25 else None
+        company_code = parts[26] if len(parts) > 26 else None
         
         company_instance = Company.objects.filter(company_id=company_code).first()
         if not company_instance:
@@ -164,6 +168,9 @@ def getTransactionDataFromDevice(request):
             raw_payload = raw
         )
 
+        device_response=f'OK#SUCCESS#fn={response_chars}#'
+        return HttpResponse(device_response, content_type="text/plain", status=status.HTTP_200_OK)
+
     except IntegrityError:
         device_response=f'OK#SUCCESS#fn={response_chars}#'
         return HttpResponse(device_response, content_type="text/plain", status=status.HTTP_200_OK)
@@ -172,30 +179,95 @@ def getTransactionDataFromDevice(request):
         logger.exception("Transaction parsing failed")
         return HttpResponse("ERROR",status=status.HTTP_500_INTERNAL_SERVER_ERROR,content_type="text/plain")
 
-    device_response=f'OK#SUCCESS#fn={response_chars}#'
-    return HttpResponse(device_response, content_type="text/plain", status=status.HTTP_201_CREATED)
 
 
 @api_view(['GET'])
 def get_all_transaction_data(request):
+    """
+    Fetch transaction data with support for cursor-based polling.
+    
+    Query Parameters:
+    - from_date: Start date (YYYY-MM-DD) - required
+    - to_date: End date (YYYY-MM-DD) - required
+    - since: ISO timestamp for incremental updates (optional)
+    """
     user = get_user_from_cookie(request)
     if not user:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    
+
     try:
-        # Filter by user's company if user has a company assigned
-        if user.company:
-            ticketdata = TransactionData.objects.filter(company_code=user.company).order_by('created_at')
-        else:
-            # If no company assigned, return empty data
-            ticketdata = TransactionData.objects.none()
+        # Get date range from query parameters
+        from_date = request.GET.get('from_date')
+        to_date = request.GET.get('to_date')
+        since_timestamp = request.GET.get('since')  # For polling updates
         
-        # Serializer handles display transformations
-        serializer = TicketDataSerializer(ticketdata, many=True)
-        return Response({"message": "success", "data": serializer.data}, status=status.HTTP_200_OK)
-    except Exception as e:
-        return Response({"message": "Data fetching failed"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # Validate required parameters
+        if not from_date or not to_date:
+            return Response(
+                {'error': 'from_date and to_date are required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Base queryset filtered by user's company and date range
+        if user.company:
+            queryset = TransactionData.objects.filter(
+                company_code=user.company,
+                ticket_date__gte=from_date,
+                ticket_date__lte=to_date
+            )
+        else:
+            queryset = TransactionData.objects.none()
+        
+        # If 'since' parameter provided, filter for polling updates
+        if since_timestamp:
+            try:
+                # Parse the timestamp - handle different formats
+                # Format from DB: 2026-01-07 05:16:06.134
+                since_dt = parse_datetime(since_timestamp)
+                
+                if since_dt is None:
+                    # Try alternative parsing
+                    since_dt = datetime.fromisoformat(since_timestamp.replace('Z', '+00:00'))
+                
+                if since_dt:
+                    # Make sure we're comparing timezone-aware datetimes
+                    if since_dt.tzinfo is None:
+                        since_dt = pytz.UTC.localize(since_dt)
+                    
+                    # Filter for records created AFTER the cursor timestamp
+                    queryset = queryset.filter(created_at__gt=since_dt)
+                    
+                    logger.info(f"Polling query: since={since_timestamp}, filtered count={queryset.count()}")
+                else:
+                    logger.warning(f"Could not parse since timestamp: {since_timestamp}")
+                    return Response({"message": "success", "data": []}, status=status.HTTP_200_OK)
+                    
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Invalid since timestamp: {since_timestamp}, error: {e}")
+                return Response({"message": "success", "data": []}, status=status.HTTP_200_OK)
+        
+        # Order by created_at descending (newest first) for consistency
+        # Frontend expects newest first
+        queryset = queryset.order_by('-created_at')
+        
+        # Limit results to prevent huge responses
+        queryset = queryset[:500]
+        
+        # Serialize data
+        serializer = TicketDataSerializer(queryset, many=True)
+        
+        return Response({
+            "message": "success", 
+            "data": serializer.data,
+            "count": len(serializer.data)
+        }, status=status.HTTP_200_OK)
     
+    except OperationalError:
+        return Response({"message": "Error fetching data", "error": str(e)},status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    except Exception as e:
+        logger.exception("Error fetching transaction data")
+        return Response({"message": "Data fetching failed", "error": str(e)},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @csrf_exempt
@@ -373,32 +445,86 @@ def getTripCloseDataFromDevice(request):
 
 @api_view(['GET'])
 def get_all_trip_close_data(request):
+    """
+    Fetch trip close data with support for cursor-based polling.
+    
+    Query Parameters:
+    - from_date: Start date (YYYY-MM-DD) - required
+    - to_date: End date (YYYY-MM-DD) - required
+    - since: ISO timestamp for incremental updates (optional)
+    """
     user = get_user_from_cookie(request)
     if not user:
-        return JsonResponse({"error": "Authentication required"},status=status.HTTP_401_UNAUTHORIZED)
+        return JsonResponse({"error": "Authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
 
     try:
-        # Return only user's company data
+        # Get date range from query parameters
+        from_date = request.GET.get('from_date')
+        to_date = request.GET.get('to_date')
+        since_timestamp = request.GET.get('since')  # For polling updates
+        
+        # Validate required parameters
+        if not from_date or not to_date:
+            return JsonResponse(
+                {'error': 'from_date and to_date are required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Base queryset filtered by user's company and date range
         if user.company:
-            trip_data = TripCloseData.objects.filter(company_code=user.company).order_by("-start_datetime")
+            queryset = TripCloseData.objects.filter(
+                company_code=user.company,
+                start_date__gte=from_date,
+                start_date__lte=to_date
+            )
         else:
-            trip_data = TripCloseData.objects.none()
+            queryset = TripCloseData.objects.none()
+        
+        # If 'since' parameter provided, filter for polling updates
+        if since_timestamp:
+            try:
+                # Parse the timestamp
+                since_dt = parse_datetime(since_timestamp)
 
-        serializer = TripCloseDataSerializer(trip_data, many=True)
+                if since_dt is None:
+                    # Try alternative parsing
+                    since_dt = datetime.fromisoformat(since_timestamp.replace('Z', '+00:00'))
 
-        return JsonResponse(
-            {"message": "success","data": serializer.data},status=status.HTTP_200_OK)
+                if since_dt:
+                    # Make sure we're comparing timezone-aware datetimes
+                    if since_dt.tzinfo is None:
+                        since_dt = pytz.UTC.localize(since_dt)
+
+                    # Filter for records created AFTER the cursor timestamp
+                    queryset = queryset.filter(created_at__gt=since_dt)
+                    
+                    logger.info(f"Trip polling query: since={since_timestamp}, filtered count={queryset.count()}")
+                else:
+                    logger.warning(f"Could not parse since timestamp: {since_timestamp}")
+                    return JsonResponse({"message": "success", "data": []}, status=status.HTTP_200_OK)
+                    
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Invalid since timestamp: {since_timestamp}, error: {e}")
+                return JsonResponse({"message": "success", "data": []}, status=status.HTTP_200_OK)
+        
+        # Order by created_at descending (newest first)
+        queryset = queryset.order_by('-created_at')
+        
+        # Limit results to prevent huge responses
+        queryset = queryset[:500]
+        
+        # Serialize data
+        serializer = TripCloseDataSerializer(queryset, many=True)
+        
+        return JsonResponse({
+            "message": "success", 
+            "data": serializer.data,
+            "count": len(serializer.data)
+        }, status=status.HTTP_200_OK)
+
+    except OperationalError:
+        return JsonResponse({"message": "Error fetching data"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
     except Exception as e:
-        return JsonResponse({"message": f"{e}"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
-
-
-# handles mosambee Merchant Posting
-@api_view(['GET'])
-def store_mosambee_data(request):
-    try:
-        pass
-    
-    except Exception as e:
-        return Response({"message": "Data Entry failed"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        logger.exception("Error fetching trip close data")
+        return JsonResponse({"message": f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
