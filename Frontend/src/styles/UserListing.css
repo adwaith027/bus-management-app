@@ -38,7 +38,7 @@
   color: #991b1b;
 }
 
-.role-badge.branch_admin {
+.role-badge.company_admin {
   background: var(--info-light);
   color: #1e40af;
 }
