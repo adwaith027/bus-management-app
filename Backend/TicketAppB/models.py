@@ -273,7 +273,7 @@ class TripCloseData(models.Model):
         help_text="Company code"
     )
 
-    # NEW: Branch foreign key
+    # Branch foreign key
     branch_code = models.ForeignKey(
         Branch,
         on_delete=models.SET_NULL,
@@ -302,7 +302,7 @@ class TripCloseData(models.Model):
         help_text="Trip direction indicator (U/D)"
     )
     
-    # NEW: Separate date and time fields for efficient querying
+    # Separate date and time fields for efficient querying
     start_date = models.DateField(
         db_index=True,
         null=True,
@@ -393,14 +393,14 @@ class TripCloseData(models.Model):
         help_text="Senior citizen passengers (sSenior + uSenior)"
     )
 
-    # NEW: Total tickets field (sum of all passenger counts)
+    # Total tickets field (sum of all passenger counts)
     total_tickets = models.IntegerField(
         default=0,
         validators=[MinValueValidator(0)],
         help_text="Total tickets issued (sum of all counts including pass)"
     )
 
-    # NEW: Cash tickets breakdown
+    # Cash tickets breakdown
     total_cash_tickets = models.IntegerField(
         default=0,
         validators=[MinValueValidator(0)],
@@ -486,7 +486,7 @@ class TripCloseData(models.Model):
         help_text="Total collection (fTotalColl)"
     )
 
-    # NEW: Cash amount breakdown
+    # Cash amount breakdown
     total_cash_amount = models.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -534,9 +534,9 @@ class TripCloseData(models.Model):
             models.Index(fields=['route_code', 'start_datetime']),
             models.Index(fields=['start_datetime']),
             models.Index(fields=["company_code"]),
-            models.Index(fields=['start_date']),  # NEW: Date index
-            models.Index(fields=['company_code', 'start_date']),  # NEW: Combined index
-            models.Index(fields=['branch_code']),  # NEW: Branch index
+            models.Index(fields=['start_date']),  # Date index
+            models.Index(fields=['company_code', 'start_date']),  # Combined index
+            models.Index(fields=['branch_code']),  # Branch index
         ]
         
         unique_together = [
@@ -566,7 +566,7 @@ class TripCloseData(models.Model):
             return self.end_ticket_no - self.start_ticket_no + 1
         return 0
 
-    # NEW: Backup calculation properties
+    # Backup calculation properties
     @property
     def calculate_total_tickets(self):
         """Calculate total tickets from all passenger counts"""
@@ -597,12 +597,10 @@ class TripCloseData(models.Model):
 class MosambeeTransaction(models.Model):
     class ProcessingStatus(models.TextChoices):
         RECEIVED = 'RECEIVED', 'Received'
-        VALIDATING = 'VALIDATING', 'Validating'
         VALIDATED = 'VALIDATED', 'Validated'
         VALIDATION_FAILED = 'VALIDATION_FAILED', 'Validation Failed'
         RECONCILING = 'RECONCILING', 'Reconciling'
         PENDING_VERIFICATION = 'PENDING_VERIFICATION', 'Pending Verification'
-        FAILED = 'FAILED', 'Failed'
     
     class VerificationStatus(models.TextChoices):
         UNVERIFIED = 'UNVERIFIED', 'Unverified'
