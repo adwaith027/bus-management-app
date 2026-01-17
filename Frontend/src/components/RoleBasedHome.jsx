@@ -8,7 +8,7 @@ export default function RoleBasedHome() {
   const role = user?.role;
 
   if (role === 'superadmin') return <AdminHome />;
-  if (role === 'branch_admin') return <BranchDashboard />;
+  if (role === 'company_admin') return <BranchDashboard />;
   if (role === 'user') return <UserHome />;
 
   return (

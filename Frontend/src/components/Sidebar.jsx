@@ -165,7 +165,7 @@ export default function Sidebar() {
             )}
 
             {/* Branch Admin Links */}
-            {role === "branch_admin" && (
+            {role === "company_admin" && (
               <>
                 <li>
                   <NavLink
