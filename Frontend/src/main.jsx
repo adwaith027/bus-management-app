@@ -16,8 +16,13 @@ import TicketReport from './pages/TicketReport'
 import TripcloseReport from './pages/TripcloseReport'
 import BranchListing from './pages/BranchListing'
 import SettlementPage from './pages/SettlementPage'
+import NotFound from './components/NotFound'
 
 const router = createBrowserRouter([
+  {
+    path:'*',
+    element:<NotFound />
+  },
   {
     path: '/',
     element: <Navigate to="/login" replace />
