@@ -1,10 +1,10 @@
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.decorators import api_view
 from rest_framework_simplejwt.exceptions import TokenError
 from django.contrib.auth import get_user_model,authenticate
 from rest_framework_simplejwt.tokens import RefreshToken,AccessToken
-from django.utils import timezone
 
 
 User=get_user_model()
@@ -94,7 +94,7 @@ def login_view(request):
             # False for HTTP, True for HTTPS
             secure=False,
             samesite='Lax',
-            max_age=3600,            
+            max_age=1800,            
             path='/'
         )
 
@@ -159,7 +159,7 @@ def protected_view(request):
 # Extract and validate access token from cookies
 def get_user_from_cookie(request):
     access_token = request.COOKIES.get('access_token')
-    
+
     if not access_token:
         return None
 
@@ -199,7 +199,7 @@ def refresh_token_view(request):
             httponly=True,
             secure=False,
             samesite='Lax',
-            max_age=3600,
+            max_age=1800,
             path='/'
         )
 
