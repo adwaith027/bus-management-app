@@ -10,8 +10,6 @@
 
 Open-source multi-tenant platform for bus fleet operations with real-time ticketing, payment reconciliation, and comprehensive reporting.
 
-[Features](#features) • [Tech Stack](#tech-stack) • [Installation](#installation) • [API Docs](#api-documentation) • [Roadmap](#roadmap)
-
 </div>
 
 ---
@@ -430,8 +428,6 @@ This project is open-source under a **non-commercial license**.
 ---
 
 <div align="center">
-
-**[⬆ Back to Top](#bus-ticketing-management-system)**
 
 By Adhwaith Krishnan
 
