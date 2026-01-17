@@ -1,0 +1,26 @@
+What Django does at startup
+
+You run:
+python manage.py runserver
+
+Django:
+Loads settings.py
+Reads INSTALLED_APPS
+
+For each app in INSTALLED_APPS:
+Django loads its AppConfig (from apps.py)
+Creates an instance of that AppConfig
+
+After all apps are loaded:
+Django calls app_config.ready() once per app
+
+
+apps.py exists to run app-level startup code when Django loads an app.
+
+Django starts
+Django loads each app’s AppConfig
+AppConfig.ready() is called
+Inside ready() we import signals
+Importing signals registers all signal handlers
+
+So the purpose is : Force-load code that must run once at startup  !!!
