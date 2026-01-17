@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from 'react';
-// import * as XLSX from 'xlsx';
+import React, { useState, useEffect, useRef } from 'react';
 import ExcelJS from 'exceljs';
 import api, { BASE_URL } from '../assets/js/axiosConfig';
 
@@ -9,6 +8,11 @@ export default function TicketReport() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const [dateError, setDateError] = useState('');
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [lastUpdateDuration, setLastUpdateDuration] = useState(0);
+  const [isPolling, setIsPolling] = useState(false);
+  const [pollingPaused, setPollingPaused] = useState(false);
+  const [newTicketIds, setNewTicketIds] = useState(new Set());
   
   // UI filters (what user sees/types)
   const [filters, setFilters] = useState({
@@ -32,6 +36,10 @@ export default function TicketReport() {
   const [showModal, setShowModal] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
 
+  // Refs for polling
+  const pollingIntervalRef = useRef(null);
+  const latestTimestampRef = useRef(null);
+
   // Check if there are pending date changes
   const hasPendingChanges = 
     appliedFilters.startDate !== filters.startDate || 
@@ -40,7 +48,16 @@ export default function TicketReport() {
   // ===== DATE & API LOGIC =====
   const getTodayDate = () => {
     const today = new Date();
-    return today.toISOString().split('T')[0]; // YYYY-MM-DD format
+    return today.toISOString().split('T')[0];
+  };
+
+  const isDateRangeEnded = () => {
+    if (!appliedFilters.endDate) return false;
+    const endDate = new Date(appliedFilters.endDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    endDate.setHours(0, 0, 0, 0);
+    return today > endDate;
   };
 
   // Initialize with today's date and fetch data
@@ -55,20 +72,123 @@ export default function TicketReport() {
       startDate: today,
       endDate: today
     });
-    // Initial fetch with today's date
     fetchTransactions(today, today);
-  }, []); // Run only once on mount
+  }, []);
 
-  const fetchTransactions = async (startDate, endDate) => {
+  // Page visibility tracking
+  const [isPageVisible, setIsPageVisible] = useState(true);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      setIsPageVisible(!document.hidden);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
+  // Polling effect
+  useEffect(() => {
+    if (isPolling && !pollingPaused && isPageVisible && appliedFilters.startDate && appliedFilters.endDate) {
+      pollingIntervalRef.current = setInterval(() => {
+        pollForNewTransactions();
+      }, 6000); // 6 second intervals
+
+      return () => {
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current);
+        }
+      };
+    } else {
+      // Clear interval if page is not visible
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+    }
+  }, [isPolling, pollingPaused, isPageVisible, appliedFilters.startDate, appliedFilters.endDate]);
+
+  // Check if date range ended
+  useEffect(() => {
+    if (isDateRangeEnded()) {
+      setPollingPaused(true);
+      setIsPolling(false);
+    } else {
+      setPollingPaused(false);
+    }
+  }, [appliedFilters.endDate]);
+
+  const fetchTransactions = async (startDate, endDate, sinceTimestamp = null) => {
     try {
-      setIsRefreshing(true);
+      // Only show loading spinner for initial/filter fetch, not for polling
+      if (!sinceTimestamp) {
+        setIsRefreshing(true);
+      }
       
-      const response = await api.get(
-        `${BASE_URL}/get_all_transaction_data?from_date=${startDate}&to_date=${endDate}`
-      );
+      const requestStartTime = Date.now();
+      
+      let url = `${BASE_URL}/get_all_transaction_data?from_date=${startDate}&to_date=${endDate}`;
+      if (sinceTimestamp) {
+        url += `&since=${encodeURIComponent(sinceTimestamp)}`;
+      }
+      
+      const response = await api.get(url);
+      
+      const requestEndTime = Date.now();
+      const requestDuration = requestEndTime - requestStartTime;
       
       if (response.data.message === 'success') {
-        setTransactions(response.data.data);
+        if (sinceTimestamp) {
+          // Polling update - append new tickets only (no loading spinner)
+          const newTickets = response.data.data || [];
+          
+          if (newTickets.length > 0) {
+            // Check for duplicates before adding
+            setTransactions(prev => {
+              const existingIds = new Set(prev.map(t => t.id));
+              const uniqueNewTickets = newTickets.filter(t => !existingIds.has(t.id));
+              
+              if (uniqueNewTickets.length === 0) {
+                return prev; // No new unique tickets
+              }
+              
+              // Prepend unique new tickets
+              const updated = [...uniqueNewTickets, ...prev];
+              
+              // Highlight new tickets
+              const newIds = new Set(uniqueNewTickets.map(t => t.id));
+              setNewTicketIds(newIds);
+              setTimeout(() => setNewTicketIds(new Set()), 2000);
+              
+              return updated;
+            });
+            
+            // Update latest timestamp to the newest ticket's created_at
+            latestTimestampRef.current = newTickets[0].created_at;
+          }
+          
+          // Update last updated time and duration for polling requests
+          setLastUpdated(new Date());
+          setLastUpdateDuration(requestDuration);
+        } else {
+          // Initial/filter fetch - replace all data
+          const fetchedData = response.data.data || [];
+          setTransactions(fetchedData);
+          
+          // Set latest timestamp from the newest ticket (first in array since backend returns descending)
+          if (fetchedData.length > 0) {
+            latestTimestampRef.current = fetchedData[0].created_at;
+          }
+          
+          // Start polling after initial fetch
+          setIsPolling(true);
+          
+          // Update last updated time for initial fetch
+          setLastUpdated(new Date());
+          setLastUpdateDuration(requestDuration);
+        }
+
         setError(null);
         setDateError('');
       } else {
@@ -83,7 +203,31 @@ export default function TicketReport() {
         setError('Error: ' + err.message);
       }
     } finally {
-      setIsRefreshing(false);
+      // Only hide loading spinner if this was an initial/filter fetch
+      if (!sinceTimestamp) {
+        setIsRefreshing(false);
+      }
+    }
+  };
+
+  const pollForNewTransactions = async () => {
+    if (!latestTimestampRef.current) return;
+    if (isDateRangeEnded()) {
+      setPollingPaused(true);
+      setIsPolling(false);
+      return;
+    }
+
+    try {
+      // Use the stored timestamp for polling
+      await fetchTransactions(
+        appliedFilters.startDate,
+        appliedFilters.endDate,
+        latestTimestampRef.current
+      );
+    } catch (err) {
+      console.error('Polling error:', err);
+      // Don't stop polling on error, just log it
     }
   };
 
@@ -101,17 +245,14 @@ export default function TicketReport() {
   // ===== FILTER LOGIC =====
   const getFilteredData = () =>
     transactions.filter(t => {
-      // Device ID filter (client-side)
       if (filters.deviceId && filters.deviceId !== 'ALL') {
         if (t.device_id !== filters.deviceId) return false;
       }
 
-      // Branch Code filter (client-side)
       if (filters.branchCode && filters.branchCode !== 'ALL') {
         if (t.branch_code !== filters.branchCode) return false;
       }
 
-      // Payment Mode filter (client-side)
       if (filters.paymentMode && filters.paymentMode !== 'ALL') {
         if (t.payment_mode_display !== filters.paymentMode) return false;
       }
@@ -131,7 +272,6 @@ export default function TicketReport() {
     return { totalTickets, totalAmount, upiCount, cashCount };
   };
 
-  // Calculate summary based on ALL FILTERED data (not just current page)
   const summary = calculateSummary(filteredData);
 
   // ===== PAGINATION =====
@@ -142,13 +282,18 @@ export default function TicketReport() {
 
   // ===== FILTER HANDLERS =====
   const handleApplyFilters = () => {
-    // Validate dates
     if (filters.endDate < filters.startDate) {
       setDateError('End date cannot be before start date');
       return;
     }
     
-    setDateError(''); // Clear any previous error
+    setDateError('');
+    
+    // Stop current polling
+    setIsPolling(false);
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+    }
     
     // Update applied filters
     setAppliedFilters({
@@ -156,14 +301,17 @@ export default function TicketReport() {
       endDate: filters.endDate
     });
     
-    // Fetch new data
+    // Reset latest timestamp
+    latestTimestampRef.current = null;
+    
+    // Fetch new data (will restart polling)
     fetchTransactions(filters.startDate, filters.endDate);
-    setCurrentPage(1); // Reset pagination
+    setCurrentPage(1);
   };
 
   const handleClientFilter = (filterType, value) => {
     setFilters(prev => ({ ...prev, [filterType]: value }));
-    setCurrentPage(1); // Reset to page 1 when filtering
+    setCurrentPage(1);
   };
 
   const clearFilters = () => {
@@ -180,6 +328,14 @@ export default function TicketReport() {
       endDate: today
     });
     setDateError('');
+    
+    // Stop polling and reset
+    setIsPolling(false);
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+    }
+    latestTimestampRef.current = null;
+    
     fetchTransactions(today, today);
     setCurrentPage(1);
   };
@@ -251,10 +407,7 @@ export default function TicketReport() {
       });
     });
 
-    // Header styling
     worksheet.getRow(1).font = { bold: true };
-
-    // Freeze header row
     worksheet.views = [{ state: 'frozen', ySplit: 1 }];
 
     const buffer = await workbook.xlsx.writeBuffer();
@@ -268,7 +421,6 @@ export default function TicketReport() {
     link.click();
   };
 
-
   // ===== MODAL HANDLERS =====
   const openModal = (transaction) => {
     setSelectedTransaction(transaction);
@@ -279,6 +431,33 @@ export default function TicketReport() {
     setShowModal(false);
     setSelectedTransaction(null);
   };
+
+  // ===== TIME AGO FORMATTER =====
+  const getTimeAgo = () => {
+    if (!lastUpdated) return '';
+    const seconds = Math.floor((new Date() - lastUpdated) / 1000);
+    
+    // For very recent updates, show the actual request duration
+    if (seconds < 2 && lastUpdateDuration > 0) {
+      // return `${lastUpdateDuration}ms ago`;
+      return `${Math.round(lastUpdateDuration/1000)}s ago`;
+    }
+    
+    if (seconds < 10) return 'just now';
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    return 'over 1h ago';
+  };
+
+  const [timeAgo, setTimeAgo] = useState('');
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTimeAgo(getTimeAgo());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [lastUpdated]);
 
   // ===== LOADING / ERROR STATES =====
   if (error) {
@@ -301,6 +480,20 @@ export default function TicketReport() {
     );
   }
 
+  const getPaginationRange = (current, total, windowSize = 5) => {
+    const half = Math.floor(windowSize / 2);
+
+    let start = Math.max(1, current - half);
+    let end = Math.min(total, start + windowSize - 1);
+
+    // Adjust start if we're near the end
+    if (end - start < windowSize - 1) {
+      start = Math.max(1, end - windowSize + 1);
+    }
+
+    return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+  };
+
   // ===== UI RENDER =====
   return (
     <div className="p-6 md:p-10 min-h-screen bg-slate-50">
@@ -308,7 +501,15 @@ export default function TicketReport() {
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
         <div>
           <h1 className="text-3xl font-bold text-slate-800">Ticket Transaction Reports</h1>
-          <p className="text-slate-500 mt-1">View and manage daily ticket transactions</p>
+          <div className="flex items-center gap-3 mt-1">
+            <p className="text-slate-500">View and manage daily ticket transactions</p>
+            {lastUpdated && (
+              <div className="flex items-center gap-2 text-xs text-slate-400">
+                <div className={`w-2 h-2 rounded-full ${isPolling && !pollingPaused && isPageVisible ? 'bg-green-500 animate-pulse' : 'bg-slate-300'}`}></div>
+                <span>{isPageVisible ? `Last updated ${timeAgo}` : 'Paused (tab inactive)'}</span>
+              </div>
+            )}
+          </div>
         </div>
         <button
           onClick={exportToExcel}
@@ -317,6 +518,16 @@ export default function TicketReport() {
           Download Report
         </button>
       </div>
+
+      {/* Polling Paused Warning */}
+      {pollingPaused && (
+        <div className="mb-4 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 flex items-center gap-2">
+          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+          </svg>
+          Date range ended - live updates paused
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
@@ -356,7 +567,6 @@ export default function TicketReport() {
 
       {/* Filters */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-4 md:p-6 mb-6">
-        {/* Date Error Message */}
         {dateError && (
           <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 flex items-center gap-2">
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -366,7 +576,6 @@ export default function TicketReport() {
           </div>
         )}
 
-        {/* Pending Changes Indicator */}
         {hasPendingChanges && !dateError && (
           <div className="mb-4 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-center gap-2">
             <span className="animate-pulse">●</span>
@@ -375,10 +584,10 @@ export default function TicketReport() {
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-          {/* Start Date */}
           <div className="flex flex-col">
             <label className="text-xs font-medium text-slate-500 mb-1">Start Date</label>
-            <input max={getTodayDate()}
+            <input 
+              max={getTodayDate()}
               type="date"
               value={filters.startDate}
               onChange={(e) => setFilters({ ...filters, startDate: e.target.value })}
@@ -386,10 +595,10 @@ export default function TicketReport() {
             />
           </div>
 
-          {/* End Date */}
           <div className="flex flex-col">
             <label className="text-xs font-medium text-slate-500 mb-1">End Date</label>
-            <input max={getTodayDate()}
+            <input 
+              max={getTodayDate()}
               type="date"
               value={filters.endDate}
               onChange={(e) => setFilters({ ...filters, endDate: e.target.value })}
@@ -397,7 +606,6 @@ export default function TicketReport() {
             />
           </div>
 
-          {/* Device ID Dropdown */}
           <div className="flex flex-col">
             <label className="text-xs font-medium text-slate-500 mb-1">Device ID</label>
             <select
@@ -412,7 +620,6 @@ export default function TicketReport() {
             </select>
           </div>
 
-          {/* Branch Code Dropdown */}
           <div className="flex flex-col">
             <label className="text-xs font-medium text-slate-500 mb-1">Branch Code</label>
             <select
@@ -427,7 +634,6 @@ export default function TicketReport() {
             </select>
           </div>
 
-          {/* Payment Mode Dropdown */}
           <div className="flex flex-col">
             <label className="text-xs font-medium text-slate-500 mb-1">Payment Mode</label>
             <select
@@ -464,14 +670,12 @@ export default function TicketReport() {
         </div>
       </div>
 
-      {/* Summary Info */}
       <div className="text-sm text-slate-500 mb-3">
         Showing {currentData.length} of {filteredData.length} transactions
       </div>
 
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden relative">
-        {/* Loading Overlay */}
         {isRefreshing && (
           <div className="absolute inset-0 bg-white/90 backdrop-blur-sm z-10 flex items-center justify-center">
             <div className="flex flex-col items-center gap-3">
@@ -501,7 +705,12 @@ export default function TicketReport() {
             <tbody className="divide-y divide-slate-100">
               {currentData.length ? (
                 currentData.map((t) => (
-                  <tr key={t.id} className="hover:bg-slate-50 transition">
+                  <tr 
+                    key={t.id} 
+                    className={`hover:bg-slate-50 transition ${
+                      newTicketIds.has(t.id) ? 'bg-blue-50' : ''
+                    }`}
+                  >
                     <td className="px-4 py-3">{t.device_id}</td>
                     <td className="px-4 py-3">{t.trip_number}</td>
                     <td className="px-4 py-3">{t.ticket_number || "-"}</td>
@@ -546,7 +755,7 @@ export default function TicketReport() {
       </div>
 
       {/* Pagination */}
-      {totalPages > 1 && (
+      {/* {totalPages > 1 && (
         <div className="flex items-center justify-center space-x-2 mt-6">
           <button
             onClick={() => changePage(currentPage - 1)}
@@ -581,13 +790,46 @@ export default function TicketReport() {
             Next
           </button>
         </div>
+      )} */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center space-x-2 mt-6">
+          <button
+            onClick={() => changePage(currentPage - 1)}
+            disabled={currentPage === 1}
+            className="px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            Prev
+          </button>
+
+          {getPaginationRange(currentPage, totalPages).map((page) => (
+            <button
+              key={page}
+              onClick={() => changePage(page)}
+              className={`px-3 py-1.5 rounded-lg border transition ${
+                currentPage === page
+                  ? "bg-slate-800 text-white border-slate-800"
+                  : "border-slate-300 hover:bg-slate-50"
+              }`}
+            >
+              {page}
+            </button>
+          ))}
+
+          <button
+            onClick={() => changePage(currentPage + 1)}
+            disabled={currentPage === totalPages}
+            className="px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            Next
+          </button>
+        </div>
       )}
+
 
       {/* Modal */}
       {showModal && selectedTransaction && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto">
-            {/* Modal Header */}
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
               <h2 className="text-xl font-bold text-slate-800">Transaction Details</h2>
               <button
@@ -600,9 +842,7 @@ export default function TicketReport() {
               </button>
             </div>
 
-            {/* Modal Body */}
             <div className="p-6 space-y-4">
-              {/* Ticket Type */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <div className="text-xs text-slate-500 font-medium">Ticket Type</div>
@@ -614,7 +854,6 @@ export default function TicketReport() {
                 </div>
               </div>
 
-              {/* Stages */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <div className="text-xs text-slate-500 font-medium">From Stage</div>
@@ -626,7 +865,6 @@ export default function TicketReport() {
                 </div>
               </div>
 
-              {/* Passenger Counts */}
               <div className="border-t border-slate-200 pt-4">
                 <h3 className="font-semibold text-slate-700 mb-3">Passenger Counts</h3>
                 <div className="grid grid-cols-3 gap-4">
@@ -661,7 +899,6 @@ export default function TicketReport() {
                 </div>
               </div>
 
-              {/* Amounts */}
               <div className="border-t border-slate-200 pt-4">
                 <h3 className="font-semibold text-slate-700 mb-3">Amount Details</h3>
                 <div className="grid grid-cols-2 gap-4">
@@ -684,7 +921,6 @@ export default function TicketReport() {
                 </div>
               </div>
 
-              {/* References */}
               <div className="border-t border-slate-200 pt-4">
                 <h3 className="font-semibold text-slate-700 mb-3">Reference Information</h3>
                 <div className="space-y-3">
@@ -708,7 +944,6 @@ export default function TicketReport() {
               </div>
             </div>
 
-            {/* Modal Footer */}
             <div className="border-t border-slate-200 px-6 py-4 flex justify-end">
               <button
                 onClick={closeModal}
