@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import auth_views,company_views,user_views,data_views,branch_views
+from .views import auth_views,company_views,user_views,data_views,branch_views,mosambee_views
 
 
 urlpatterns = [
@@ -36,6 +36,12 @@ urlpatterns = [
     path('getTripClose/',data_views.getTripCloseDataFromDevice,name='get_trip_close_data'),
     path('get_all_trip_close_data/',data_views.get_all_trip_close_data,name='get_all_trip_close_data'),
 
+    # mosambee data
+    path('postSettlementDetails/',mosambee_views.mosambee_settlement_data,name='postSettlementDetails'),
+    path('get_settlement_data', mosambee_views.get_settlement_data, name='get_settlement_data'),
+    path('verify_settlement', mosambee_views.verify_settlement, name='verify_settlement'),
+    path('get_settlement_summary', mosambee_views.get_settlement_summary, name='get_settlement_summary'),
+    
     # admin dashboard data
     path('get_admin_data/',data_views.get_admin_dashboard_data,name='get_admin_dashboard_data'),
 ]
