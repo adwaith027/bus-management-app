@@ -1,6 +1,5 @@
 from rest_framework import serializers
-from .models import Company,CustomUser,TransactionData,TripCloseData,Branch
-
+from .models import Company,CustomUser,TransactionData,TripCloseData,Branch,MosambeeTransaction
 
 class CompanySerializer(serializers.ModelSerializer):
     # Read-only fields that are computed or set by system
@@ -103,7 +102,7 @@ class TicketDataSerializer(serializers.ModelSerializer):
     payment_mode_display = serializers.SerializerMethodField()
     ticket_type_display = serializers.SerializerMethodField()
     formatted_ticket_date = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = TransactionData
         fields = [
@@ -289,3 +288,165 @@ class BranchSerializer(serializers.ModelSerializer):
             'is_active',
             'created_by',
         ]
+
+
+
+class MosambeeTransactionSerializer(serializers.ModelSerializer):
+    """
+    Serializer for Mosambee payment transactions.
+    Used for settlement verification interface.
+    """
+    # Related ticket information
+    related_ticket_number = serializers.SerializerMethodField()
+    related_ticket_amount = serializers.SerializerMethodField()
+    related_ticket_date = serializers.SerializerMethodField()
+    
+    # Display fields
+    payment_status_display = serializers.SerializerMethodField()
+    formatted_transaction_date = serializers.SerializerMethodField()
+    needs_attention = serializers.SerializerMethodField()
+    
+    # Verification info
+    verified_by_username = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = MosambeeTransaction
+        fields = [
+            # IDs
+            'id',
+            'transactionID',
+            'transactionRRN',
+            'merchantId',
+            
+            # Date/Time
+            'transaction_date',
+            'formatted_transaction_date',
+            'transaction_time',
+            'transaction_datetime',
+            
+            # Financial
+            'transactionAmount',
+            'cashBack',
+            'tipAmount',
+            
+            # Status fields
+            'processing_status',
+            'verification_status',
+            'reconciliation_status',
+            'responseCode',
+            'transactionStatus',
+            'payment_status_display',
+            
+            # References
+            'invoiceNumber',
+            'billNumber',
+            
+            # Related ticket info
+            'related_ticket_number',
+            'related_ticket_amount',
+            'related_ticket_date',
+            
+            # Card/Terminal
+            'transactionCardNumber',
+            'cardType',
+            'cardHolderName',
+            'transactionTerminalId',
+            'acquirerName',
+            
+            # Location
+            'businessName',
+            'addressLine1',
+            
+            # Checksum
+            'is_checksum_valid',
+            'validation_error',
+            
+            # Reconciliation
+            'reconciliation_error',
+            'reconciled_at',
+            
+            # Verification
+            'verified_by_username',
+            'verified_at',
+            'verification_notes',
+            
+            # Computed
+            'needs_attention',
+            
+            # Settlement
+            'settlement_batch_id',
+            'settled_at',
+            
+            # Reposting
+            'repost_count',
+            
+            # Timestamps
+            'first_received_at',
+            'last_received_at',
+            'created_at',
+        ]
+    
+    def get_related_ticket_number(self, obj):
+        """Get ticket number if related ticket exists"""
+        if obj.related_ticket:
+            return obj.related_ticket.ticket_number
+        return None
+    
+    def get_related_ticket_amount(self, obj):
+        """Get ticket amount if related ticket exists"""
+        if obj.related_ticket:
+            return str(obj.related_ticket.ticket_amount)
+        return None
+    
+    def get_related_ticket_date(self, obj):
+        """Get ticket date if related ticket exists"""
+        if obj.related_ticket:
+            return obj.related_ticket.ticket_date.strftime('%d-%m-%Y')
+        return None
+    
+    def get_payment_status_display(self, obj):
+        """Convert response code to display string"""
+        if obj.responseCode in ['0', '00', '000']:
+            return "Approved"
+        return "Declined"
+    
+    def get_formatted_transaction_date(self, obj):
+        """Format date as DD-MM-YYYY"""
+        if obj.transaction_date:
+            return obj.transaction_date.strftime('%d-%m-%Y')
+        return None
+    
+    def get_needs_attention(self, obj):
+        """Check if transaction needs manager attention"""
+        return obj.needs_manager_attention
+    
+    def get_verified_by_username(self, obj):
+        """Get username of verifier"""
+        if obj.verified_by:
+            return obj.verified_by.username
+        return None
+
+
+class SettlementVerificationSerializer(serializers.Serializer):
+    """
+    Serializer for settlement verification actions.
+    Used when manager verifies/rejects transactions.
+    """
+    transaction_id = serializers.IntegerField(required=True)
+    verification_status = serializers.ChoiceField(
+        choices=['VERIFIED', 'REJECTED', 'FLAGGED'],
+        required=True
+    )
+    verification_notes = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=1000
+    )
+    
+    def validate_transaction_id(self, value):
+        """Ensure transaction exists"""
+        try:
+            MosambeeTransaction.objects.get(id=value)
+        except MosambeeTransaction.DoesNotExist:
+            raise serializers.ValidationError("Transaction not found")
+        return value
