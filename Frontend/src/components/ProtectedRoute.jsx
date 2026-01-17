@@ -1,6 +1,7 @@
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import api, { BASE_URL } from '../assets/js/axiosConfig';
+import {BarLoader,BeatLoader,BounceLoader,CircleLoader,ClimbingBoxLoader,ClipLoader,ClockLoader,DotLoader,FadeLoader,GridLoader,HashLoader,MoonLoader,PacmanLoader,PropagateLoader,PulseLoader,PuffLoader,RingLoader,RiseLoader,RotateLoader,ScaleLoader,SkewLoader,SquareLoader,SyncLoader} from "react-spinners";
 
 export default function ProtectedRoute() {
   const [isAuthenticated, setIsAuthenticated] = useState(null);
@@ -52,7 +53,7 @@ export default function ProtectedRoute() {
       }
       
       // Branch admin restrictions: cannot access superadmin pages
-      if (userRole === 'branch_admin') {
+      if (userRole === 'company_admin') {
         if (path.includes('/companies') || 
             path.includes('/users')) {
           window.alert('Access Denied: This page is only for SuperAdmins');
@@ -83,7 +84,11 @@ export default function ProtectedRoute() {
         height: '100vh',
         fontSize: '18px'
       }}>
-        Loading...
+        {/* Loading... */}
+        {/* <ClimbingBoxLoader /> */}
+        {/* <GridLoader /> */}
+        {/* <HashLoader /> */}
+        <PropagateLoader /> 
       </div>
     );
   }
