@@ -127,7 +127,6 @@ export default function CompanyListing() {
       }
 
       if (response?.status === 200 || response?.status === 201) {
-        // You might want to use a toast notification here instead of alert
         window.alert(response.data.message || 'Operation successful!');
         setIsModalOpen(false);
         resetFormData();
@@ -181,6 +180,15 @@ export default function CompanyListing() {
       const { data } = err.response || {};
       window.alert(data?.message || data?.error || 'License validation failed');
     }
+  };
+
+  // Helper to check if license is expired
+  const isLicenseExpired = (company) => {
+    if (!company.product_to_date) return false;
+    
+    const today = new Date();
+    const expiryDate = new Date(company.product_to_date);
+    return today > expiryDate;
   };
 
   const getModalTitle = () => {
@@ -238,6 +246,7 @@ export default function CompanyListing() {
                 <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">ID</th>
                 <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Company</th>
                 <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Contact</th>
+                <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Licenses</th>
                 <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
                 <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">License Action</th>
                 <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Actions</th>
@@ -264,6 +273,7 @@ export default function CompanyListing() {
                   const isValidating = company.authentication_status === 'Validating';
                   const hasCompanyId = company.company_id !== null && company.company_id !== undefined;
                   const isRegistering = registeringLicense[company.id];
+                  const licenseExpired = isLicenseExpired(company);
                   
                   return (
                     <tr key={company.id} className="hover:bg-slate-50/80 transition-colors">
@@ -276,9 +286,25 @@ export default function CompanyListing() {
                       </td>
                       <td className="px-6 py-4 text-sm text-slate-600">{company.contact_person}</td>
                       <td className="px-6 py-4">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700 border border-indigo-200">
+                          {company.number_of_licence || 0} {company.number_of_licence === 1 ? 'License' : 'Licenses'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getStatusStyle(company.authentication_status)}`}>
                           {company.authentication_status || 'Pending'}
                         </span>
+                        {/* Show expiry date if approved */}
+                        {company.authentication_status === 'Approve' && company.product_to_date && (
+                          <div className={`text-xs mt-1 ${licenseExpired ? 'text-red-600 font-semibold' : 'text-slate-500'}`}>
+                            {licenseExpired ? 'Expired: ' : 'Valid till: '}
+                            {new Date(company.product_to_date).toLocaleDateString('en-IN', { 
+                              day: '2-digit', 
+                              month: 'short', 
+                              year: 'numeric' 
+                            })}
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         {!hasCompanyId ? (
@@ -289,19 +315,28 @@ export default function CompanyListing() {
                           >
                             {isRegistering ? 'Registering...' : 'Register Company'}
                           </button>
-                        ) : isPending ? (
+                        ) : isPending || licenseExpired ? (
                           <button 
                             onClick={() => handleValidateLicense(company.id)}
-                            className="text-xs font-medium bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 transition"
+                            className={`text-xs font-medium px-3 py-1.5 rounded-lg transition ${
+                              licenseExpired 
+                                ? 'bg-red-600 hover:bg-red-700 text-white animate-pulse' 
+                                : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                            }`}
                           >
-                            Validate License
+                            {licenseExpired ? '🔴 License Expired - Revalidate' : 'Validate License'}
                           </button>
                         ) : isValidating ? (
                           <span className="text-xs flex items-center text-blue-600 font-medium animate-pulse">
-                             Validating...
+                            Validating...
                           </span>
                         ) : (
-                          <span className="text-xs text-slate-400 font-medium">Synced</span>
+                          <span className="text-xs text-emerald-600 font-medium flex items-center gap-1">
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                            </svg>
+                            Active
+                          </span>
                         )}
                       </td>
                       <td className="px-6 py-4 text-right">
@@ -337,7 +372,7 @@ export default function CompanyListing() {
         </div>
       </div>
 
-      {/* Modal Content - Styled with Tailwind */}
+      {/* Modal Content */}
       <Modal isOpen={isModalOpen} onClose={closeModal} title={getModalTitle()}>
         <form className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
