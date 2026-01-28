@@ -1,7 +1,7 @@
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.decorators import api_view
-from ..models import Company
+from ..models import Company,TransactionData,TripCloseData
 from ..serializers import CompanySerializer
 from django.contrib.auth import get_user_model
 from .auth_views import get_user_from_cookie
@@ -11,6 +11,9 @@ import logging
 import threading
 from django.conf import settings
 from datetime import datetime
+import json
+from django.forms.models import model_to_dict
+from django.http import JsonResponse
 
 # Setup logger  
 logger = logging.getLogger(__name__)
@@ -276,6 +279,14 @@ def background_license_polling(company_id):
             company.device_count = auth_data.get('TotalCount', 0)
             company.branch_count = auth_data.get('OutletCount', 0)
             
+            # UPDATE: License count from server response
+            number_of_licence = auth_data.get('NumberOfLicence')
+            if number_of_licence:
+                try:
+                    company.number_of_licence = int(number_of_licence)
+                except (ValueError, TypeError):
+                    pass
+
             logger.info(f"[BACKGROUND] Updated license details for company: {company.company_name}")
         
         company.save()
@@ -302,7 +313,6 @@ def background_license_polling(company_id):
                 company.save()
         except:
             pass
-
 
 
 @api_view(['POST'])
@@ -574,3 +584,61 @@ def update_company_details(request, pk):
         },
         status=status.HTTP_400_BAD_REQUEST
     )
+
+
+# get data to be displayed in company dashboard
+@api_view(['GET'])
+def get_company_dashboard_metrics(request):
+    # Get user from cookie and verify authentication
+    user = get_user_from_cookie(request)
+    if not user:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    selected_date=request.GET.get('date')
+    if not selected_date:
+        return Response({'error': 'Date input missing'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if isinstance(selected_date,str):
+        selected_date=datetime.strptime(selected_date,"%Y-%m-%d")
+
+    # returns id as int
+    company_id=user.company.id
+    
+    # Query TransactionData for payment metrics
+    # Query TripCloseData for trip/bus metrics
+    # Calculate aggregations using Django's aggregate/annotate
+    # Return structured JSON response
+
+    try:    
+        transaction_queryset = TransactionData.objects.filter(
+                company_code=user.company,
+                ticket_date=selected_date
+            )
+        return JsonResponse(list(transaction_queryset.values()), safe=False)
+    # Response structure
+    #     {
+    #     "collections": {
+    #         "daily_total": 45280.50,
+    #         "cash": 28150.00,
+    #         "upi": 17130.50,
+    #         "pending": 3200.00
+    #     },
+    #     "operations": {
+    #         "buses_active": 12,
+    #         "trips_completed": 48,
+    #         "total_passengers": 1240,
+    #         "active_routes": 8
+    #     },
+    #     "settlements": {
+    #         "total_transactions": 156,
+    #         "verified": 142,
+    #         "pending_verification": 12,
+    #         "failed": 2
+    #     }
+    # }
+    
+        return Response({"message": "Successfully retreived data"},status=status.HTTP_200_OK)
+
+    except Exception as e:
+        print(e)
+        return Response({"message": "Data fetching failed"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
