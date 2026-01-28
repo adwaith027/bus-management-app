@@ -42,21 +42,21 @@ export default function ProtectedRoute() {
     if (!loading && isAuthenticated && userRole) {
       const path = location.pathname;
       
-      // Superadmin restrictions: cannot access branch admin pages
+      // Superadmin restrictions: cannot access company admin pages
       if (userRole === 'superadmin') {
         if (path.includes('/branches') || 
             path.includes('/ticket-report') || 
             path.includes('/trip-close-report')) {
-          window.alert('Access Denied: This page is only for Branch Admins');
+          window.alert('Access Denied: This page is only for Company Admins');
           navigate('/dashboard', { replace: true });
         }
       }
       
-      // Branch admin restrictions: cannot access superadmin pages
+      // Company admin restrictions: cannot access superadmin pages
       if (userRole === 'company_admin') {
         if (path.includes('/companies') || 
             path.includes('/users')) {
-          window.alert('Access Denied: This page is only for SuperAdmins');
+          window.alert('Access Denied: This page is only for System Admins');
           navigate('/dashboard', { replace: true });
         }
       }

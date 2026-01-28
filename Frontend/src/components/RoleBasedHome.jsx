@@ -1,5 +1,5 @@
 import AdminHome from '../pages/AdminHome';
-import BranchDashboard from '../pages/BranchDashboard';
+import CompanyDashboard from '../pages/CompanyDashboard';
 import UserHome from '../pages/UserHome';
 
 export default function RoleBasedHome() {
@@ -8,7 +8,7 @@ export default function RoleBasedHome() {
   const role = user?.role;
 
   if (role === 'superadmin') return <AdminHome />;
-  if (role === 'company_admin') return <BranchDashboard />;
+  if (role === 'company_admin') return <CompanyDashboard />;
   if (role === 'user') return <UserHome />;
 
   return (

@@ -371,7 +371,7 @@ export default function UserListing() {
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 transition-all appearance-none bg-white disabled:bg-slate-50"
                 >
                   <option value="user">User</option>
-                  <option value="company_admin">Branch Admin</option>
+                  <option value="company_admin">Company Admin</option>
                 </select>
                 {!isReadOnly && (
                   <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
