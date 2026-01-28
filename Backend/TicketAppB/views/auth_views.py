@@ -5,7 +5,8 @@ from rest_framework.decorators import api_view
 from rest_framework_simplejwt.exceptions import TokenError
 from django.contrib.auth import get_user_model,authenticate
 from rest_framework_simplejwt.tokens import RefreshToken,AccessToken
-
+from datetime import date,datetime as dti
+from ..models import Company
 
 User=get_user_model()
 
@@ -51,7 +52,7 @@ def signup_view(request):
 @api_view(['POST'])
 def login_view(request):
     if not request.data:
-        return Response({"error":"Invalid request"},status=status.HTTP_400_BAD_REQUEST)
+        return Response({"error":"Invalid request.No credentials provided"},status=status.HTTP_400_BAD_REQUEST)
     
     username=request.data.get('username')
     password=request.data.get('password')
@@ -70,6 +71,17 @@ def login_view(request):
     if not user.is_active:
         return Response({'error': 'Account is inactive'}, status=403)
     
+    # get company for license validation
+    company=user.company
+    if company:
+        if company.product_to_date:
+            if date.today()>company.product_to_date:
+                return Response({"error":"License Expired. Contact Administrator"},status=status.HTTP_403_FORBIDDEN)
+        
+        if company.authentication_status:
+            if company.authentication_status!=Company.AuthStatus.APPROVED:
+                return Response({"error":"Pending License Approval. Contact Administrator"},status=status.HTTP_403_FORBIDDEN)
+  
     try:
         user.last_login = timezone.now()
         user.save(update_fields=['last_login'])
@@ -78,13 +90,20 @@ def login_view(request):
         access_token=str(refresh.access_token)
         refresh_token=str(refresh)
 
+        valid_till = None
+        if company and company.product_to_date:
+            valid_till = company.product_to_date.strftime("%d-%m-%Y")
+
         response = Response({"message":"Login Successful",
                 "user":{
                     'id': user.id,
                     'username': user.username,
                     'email': user.email,
                     'role': user.role,
-                    'is_verified': user.is_verified
+                    'is_verified': user.is_verified,
+                    'company_name': company.company_name if company else None,
+                    "valid_till":valid_till,
+                    'license_status':company.authentication_status if company else None
                 }})
 
         response.set_cookie(
@@ -113,7 +132,6 @@ def login_view(request):
     
     except Exception as e:
         return Response({"message":"Login Failed. Try again later"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
 
 
 @api_view(['POST'])
@@ -215,9 +233,12 @@ def verify_auth(request):
     user = get_user_from_cookie(request)
     
     if not user:
-        return Response({
-            'error': 'Not authenticated'
-        }, status=401)
+        return Response({'error': 'Not authenticated'}, status=401)
+    
+    company = user.company
+    valid_till = None
+    if company and company.product_to_date:
+        valid_till = company.product_to_date.strftime("%d-%m-%Y")
     
     return Response({
         'authenticated': True,
@@ -225,6 +246,10 @@ def verify_auth(request):
             'id': user.id,
             'username': user.username,
             'email': user.email,
-            'role': user.role
+            'role': user.role,
+            'is_verified': user.is_verified,
+            'company_name': company.company_name if company else None,
+            'valid_till': valid_till,
+            'license_status': company.authentication_status if company else None
         }
     })
