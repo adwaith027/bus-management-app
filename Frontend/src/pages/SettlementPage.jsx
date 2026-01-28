@@ -7,8 +7,7 @@ export default function SettlementPage() {
   const [summary, setSummary] = useState(null);
   
   // Loading States
-  const [isInitialLoad, setIsInitialLoad] = useState(true); // For the very first load only
-  const [isRefreshing, setIsRefreshing] = useState(false);  // For manual filter updates
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState(null);
   
   // Polling State
@@ -71,7 +70,7 @@ export default function SettlementPage() {
     // Poll every 15 seconds if page is visible and filters are set
     if (isPageVisible && appliedFilters.startDate) {
       pollingIntervalRef.current = setInterval(() => {
-        // Pass false to 'showLoading' to make it silent
+        // Pass false to 'triggerLoading' to make it silent
         fetchData(appliedFilters.startDate, appliedFilters.endDate, false);
       }, 15000);
     }
@@ -79,14 +78,12 @@ export default function SettlementPage() {
     return () => {
       if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
     };
-  }, [isPageVisible, appliedFilters, filters]); // Re-create interval if filters change
+  }, [isPageVisible, appliedFilters, filters]);
 
   // ===== FETCH DATA =====
-  // showLoading: true = full spinner (initial), false = silent (polling), 'overlay' = table overlay
-  const fetchData = async (startDate, endDate, showLoading = 'overlay') => {
-    if (showLoading === true) setIsInitialLoad(true);
-    if (showLoading === 'overlay') setIsRefreshing(true);
-    
+  // triggerLoading: true = show overlay/skeletons, false = silent update
+  const fetchData = async (startDate, endDate, triggerLoading = true) => {
+    if (triggerLoading) setIsRefreshing(true);
     setError(null);
 
     try {
@@ -114,13 +111,12 @@ export default function SettlementPage() {
 
     } catch (err) {
       console.error("Fetch error:", err);
-      if (showLoading === true) {
-        // Only show main error if it blocks the initial load
+      // Only show error message if it's a user-initiated action, otherwise fail silently for polling
+      if (triggerLoading) {
         setError('Failed to load data. Please check your connection.');
       }
     } finally {
-      setIsInitialLoad(false);
-      setIsRefreshing(false);
+      if (triggerLoading) setIsRefreshing(false);
     }
   };
 
@@ -132,7 +128,7 @@ export default function SettlementPage() {
     }
     setAppliedFilters({ startDate: filters.startDate, endDate: filters.endDate });
     setCurrentPage(1);
-    fetchData(filters.startDate, filters.endDate, 'overlay');
+    fetchData(filters.startDate, filters.endDate, true);
   };
 
   const clearFilters = () => {
@@ -147,7 +143,7 @@ export default function SettlementPage() {
     };
     setFilters(resetFilters);
     setAppliedFilters({ startDate: today, endDate: today });
-    fetchData(today, today, 'overlay');
+    fetchData(today, today, true);
     setCurrentPage(1);
   };
 
@@ -155,7 +151,6 @@ export default function SettlementPage() {
   const handleVerify = async (status) => {
     if (!selectedTransaction) return;
 
-    // Safety check for Amount Mismatch
     if (status === 'VERIFIED' && selectedTransaction.reconciliation_status === 'AMOUNT_MISMATCH' && !verificationNotes) {
         alert("Please add a note explaining why you are verifying a transaction with an Amount Mismatch.");
         return;
@@ -172,12 +167,12 @@ export default function SettlementPage() {
       if (response.data.message === 'Transaction verified successfully') {
         const updatedTransaction = response.data.data;
 
-        // 1. Optimistic Update: Update the specific row in the list immediately
+        // 1. Optimistic Update
         setSettlements(prev => 
             prev.map(item => item.id === updatedTransaction.id ? updatedTransaction : item)
         );
 
-        // 2. Update Summary Stats (Wait for background refresh)
+        // 2. Update Summary Stats (Silent refresh)
         fetchData(appliedFilters.startDate, appliedFilters.endDate, false);
 
         closeModal();
@@ -236,37 +231,24 @@ export default function SettlementPage() {
     );
   };
 
-  // ===== 1. INITIAL LOADING SCREEN (Only for first load) =====
-  if (isInitialLoad) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-slate-50">
-        <div className="flex flex-col items-center gap-4">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-slate-800"></div>
-          <div className="text-slate-600 font-medium animate-pulse">Initializing Settlement Dashboard...</div>
-        </div>
-      </div>
-    );
-  }
+  // ===== TIME AGO FORMATTER =====
+  const getTimeAgo = () => {
+    if (!lastUpdated) return '';
+    const seconds = Math.floor((new Date() - lastUpdated) / 1000);
+    if (seconds < 10) return 'just now';
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    return 'over 1h ago';
+  };
 
-  // ===== 2. ERROR SCREEN =====
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-slate-50">
-        <div className="bg-white border border-red-200 rounded-xl p-8 max-w-md shadow-lg text-center">
-          <div className="text-red-500 mb-4">
-             <svg className="w-12 h-12 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-          </div>
-          <h3 className="text-lg font-bold text-slate-800 mb-2">Failed to Load Data</h3>
-          <p className="text-slate-500 mb-6">{error}</p>
-          <button onClick={() => fetchData(getTodayDate(), getTodayDate(), true)} className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-700 transition">
-            Try Again
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const [timeAgo, setTimeAgo] = useState('');
+  useEffect(() => {
+    const interval = setInterval(() => setTimeAgo(getTimeAgo()), 1000);
+    return () => clearInterval(interval);
+  }, [lastUpdated]);
 
-  // ===== 3. MAIN DASHBOARD =====
+  // ===== MAIN RENDER =====
   return (
     <div className="p-6 md:p-10 min-h-screen bg-slate-50">
       
@@ -277,56 +259,96 @@ export default function SettlementPage() {
           <div className="flex items-center gap-3 mt-1">
              <p className="text-slate-500">Verify and reconcile payment transactions</p>
              {lastUpdated && (
-                <div className="flex items-center gap-2 text-xs text-slate-400 bg-white px-2 py-1 rounded-full border border-slate-100 shadow-sm">
-                    <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                    Updated {lastUpdated.toLocaleTimeString()}
+                <div className="flex items-center gap-2 text-xs text-slate-400">
+                    <div className={`w-2 h-2 rounded-full ${isRefreshing ? 'bg-blue-500 animate-pulse' : 'bg-green-500'}`}></div>
+                    <span>{isPageVisible ? `Last updated ${timeAgo}` : 'Paused (tab inactive)'}</span>
                 </div>
              )}
           </div>
         </div>
         
         <div className="flex gap-2">
-            <button onClick={() => fetchData(appliedFilters.startDate, appliedFilters.endDate, 'overlay')} className="bg-white border border-slate-200 text-slate-600 p-2.5 rounded-xl hover:bg-slate-50 transition shadow-sm" title="Refresh Data">
+            <button 
+                onClick={() => fetchData(appliedFilters.startDate, appliedFilters.endDate, true)} 
+                className="bg-white border border-slate-200 text-slate-600 p-2.5 rounded-xl hover:bg-slate-50 transition shadow-sm" 
+                title="Refresh Data"
+            >
                 <svg className={`w-5 h-5 ${isRefreshing ? 'animate-spin text-blue-600' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
             </button>
         </div>
       </div>
 
       {/* SUMMARY CARDS */}
-      {summary && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm hover:shadow-md transition">
             <div className="text-slate-500 text-sm font-medium">Pending Verification</div>
-            <div className="text-2xl font-bold text-yellow-600 mt-1">{summary.verification_summary.unverified}</div>
-            <div className="text-xs text-slate-400 mt-1">of {summary.verification_summary.total} total</div>
+            {isRefreshing && !summary ? (
+                <div className="animate-pulse bg-slate-200 h-8 w-20 rounded mt-1"></div>
+            ) : (
+                <div className="text-2xl font-bold text-yellow-600 mt-1">
+                    {summary?.verification_summary?.unverified || 0}
+                </div>
+            )}
+            <div className="text-xs text-slate-400 mt-1">
+                {summary ? `of ${summary.verification_summary.total} total` : '-'}
+            </div>
           </div>
+          
           <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm hover:shadow-md transition">
             <div className="text-slate-500 text-sm font-medium">Auto-Matched</div>
-            <div className="text-2xl font-bold text-green-600 mt-1">{summary.reconciliation_summary.auto_matched}</div>
+            {isRefreshing && !summary ? (
+                <div className="animate-pulse bg-slate-200 h-8 w-20 rounded mt-1"></div>
+            ) : (
+                <div className="text-2xl font-bold text-green-600 mt-1">
+                    {summary?.reconciliation_summary?.auto_matched || 0}
+                </div>
+            )}
             <div className="text-xs text-slate-400 mt-1">Ready for verification</div>
           </div>
+          
           <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm hover:shadow-md transition">
             <div className="text-slate-500 text-sm font-medium">Issues Found</div>
-            <div className="text-2xl font-bold text-orange-600 mt-1">
-              {summary.reconciliation_summary.amount_mismatch + summary.reconciliation_summary.not_found + summary.reconciliation_summary.duplicate}
-            </div>
+            {isRefreshing && !summary ? (
+                <div className="animate-pulse bg-slate-200 h-8 w-20 rounded mt-1"></div>
+            ) : (
+                <div className="text-2xl font-bold text-orange-600 mt-1">
+                    {summary ? (summary.reconciliation_summary.amount_mismatch + summary.reconciliation_summary.not_found + summary.reconciliation_summary.duplicate) : 0}
+                </div>
+            )}
             <div className="text-xs text-slate-400 mt-1">Needs attention</div>
           </div>
+          
           <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm hover:shadow-md transition">
             <div className="text-slate-500 text-sm font-medium">Total Amount</div>
-            <div className="text-2xl font-bold text-slate-800 mt-1">₹{summary.amount_summary.total_amount.toFixed(2)}</div>
-            <div className="text-xs text-green-600 mt-1">₹{summary.amount_summary.verified_amount.toFixed(2)} verified</div>
+            {isRefreshing && !summary ? (
+                <div className="animate-pulse bg-slate-200 h-8 w-24 rounded mt-1"></div>
+            ) : (
+                <div className="text-2xl font-bold text-slate-800 mt-1">
+                    ₹{summary?.amount_summary?.total_amount?.toFixed(2) || '0.00'}
+                </div>
+            )}
+            <div className="text-xs text-green-600 mt-1">
+                {summary ? `₹${summary.amount_summary.verified_amount.toFixed(2)} verified` : '-'}
+            </div>
           </div>
-        </div>
-      )}
+      </div>
 
       {/* FILTERS */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-4 md:p-6 mb-6">
-        {hasPendingChanges && (
-          <div className="mb-4 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-center gap-2 animate-pulse">
-            <span>●</span> Filters modified - Click Apply to update
+        
+        {error && (
+          <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 flex items-center gap-2">
+             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+             {error}
           </div>
         )}
+
+        {hasPendingChanges && (
+          <div className="mb-4 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-center gap-2">
+            <span className="animate-pulse">●</span> Filters modified - Click Apply to update
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
           <div className="flex flex-col">
             <label className="text-xs font-medium text-slate-500 mb-1">Start Date</label>
@@ -378,14 +400,18 @@ export default function SettlementPage() {
       </div>
 
       {/* TRANSACTIONS TABLE (Dynamic Loading) */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden relative min-h-[400px]">
+      <div className="text-sm text-slate-500 mb-3">
+        Showing {currentData.length} of {settlements.length} transactions
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden relative min-h-100">
         
-        {/* Soft Loading Overlay */}
+        {/* Loading Overlay */}
         {isRefreshing && (
-            <div className="absolute inset-0 bg-white/60 backdrop-blur-[1px] z-10 flex items-center justify-center">
-                <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-full shadow-lg border border-slate-100">
-                    <div className="animate-spin h-4 w-4 border-2 border-slate-600 border-t-transparent rounded-full"></div>
-                    <span className="text-sm font-medium text-slate-600">Updating data...</span>
+            <div className="absolute inset-0 bg-white/90 backdrop-blur-sm z-10 flex items-center justify-center">
+                <div className="flex flex-col items-center gap-3">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-slate-600"></div>
+                    <div className="text-slate-600 font-medium">Loading data...</div>
                 </div>
             </div>
         )}
@@ -435,8 +461,12 @@ export default function SettlementPage() {
                 <tr>
                   <td colSpan={8} className="px-4 py-12 text-center text-slate-400">
                     <div className="flex flex-col items-center justify-center gap-2">
-                        <svg className="w-8 h-8 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        <span>No settlements found for selected filters</span>
+                        {isRefreshing ? null : (
+                          <>
+                            <svg className="w-8 h-8 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            <span>No settlements found for selected filters</span>
+                          </>
+                        )}
                     </div>
                   </td>
                 </tr>
