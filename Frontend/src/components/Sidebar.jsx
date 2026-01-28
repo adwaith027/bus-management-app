@@ -34,6 +34,26 @@ export default function Sidebar() {
       }
     `;
 
+  const getLicenseWarning = () => {
+      const validTill = user?.valid_till; // Format: "DD-MM-YYYY"
+      if (!validTill) return null;
+
+      // Parse date
+      const [day, month, year] = validTill.split('-');
+      const expiryDate = new Date(year, month - 1, day);
+      const today = new Date();
+      const daysRemaining = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
+
+      if (daysRemaining <= 0) {
+        return { message: "License Expired!", type: "error", days: daysRemaining };
+      } else if (daysRemaining <= 10) {
+        return { message: `License expires in ${daysRemaining} days`, type: "warning", days: daysRemaining };
+      }
+      return null;
+    };
+
+  const warning = getLicenseWarning();
+
   return (
     <>
       {/* Mobile Hamburger */}
@@ -113,6 +133,25 @@ export default function Sidebar() {
         </div>
       </div>
 
+      {/* License Warning - After Header */}
+      {warning && !isCollapsed && (
+        <div className={`mx-3 mt-3 mb-2 p-3 rounded-lg text-sm ${
+          warning.type === 'error' 
+            ? 'bg-red-50 border border-red-200 text-red-700' 
+            : 'bg-amber-50 border border-amber-200 text-amber-700'
+        }`}>
+          <div className="flex items-start gap-2">
+            <i className={`${
+              warning.type === 'error' ? 'fa-solid fa-circle-xmark' : 'fa-solid fa-triangle-exclamation'
+            } text-lg mt-0.5`}></i>
+            <div>
+              <p className="font-semibold">{warning.message}</p>
+              <p className="text-xs mt-1 opacity-80">Valid till: {user?.valid_till}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
 
         {/* NAVIGATION */}
         <nav className="flex-1 overflow-y-auto py-5 px-3 custom-scrollbar">
@@ -164,7 +203,7 @@ export default function Sidebar() {
               </>
             )}
 
-            {/* Branch Admin Links */}
+            {/* Company Admin Links */}
             {role === "company_admin" && (
               <>
                 <li>
