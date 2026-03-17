@@ -15,14 +15,12 @@ environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
 
 SECRET_KEY = env('SECRET_KEY')
 
-# don't run with debug turned on in production!
-DEBUG = True
+DEBUG = env.bool('DEBUG', default=False)
 
 ALLOWED_HOSTS = env.list('ALLOWED_HOSTS')
 
 
 # Application definition
-
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -115,12 +113,74 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
-
 USE_I18N = True
 
 USE_TZ = True
 TIME_ZONE = 'Asia/Kolkata'
+
+
+# Logging Configuration
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {name} {module} {funcName}:{lineno} - {message}',
+            'style': '{',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
+        },
+        'simple': {
+            'format': '{levelname} {asctime} {message}',
+            'style': '{',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': 'DEBUG',
+            'class': 'logging.StreamHandler',
+            'formatter': 'simple',
+        },
+        'file': {
+            'level': 'INFO',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'django.log'),
+            'maxBytes': 1024 * 1024 * 15,  # 15MB
+            'backupCount': 10,
+            'formatter': 'verbose',
+        },
+        'device_file': {
+            'level': 'DEBUG',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'device_transactions.log'),
+            'maxBytes': 1024 * 1024 * 50,  # 50MB
+            'backupCount': 10,
+            'formatter': 'verbose',
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'TicketAppB.views2': {
+            'handlers': ['device_file', 'console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'TicketAppB': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+    },
+}
+
+# Create logs directory if it doesn't exist
+LOGS_DIR = os.path.join(BASE_DIR, 'logs')
+if not os.path.exists(LOGS_DIR):
+    os.makedirs(LOGS_DIR)
 
 
 # Static files (CSS, JavaScript, Images)
@@ -140,7 +200,6 @@ CORS_ALLOW_CREDENTIALS = True
 
 # CORS_ALLOW_ALL_ORIGINS = True
 
-
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
@@ -159,13 +218,11 @@ SIMPLE_JWT = {
 }
 
 # Cookie Settings for HTTP Testing
-SESSION_COOKIE_SECURE = False
-CSRF_COOKIE_SECURE = False
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
 
 SESSION_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SAMESITE = 'Lax'
-
-
 
 # License Server Configuration
 LICENSE_SERVER_BASE_URL = env('LICENSE_SERVER_BASE_URL',default='http://202.88.237.210:8093/LicenceMgmt/public/api')
@@ -180,6 +237,31 @@ PRODUCT_AUTH_URL = f"{LICENSE_SERVER_BASE_URL}{PRODUCT_AUTH_ENDPOINT}"
 APP_VERSION = env('APP_VERSION', default='1.0.0')
 PROJECT_NAME = env('PROJECT_NAME', default='Bus Ticketing System')
 
-
 # Mosambee salt
 MOSAMBEE_SALT=env('MOSAMBEE_SALT', default='448B2EAC08375149D8D352D56D8BD42C30A913C696893EDC')
+
+# automatically append slash to URLs (for DRF)
+APPEND_SLASH = False
+
+# Celery Configuration
+CELERY_BROKER_URL = env('CELERY_BROKER_URL', default='redis://localhost:6379/0')
+
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'Asia/Kolkata'  # Set to your local time
+
+# Optimization for high-concurrency (Reliability)
+CELERY_TASK_ACKS_LATE = True  # Task isn't "gone" until it's finished
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1  # Prevents one worker from hogging 100 tasks
+CELERY_TASK_REJECT_ON_WORKER_LOST = True # Re-queue if worker crashes
+
+# Django Cache (Redis DB 1 — separate from Celery broker on DB 0)
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": env('REDIS_CACHE_URL', default='redis://localhost:6379/1'),
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        }
+    }
+}
