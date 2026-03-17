@@ -1,0 +1,4 @@
+Make changes in :
+1) vite.config.js
+2) main.jsx
+3) env - backend base url

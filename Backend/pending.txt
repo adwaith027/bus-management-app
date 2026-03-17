@@ -1,0 +1,37 @@
+Celery Beat — periodic job for stuck pending logs
+
+
+pip install django-celery-beat
+
+Add to INSTALLED_APPS in settings.py:
+python'django_celery_beat',
+
+
+Add schedule in settings.py:
+pythonfrom celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    'requeue-stuck-pending-logs': {
+        'task': 'TicketAppB.tasks.requeue_pending_logs',
+        'schedule': crontab(minute='*/10'),  # every 10 minutes
+    },
+}
+
+The task in tasks.py:
+python@shared_task
+def requeue_pending_logs():
+    from datetime import timedelta
+    from django.utils import timezone
+
+    # only pick logs older than 5 mins (freshly created ones are still being processed)
+    cutoff = timezone.now() - timedelta(minutes=5)
+    stuck_logs = RawDataLog.objects.filter(
+        status=RawDataLog.statusChoices.PENDING,
+        received_at__lt=cutoff
+    )
+    for log in stuck_logs:
+        process_transaction_data.delay(log.id)
+
+Run Beat separately alongside your worker:
+bashcelery -A Backend beat -l info
+celery -A Backend worker -l info
