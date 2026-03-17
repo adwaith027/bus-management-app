@@ -28,12 +28,20 @@ def create_user(request):
         company=request.data.get('company_id')
         password=request.data.get('password')
 
-        try:
-            company_instance = Company.objects.get(id=company)
-        except Company.DoesNotExist:
-            return Response({"message": "Invalid Company Given"},status=status.HTTP_400_BAD_REQUEST)
+        company_instance = None
+        if role != 'executive_user':
+            try:
+                company_instance = Company.objects.get(id=company)
+            except Company.DoesNotExist:
+                return Response({"message": "Invalid Company Given"},status=status.HTTP_400_BAD_REQUEST)
         
-        user = User.objects.create_user(username=username, email=email, password=password,company=company_instance,role=role)
+        user = User.objects.create_user(
+            username=username,
+            email=email,
+            password=password,
+            company=company_instance,
+            role=role
+        )
         user.save()
 
         return Response({"message":"User added successfully"},status=status.HTTP_201_CREATED)
@@ -68,7 +76,7 @@ def update_user(request, user_id):
     email      = request.data.get('email')
     role       = request.data.get('role')
     company_id = request.data.get('company_id')
-    if not all([username, email, role, company_id]):
+    if not all([username, email, role]):
         return Response({'error': "Missing required fields"}, status=status.HTTP_401_UNAUTHORIZED)
 
     # check if user exists
@@ -85,11 +93,13 @@ def update_user(request, user_id):
     if User.objects.filter(email=email).exclude(pk=user_id).exists():
         return Response({'status': 'error','message': 'Email already exists','error': 'This email is already registered to another user'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # check if company exists
-    try:
-        company_instance=Company.objects.get(pk=company_id)
-    except Company.DoesNotExist:
-        return Response({"status": "error","message": "Company not found","error": f"No company found with ID {company_id}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    company_instance = None
+    if role != 'executive_user':
+        # check if company exists
+        try:
+            company_instance=Company.objects.get(pk=company_id)
+        except Company.DoesNotExist:
+            return Response({"status": "error","message": "Company not found","error": f"No company found with ID {company_id}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     try:        
         user_data.username=username

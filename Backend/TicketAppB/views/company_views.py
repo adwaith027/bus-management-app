@@ -1,7 +1,7 @@
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.decorators import api_view
-from ..models import Company,TransactionData,TripCloseData
+from ..models import Company,TransactionData,TripCloseData,Route,VehicleType,MosambeeTransaction
 from ..serializers import CompanySerializer
 from django.contrib.auth import get_user_model
 from .auth_views import get_user_from_cookie
@@ -14,6 +14,8 @@ from datetime import datetime
 import json
 from django.forms.models import model_to_dict
 from django.http import JsonResponse
+from django.db.models import Sum
+from django.db.utils import OperationalError, ProgrammingError
 
 # Setup logger  
 logger = logging.getLogger(__name__)
@@ -599,46 +601,141 @@ def get_company_dashboard_metrics(request):
         return Response({'error': 'Date input missing'}, status=status.HTTP_400_BAD_REQUEST)
     
     if isinstance(selected_date,str):
-        selected_date=datetime.strptime(selected_date,"%Y-%m-%d")
+        try:
+            selected_date=datetime.strptime(selected_date,"%Y-%m-%d").date()
+        except ValueError:
+            return Response({'error': 'Invalid date format'}, status=status.HTTP_400_BAD_REQUEST)
 
     # returns id as int
-    company_id=user.company.id
+    company = user.company
+    if not company:
+        return Response({
+            "message": "success",
+            "data": {
+                "collections": {
+                    "daily_cash": 0,
+                    "daily_upi": 0,
+                    "monthly_total": 0,
+                },
+                "operations": {
+                    "buses_active": 0,
+                    "buses_total": 0,
+                    "trips_completed": 0,
+                    "trips_scheduled": 0,
+                    "routes_active": 0,
+                    "routes_total": 0,
+                    "total_passengers": 0,
+                },
+                "settlements": {
+                    "total_transactions": 0,
+                    "verified": 0,
+                    "pending_verification": 0,
+                    "failed": 0,
+                }
+            }
+        }, status=status.HTTP_200_OK)
     
     # Query TransactionData for payment metrics
     # Query TripCloseData for trip/bus metrics
     # Calculate aggregations using Django's aggregate/annotate
     # Return structured JSON response
 
-    try:    
-        transaction_queryset = TransactionData.objects.filter(
-                company_code=user.company,
-                ticket_date=selected_date
-            )
-        return JsonResponse(list(transaction_queryset.values()), safe=False)
-    # Response structure
-    #     {
-    #     "collections": {
-    #         "daily_total": 45280.50,
-    #         "cash": 28150.00,
-    #         "upi": 17130.50,
-    #         "pending": 3200.00
-    #     },
-    #     "operations": {
-    #         "buses_active": 12,
-    #         "trips_completed": 48,
-    #         "total_passengers": 1240,
-    #         "active_routes": 8
-    #     },
-    #     "settlements": {
-    #         "total_transactions": 156,
-    #         "verified": 142,
-    #         "pending_verification": 12,
-    #         "failed": 2
-    #     }
-    # }
-    
-        return Response({"message": "Successfully retreived data"},status=status.HTTP_200_OK)
+    collections = {"daily_cash": 0, "daily_upi": 0, "monthly_total": 0}
+    operations = {
+        "buses_active": 0,
+        "buses_total": 0,
+        "trips_completed": 0,
+        "trips_scheduled": 0,
+        "routes_active": 0,
+        "routes_total": 0,
+        "total_passengers": 0,
+    }
+    settlements = {
+        "total_transactions": 0,
+        "verified": 0,
+        "pending_verification": 0,
+        "failed": 0,
+    }
 
+    try:
+        transaction_base = TransactionData.objects.filter(company_code=company,ticket_date=selected_date)
+
+        daily_cash = transaction_base.filter(
+            ticket_status=TransactionData.PaymentMode.CASH
+        ).aggregate(total=Sum('ticket_amount'))['total'] or 0
+
+        daily_upi = transaction_base.filter(
+            ticket_status=TransactionData.PaymentMode.UPI
+        ).aggregate(total=Sum('ticket_amount'))['total'] or 0
+
+        monthly_total = TransactionData.objects.filter(
+            company_code=company,
+            ticket_date__year=selected_date.year,
+            ticket_date__month=selected_date.month
+        ).aggregate(total=Sum('ticket_amount'))['total'] or 0
+
+        collections = {
+            "daily_cash": float(daily_cash),
+            "daily_upi": float(daily_upi),
+            "monthly_total": float(monthly_total),
+        }
+
+        total_passengers = transaction_base.aggregate(
+            total=Sum('total_tickets')
+        )['total'] or 0
+        operations["total_passengers"] = int(total_passengers)
+
+    except (OperationalError, ProgrammingError) as e:
+        logger.warning(f"Collection metrics unavailable: {str(e)}")
     except Exception as e:
-        print(e)
-        return Response({"message": "Data fetching failed"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        logger.exception(f"Collection metrics error: {str(e)}")
+
+    try:
+        trips_completed = TripCloseData.objects.filter(company_code=company,start_date=selected_date).count()
+        operations["trips_completed"] = trips_completed
+        operations["trips_scheduled"] = trips_completed
+
+        buses_active = TripCloseData.objects.filter(company_code=company,start_date=selected_date).values('palmtec_id').distinct().count()
+        operations["buses_active"] = buses_active
+    
+    except (OperationalError, ProgrammingError) as e:
+        logger.warning(f"Trip metrics unavailable: {str(e)}")
+    except Exception as e:
+        logger.exception(f"Trip metrics error: {str(e)}")
+
+    try:
+        operations["buses_total"] = VehicleType.objects.filter(company=company,is_deleted=False).count()
+        operations["routes_total"] = Route.objects.filter(company=company).count()
+        operations["routes_active"] = Route.objects.filter(company=company,is_deleted=False).count()
+    
+    except (OperationalError, ProgrammingError) as e:
+        logger.warning(f"Route/vehicle metrics unavailable: {str(e)}")
+    except Exception as e:
+        logger.exception(f"Route/vehicle metrics error: {str(e)}")
+
+    try:
+        settlement_qs = MosambeeTransaction.objects.filter(transaction_date=selected_date,related_ticket__company_code=company)
+
+        settlements["total_transactions"] = settlement_qs.count()
+        settlements["verified"] = settlement_qs.filter(
+            verification_status=MosambeeTransaction.VerificationStatus.VERIFIED).count()
+        settlements["pending_verification"] = settlement_qs.filter(
+            verification_status__in=[
+                MosambeeTransaction.VerificationStatus.UNVERIFIED,
+                MosambeeTransaction.VerificationStatus.FLAGGED,
+            ]
+        ).count()
+        settlements["failed"] = settlement_qs.filter(
+            verification_status__in=[
+                MosambeeTransaction.VerificationStatus.REJECTED,
+                MosambeeTransaction.VerificationStatus.DISPUTED,
+            ]
+        ).count()
+
+    except (OperationalError, ProgrammingError) as e:
+        logger.warning(f"Settlement metrics unavailable: {str(e)}")
+    except Exception as e:
+        logger.exception(f"Settlement metrics error: {str(e)}")
+
+    return Response(
+        {"message": "success","data": {"collections": collections,"operations": operations,"settlements": settlements}},status=status.HTTP_200_OK)

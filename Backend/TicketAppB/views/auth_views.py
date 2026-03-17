@@ -1,3 +1,4 @@
+import secrets
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
@@ -5,10 +6,61 @@ from rest_framework.decorators import api_view
 from rest_framework_simplejwt.exceptions import TokenError
 from django.contrib.auth import get_user_model,authenticate
 from rest_framework_simplejwt.tokens import RefreshToken,AccessToken
-from datetime import date,datetime as dti
-from ..models import Company
+from datetime import date
+from ..models import Company, UserDeviceMapping
 
 User=get_user_model()
+
+
+def _classify_device_type(user_agent):
+    agent = (user_agent or "").lower()
+    if "android" in agent:
+        return UserDeviceMapping.DeviceType.ANDROID
+    if "iphone" in agent or "ipad" in agent or "ios" in agent:
+        return UserDeviceMapping.DeviceType.IOS
+    if any(token in agent for token in ["mobile", "opera mini", "blackberry", "iemobile"]):
+        return UserDeviceMapping.DeviceType.WEB_MOBILE
+    if agent:
+        return UserDeviceMapping.DeviceType.WEB_DESKTOP
+    return UserDeviceMapping.DeviceType.UNKNOWN
+
+
+def _set_user_device_validity(user):
+    has_approved_device = UserDeviceMapping.objects.filter(
+        user=user,
+        status=UserDeviceMapping.DeviceStatus.APPROVED,
+    ).exists()
+    if user.is_device_valid != has_approved_device:
+        user.is_device_valid = has_approved_device
+        user.save(update_fields=["is_device_valid"])
+    return has_approved_device
+
+
+def _generate_unique_device_uid():
+    while True:
+        device_uid = secrets.token_urlsafe(24)
+        if not UserDeviceMapping.objects.filter(device_uid=device_uid).exists():
+            return device_uid
+
+
+def _create_pending_mapping(user, device_type, user_agent, device_uid):
+    mapping = UserDeviceMapping.objects.create(
+        user=user,
+        username_snapshot=user.username,
+        device_uid=device_uid,
+        device_type=device_type,
+        user_agent=user_agent,
+        status=UserDeviceMapping.DeviceStatus.PENDING,
+        last_seen_at=timezone.now(),
+    )
+    return mapping
+
+
+def _build_logout_response(message):
+    response = Response({"message": message})
+    response.delete_cookie("access_token", path="/")
+    response.delete_cookie("refresh_token", path="/")
+    return response
 
 
 @api_view(['POST'])
@@ -63,6 +115,14 @@ def login_view(request):
     user=authenticate(username=username,password=password)
 
     if not user:
+        # If credentials are correct but account is inactive, authenticate() returns None.
+        # Provide a clearer error for inactive accounts.
+        try:
+            existing_user = User.objects.get(username=username)
+            if not existing_user.is_active:
+                return Response({"error":"Account is inactive. Contact administrator."},status=status.HTTP_403_FORBIDDEN)
+        except User.DoesNotExist:
+            pass
         return Response({"error":"Invalid credentials"},status=status.HTTP_401_UNAUTHORIZED)
     
     # if not user.is_verified:
@@ -81,8 +141,92 @@ def login_view(request):
         if company.authentication_status:
             if company.authentication_status!=Company.AuthStatus.APPROVED:
                 return Response({"error":"Pending License Approval. Contact Administrator"},status=status.HTTP_403_FORBIDDEN)
-  
+
+    user_agent = request.headers.get("User-Agent", "")
+    device_type = _classify_device_type(user_agent)
+    device_uid = request.data.get("device_uid")
+
+    if user.role != "superadmin":
+        if not device_uid:
+            generated_uid = _generate_unique_device_uid()
+            pending_mapping = _create_pending_mapping(
+                user=user,
+                device_type=device_type,
+                user_agent=user_agent,
+                device_uid=generated_uid,
+            )
+            return Response(
+                {
+                    "error_code": "DEVICE_REGISTRATION_REQUIRED",
+                    "error": "Login from this device is unauthorized",
+                    "message": "Device registration created. Wait for approval and retry login.",
+                    "details": {
+                        "device_uid": pending_mapping.device_uid,
+                        "device_type": pending_mapping.device_type,
+                        "status": pending_mapping.status,
+                    },
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        mapping = UserDeviceMapping.objects.filter(device_uid=device_uid).select_related("user").first()
+        if mapping and mapping.user_id != user.id:
+            return Response(
+                {
+                    "error_code": "DEVICE_UID_ALREADY_BOUND",
+                    "error": "This device UID is already linked to another user.",
+                    "message": "This device is linked to another user. Release device from current user before trying again.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not mapping:
+            return Response(
+                {
+                    "error_code": "DEVICE_UID_INVALID_OR_RELEASED",
+                    "error": "Invalid or released device UID",
+                    "message": "This device UID is not valid anymore. Login without device UID to register this device again.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            mapping.last_seen_at = timezone.now()
+            mapping.username_snapshot = user.username
+            mapping.device_type = device_type
+            mapping.user_agent = user_agent
+            mapping.save(
+                update_fields=[
+                    "last_seen_at",
+                    "username_snapshot",
+                    "device_type",
+                    "user_agent",
+                    "updated_at",
+                ]
+            )
+        except Exception:
+            return Response(
+                {"error": "Failed to process device mapping"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        if mapping.status != UserDeviceMapping.DeviceStatus.APPROVED:
+            return Response(
+                {
+                    "error_code": "DEVICE_UNAUTHORIZED",
+                    "error": "Login from this device is unauthorized",
+                    "message": "Device not approved. Contact superadmin.",
+                    "details": {
+                        "device_uid": mapping.device_uid,
+                        "device_type": mapping.device_type,
+                        "status": mapping.status,
+                    },
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
     try:
+        _set_user_device_validity(user)
         user.last_login = timezone.now()
         user.save(update_fields=['last_login'])
 
@@ -101,6 +245,7 @@ def login_view(request):
                     'email': user.email,
                     'role': user.role,
                     'is_verified': user.is_verified,
+                    'is_device_valid': user.is_device_valid,
                     'company_name': company.company_name if company else None,
                     "valid_till":valid_till,
                     'license_status':company.authentication_status if company else None
@@ -136,12 +281,46 @@ def login_view(request):
 
 @api_view(['POST'])
 def logout_view(request):
-    response=Response({"message":"Logged out successfully"})
+    return _build_logout_response("Logged out successfully")
 
-    response.delete_cookie('access_token',path='/')
-    response.delete_cookie('refresh_token',path='/')
 
-    return response
+@api_view(['POST'])
+def release_device_view(request):
+    user = get_user_from_cookie(request)
+    if not user:
+        return Response(
+            {"error_code": "AUTH_REQUIRED", "error": "Authentication required"},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    device_uid = request.data.get("device_uid")
+    mapping = None
+
+    if device_uid:
+        mapping = UserDeviceMapping.objects.filter(device_uid=device_uid).select_related("user").first()
+    else:
+        mapping = (
+            UserDeviceMapping.objects.filter(user=user)
+            .order_by("-last_seen_at", "-updated_at")
+            .first()
+        )
+
+    if not mapping:
+        return Response(
+            {"error_code": "DEVICE_MAPPING_NOT_FOUND", "error": "No device mapping found for release"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if mapping.user_id != user.id:
+        return Response(
+            {"error_code": "DEVICE_RELEASE_NOT_ALLOWED", "error": "You cannot release another user's device"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    mapping.delete()
+    _set_user_device_validity(user)
+
+    return _build_logout_response("RELEASE_SUCCESS")
 
 
 @api_view(['GET'])
@@ -248,6 +427,7 @@ def verify_auth(request):
             'email': user.email,
             'role': user.role,
             'is_verified': user.is_verified,
+            'is_device_valid': user.is_device_valid,
             'company_name': company.company_name if company else None,
             'valid_till': valid_till,
             'license_status': company.authentication_status if company else None
