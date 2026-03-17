@@ -270,7 +270,7 @@ def get_settlement_data(request):
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
     
     # Check if user has permission (manager/admin only)
-    if user.role not in ['company_admin','branch_admin', 'admin', 'super_admin']:
+    if user.role not in ['company_admin','depot_admin', 'admin', 'super_admin']:
         return Response({'error': 'Insufficient permissions'}, status=status.HTTP_403_FORBIDDEN)
     
     try:
@@ -345,7 +345,7 @@ def verify_settlement(request):
         }, status=status.HTTP_401_UNAUTHORIZED)
     
     # Check permissions
-    if user.role not in ['company_admin', 'branch_admin','admin', 'super_admin']:
+    if user.role not in ['company_admin', 'depot_admin','admin', 'super_admin']:
         return Response({'error': 'Insufficient permissions'}, status=status.HTTP_403_FORBIDDEN)
     
     try:
@@ -407,7 +407,7 @@ def get_settlement_summary(request):
     if not user:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
     
-    if user.role not in ['company_admin','branch_admin', 'admin', 'super_admin']:
+    if user.role not in ['company_admin','depot_admin', 'admin', 'super_admin']:
         return Response({'error': 'Insufficient permissions'}, status=status.HTTP_403_FORBIDDEN)
     
     try:

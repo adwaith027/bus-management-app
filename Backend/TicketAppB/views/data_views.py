@@ -1,184 +1,68 @@
 import logging
-from decimal import Decimal,InvalidOperation
-from datetime import datetime,timezone
+from decimal import Decimal
+from datetime import datetime
 from rest_framework import status
-from ..models import TransactionData,TripCloseData,Company,MosambeeTransaction
-from django.http import HttpResponse,JsonResponse
+from ..models import TransactionData, TripCloseData, RawDataLog
+from django.http import HttpResponse, JsonResponse
 from .auth_views import get_user_from_cookie
 from rest_framework.response import Response
-from django.contrib.auth import get_user_model
-from ..serializers import TicketDataSerializer,TripCloseDataSerializer
+from ..serializers import TicketDataSerializer, TripCloseDataSerializer
 from rest_framework.decorators import api_view
 from django.db import IntegrityError, OperationalError
 from django.views.decorators.csrf import csrf_exempt
-import json
-from django.db.models import Count
 from django.utils.dateparse import parse_datetime
 import pytz
-import hashlib
-from django.conf import settings
+from django.db import transaction
+from ..tasks import process_transaction_data
+from .utils import _get_company
 
-
-User=get_user_model()
 logger = logging.getLogger(__name__)
 
 
-@api_view(['GET'])
-def get_admin_dashboard_data(request):
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
 
-    try:
-        # find all company data
-        all_companies=Company.objects.all()
-        total_companies=Company.objects.count()
-        validated_companies=0
-        unvalidated_companies=0
-        expired_companies=0
-        dashboard_data={"company_summary":{},"user_summary": {}}
-        for company in all_companies:
-            if company.authentication_status=="Pending":
-                unvalidated_companies+=1
-            elif company.authentication_status=="Approve":
-                validated_companies+=1
-            elif company.authentication_status=="Expired":
-                expired_companies+=1
-
-        dashboard_data['company_summary'].update({"total_companies":total_companies,"validated_companies":validated_companies,"unvalidated_companies":unvalidated_companies,"expired_companies":expired_companies})
-
-        # find all user data
-        all_non_admin_users=User.objects.filter(is_superuser=False).count()
-        users_by_company_qs = (User.objects.filter(is_superuser=False).values('company__company_name').annotate(count=Count('id')))
-        users_by_company = [{"company_name": row["company__company_name"],"count": row["count"]}for row in users_by_company_qs]
-
-        dashboard_data['user_summary'].update({"total_users":all_non_admin_users,"users_by_company":users_by_company})
-        
-        return Response({"message":"Success","data":dashboard_data},status=status.HTTP_200_OK)
-    except Exception as e:
-        return Response({"message": "Data fetching failed"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-# used by machine
 @csrf_exempt
 def getTransactionDataFromDevice(request):
     if request.method != "GET":
         return HttpResponse("METHOD_NOT_ALLOWED",status=status.HTTP_405_METHOD_NOT_ALLOWED,content_type="text/plain")
 
     raw = request.GET.get("fn")
-
     if not raw:
         return HttpResponse("NO_DATA",status=status.HTTP_400_BAD_REQUEST,content_type="text/plain")
+    
+    parts=raw.split("|")
 
-    logger.info("Transaction from device: %s", raw)
+    # Check if we have minimum required parts
+    if len(parts) < 27:
+        return HttpResponse("MISSING_DATA",status=status.HTTP_400_BAD_REQUEST,content_type="text/plain")
 
-    parts = raw.split("|")
+    # Validate request type
+    if parts[0] != 'Ticket':
+        return HttpResponse(f"INVALID",status=status.HTTP_400_BAD_REQUEST,content_type="text/plain")
 
-    # get first 32 chars for response
     response_chars=raw[0:32]
 
     try:
-        company_code = parts[26] if len(parts) > 26 else None
-        
-        company_instance = Company.objects.filter(company_id=company_code).first()
+        company_code = parts[26]
+
+        company_instance = _get_company(company_code) if company_code else None
         if not company_instance:
-            logger.error("Invalid company code from device: %s", company_code)
             return HttpResponse("INVALID_COMPANY", status=400, content_type="text/plain")
-        
-        # Parse count fields with proper None handling
-        full_count = int(parts[8]) if len(parts) > 8 and parts[8] else 0
-        half_count = int(parts[9]) if len(parts) > 9 and parts[9] else 0
-        st_count = int(parts[10]) if len(parts) > 10 and parts[10] else 0
-        phy_count = int(parts[11]) if len(parts) > 11 and parts[11] else 0
-        lugg_count = int(parts[12]) if len(parts) > 12 and parts[12] else 0
 
-        # Calculate total tickets
-        try:
-            total_tickets = full_count + half_count + st_count + phy_count + lugg_count
-        except (TypeError, ValueError) as e:
-            logger.error("Error calculating total_tickets: %s", e)
-            total_tickets = 0
+        with transaction.atomic():
+            log=RawDataLog.objects.create(
+                raw_payload=raw,
+                company_code=company_instance,
+                source=RawDataLog.typeChoices.TRANSACTION
+            )
 
-        # Parse ticket_status as integer with validation
-        try:
-            ticket_status_raw = parts[24] if len(parts) > 24 and parts[24] else None
-            if ticket_status_raw is not None:
-                ticket_status = int(ticket_status_raw)
-                # Validate: only 0 (Cash) or 1 (UPI) allowed
-                if ticket_status not in [0, 1]:
-                    logger.warning("Invalid ticket_status value %s, defaulting to 0 (Cash)", ticket_status)
-                    ticket_status = 0
-            else:
-                ticket_status = 0  # Default to Cash
-        except (ValueError, TypeError) as e:
-            logger.error("Error parsing ticket_status: %s, defaulting to 0 (Cash)", e)
-            ticket_status = 0
-        
-        transaction = TransactionData.objects.create(
-            request_type = parts[0] if len(parts) > 0 else None,
-            device_id    = parts[1] if len(parts) > 1 else None,
-            trip_number  = parts[2] if len(parts) > 2 else None,
-            ticket_number= parts[3] if len(parts) > 3 else None,
-
-            ticket_date = datetime.strptime(parts[4], "%Y-%m-%d").date()
-                          if len(parts) > 4 and parts[4] else None,
-            ticket_time = datetime.strptime(parts[5], "%H:%M:%S").time()
-                          if len(parts) > 5 and parts[5] else None,
-
-            from_stage = int(parts[6]) if len(parts) > 6 and parts[6] else 0,
-            to_stage   = int(parts[7]) if len(parts) > 7 and parts[7] else 0,
-
-            # Use pre-calculated count values
-            full_count = full_count,
-            half_count = half_count,
-            st_count   = st_count,
-            phy_count  = phy_count,
-            lugg_count = lugg_count,
-
-            # Add total_tickets
-            total_tickets = total_tickets,
-
-            ticket_amount = Decimal(parts[13]) if len(parts) > 13 and parts[13] else Decimal("0.00"),
-            lugg_amount   = Decimal(parts[14]) if len(parts) > 14 and parts[14] else Decimal("0.00"),
-
-            ticket_type   = parts[15] if len(parts) > 15 else None,
-            adjust_amount = Decimal(parts[16]) if len(parts) > 16 and parts[16] else Decimal("0.00"),
-            
-            pass_id        = parts[17] if len(parts) > 17 else None,
-            warrant_amount= Decimal(parts[18]) if len(parts) > 18 and parts[18] else Decimal("0.00"),
-
-            refund_status = parts[19] if len(parts) > 19 else None,
-            refund_amount = Decimal(parts[20]) if len(parts) > 20 and parts[20] else Decimal("0.00"),
-
-            ladies_count = int(parts[21]) if len(parts) > 21 and parts[21] else 0,
-            senior_count = int(parts[22]) if len(parts) > 22 and parts[22] else 0,
-
-            transaction_id   = parts[23] if len(parts) > 23 else None,
-            
-            # Use parsed integer ticket_status
-            ticket_status    = ticket_status,
-            
-            reference_number = parts[25] if len(parts) > 25 else None,
-            
-            # Company foreign key
-            company_code     = company_instance,
-
-            # Branch code (currently null, device doesn't send yet)
-            branch_code = None,
-
-            raw_payload = raw
-        )
+            transaction.on_commit(lambda: process_transaction_data.delay(log.id))
 
         device_response=f'OK#SUCCESS#fn={response_chars}#'
         return HttpResponse(device_response, content_type="text/plain", status=status.HTTP_200_OK)
 
-    except IntegrityError:
-        device_response=f'OK#SUCCESS#fn={response_chars}#'
-        return HttpResponse(device_response, content_type="text/plain", status=status.HTTP_200_OK)
-
-    except Exception:
-        logger.exception("Transaction parsing failed")
+    except Exception as e:
+        logger.exception(f"Transaction parsing failed: {e}")
         return HttpResponse("ERROR",status=status.HTTP_500_INTERNAL_SERVER_ERROR,content_type="text/plain")
-
 
 
 @api_view(['GET'])
@@ -237,7 +121,7 @@ def get_all_transaction_data(request):
                     # Filter for records created AFTER the cursor timestamp
                     queryset = queryset.filter(created_at__gt=since_dt)
                     
-                    logger.info(f"Polling query: since={since_timestamp}, filtered count={queryset.count()}")
+                    logger.info(f"Polling query: since={since_timestamp}")
                 else:
                     logger.warning(f"Could not parse since timestamp: {since_timestamp}")
                     return Response({"message": "success", "data": []}, status=status.HTTP_200_OK)
@@ -298,7 +182,7 @@ def getTripCloseDataFromDevice(request):
         try:
             company_code = parts[2] if len(parts) > 2 else None
         
-            company_instance = Company.objects.filter(company_id=company_code).first()
+            company_instance = _get_company(company_code)
             if not company_instance:
                 logger.error("Invalid company code from device: %s", company_code)
                 return HttpResponse("INVALID_COMPANY", status=400, content_type="text/plain")
@@ -361,7 +245,7 @@ def getTripCloseDataFromDevice(request):
                 # Device information
                 palmtec_id=parts[1],
                 company_code=company_instance,
-                branch_code=None,  # Branch (not sent by device yet)
+                depot_code=None,  # Depot (not sent by device yet)
 
                 # Trip identification
                 schedule=int(parts[3]) if parts[3] else 0,
@@ -498,7 +382,7 @@ def get_all_trip_close_data(request):
                     # Filter for records created AFTER the cursor timestamp
                     queryset = queryset.filter(created_at__gt=since_dt)
                     
-                    logger.info(f"Trip polling query: since={since_timestamp}, filtered count={queryset.count()}")
+                    logger.info(f"Trip polling query: since={since_timestamp}")
                 else:
                     logger.warning(f"Could not parse since timestamp: {since_timestamp}")
                     return JsonResponse({"message": "success", "data": []}, status=status.HTTP_200_OK)

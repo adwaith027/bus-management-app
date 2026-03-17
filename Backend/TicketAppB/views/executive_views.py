@@ -6,13 +6,10 @@ from django.contrib.auth import get_user_model
 from ..models import ExecutiveCompanyMapping
 from ..serializers import ExecutiveCompanyMappingSerializer, CompanySerializer
 from .auth_views import get_user_from_cookie
+from .utils import _is_superadmin
 
 
 User = get_user_model()
-
-
-def _is_superadmin(user):
-    return user and user.role == "superadmin"
 
 
 def _sync_executive_user_active(executive_user_id):

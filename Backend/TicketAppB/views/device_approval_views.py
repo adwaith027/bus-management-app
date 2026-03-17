@@ -6,20 +6,7 @@ from rest_framework.response import Response
 from ..models import UserDeviceMapping
 from ..serializers import UserDeviceMappingSerializer
 from .auth_views import get_user_from_cookie
-
-
-def _is_superadmin(user):
-    return user and user.role == "superadmin"
-
-
-def _update_user_device_validity(target_user):
-    has_approved = UserDeviceMapping.objects.filter(
-        user=target_user,
-        status=UserDeviceMapping.DeviceStatus.APPROVED,
-    ).exists()
-    if target_user.is_device_valid != has_approved:
-        target_user.is_device_valid = has_approved
-        target_user.save(update_fields=["is_device_valid"])
+from .utils import _is_superadmin
 
 
 @api_view(["GET"])
@@ -91,8 +78,6 @@ def approve_device(request, mapping_id):
     mapping.approved_by = user
     mapping.save(update_fields=["status", "approved_at", "approved_by", "updated_at"])
 
-    _update_user_device_validity(mapping.user)
-
     return Response({"message": "Device approved"}, status=status.HTTP_200_OK)
 
 
@@ -119,9 +104,8 @@ def revoke_device(request, mapping_id):
         )
 
     mapping.status = UserDeviceMapping.DeviceStatus.INACTIVE
+    mapping.is_active = False
     mapping.approved_by = user
-    mapping.save(update_fields=["status", "approved_by", "updated_at"])
-
-    _update_user_device_validity(mapping.user)
+    mapping.save(update_fields=["status", "is_active", "approved_by", "updated_at"])
 
     return Response({"message": "Device revoked"}, status=status.HTTP_200_OK)
