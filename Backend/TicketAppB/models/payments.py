@@ -3,7 +3,7 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator
 from django.conf import settings
-from .company import Company,Branch
+from .company import Company, Depot
 
 # Payment processing (MosambeeTransaction)
 
@@ -237,6 +237,6 @@ class MosambeeTransaction(models.Model):
     def can_be_verified_by(self, user):
         return (
             user.is_authenticated and
-            user.role in ['manager', 'admin', 'super_admin'] and
+            user.role in ['manager', 'company_admin', 'superadmin'] and
             self.verification_status == self.VerificationStatus.UNVERIFIED
         )

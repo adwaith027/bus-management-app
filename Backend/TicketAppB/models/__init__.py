@@ -5,9 +5,9 @@ AUTH_MODELS = ['CustomUser', 'UserDeviceMapping']
 
 
 # Company models
-from .company import Company, Branch, Dealer, DealerCustomerMapping, ExecutiveCompanyMapping
+from .company import Company, Depot, Dealer, DealerCustomerMapping, ExecutiveCompanyMapping
 
-COMPANY_MODELS = ['Company','Branch','Dealer','DealerCustomerMapping','ExecutiveCompanyMapping',]
+COMPANY_MODELS = ['Company','Depot','Dealer','DealerCustomerMapping','ExecutiveCompanyMapping',]
 
 
 # Master data models
@@ -52,10 +52,9 @@ OPERATIONS_MODELS = ['ExpenseMaster','Expense','CrewAssignment','InspectorDetail
 
 
 # Transaction models
-from .transactions import (TransactionData,TripCloseData,)
+from .transactions import (TransactionData,TripCloseData,RawDataLog,)
 
-TRANSACTION_MODELS = ['TransactionData','TripCloseData',]
-
+TRANSACTION_MODELS = ['TransactionData','TripCloseData','RawDataLog',]
 
 # Payment models
 from .payments import MosambeeTransaction

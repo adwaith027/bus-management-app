@@ -4,6 +4,7 @@ from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator
 from django.conf import settings
 from .company import Company, Dealer
+from .managers import CustomUserManager
 
 # Authentication models
 
@@ -14,6 +15,7 @@ class CustomUser(AbstractUser):
     # db stores id in company_id
     company=models.ForeignKey(to=Company,on_delete=models.CASCADE,null=True,blank=True,related_name='users')
     dealer = models.ForeignKey(to=Dealer,on_delete=models.SET_NULL,null=True,blank=True,related_name='users')
+    objects = CustomUserManager()
     
     class Meta:
         db_table = 'custom_user'
@@ -62,6 +64,9 @@ class UserDeviceMapping(models.Model):
     )
     approved_at = models.DateTimeField(null=True, blank=True)
     last_seen_at = models.DateTimeField(null=True, blank=True)
+    # Tracks whether this device currently has an active session.
+    # Set True on login, False on logout. Used for company-wide device slot counting.
+    is_active = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

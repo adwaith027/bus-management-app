@@ -149,13 +149,13 @@ class CrewAssignment(models.Model):
         Employee,
         on_delete=models.PROTECT,
         related_name='driver_assignments',
-        limit_choices_to={'emp_type__emp_type_code': 'DRIVER'}
+        limit_choices_to={'emp_type__emp_type_name': 'Driver'}
     )
     conductor = models.ForeignKey(
         Employee,
         on_delete=models.PROTECT,
         related_name='conductor_assignments',
-        limit_choices_to={'emp_type__emp_type_code': 'CONDUCTOR'},
+        limit_choices_to={'emp_type__emp_type_name': 'Conductor'},
         null=True,
         blank=True
     )
@@ -163,7 +163,7 @@ class CrewAssignment(models.Model):
         Employee,
         on_delete=models.PROTECT,
         related_name='cleaner_assignments',
-        limit_choices_to={'emp_type__emp_type_code': 'CLEANER'},
+        limit_choices_to={'emp_type__emp_type_name': 'Cleaner'},
         null=True,
         blank=True
     )

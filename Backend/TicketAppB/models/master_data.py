@@ -301,23 +301,72 @@ class RouteStage(models.Model):
         return f"{self.route.route_code} - Stop {self.sequence_no}: {self.stage.stage_name}"
 
 
+# class Fare(models.Model):
+#     """Fare matrix - from stage to stage pricing"""
+#     route = models.ForeignKey(Route,on_delete=models.CASCADE,related_name='fares')
+#     from_stage = models.ForeignKey(Stage,on_delete=models.PROTECT,related_name='fares_from',help_text="Start stage")
+#     to_stage = models.ForeignKey(Stage,on_delete=models.PROTECT,related_name='fares_to',help_text="End stage")
+#     fare_amount = models.DecimalField(
+#         max_digits=10,
+#         decimal_places=2,
+#         validators=[MinValueValidator(Decimal('0.00'))],
+#         help_text="Fare amount for this stage combination"
+#     )
+#     company = models.ForeignKey(
+#         'Company',
+#         on_delete=models.CASCADE,
+#         related_name='fares'
+#     )
+    
+#     created_at = models.DateTimeField(auto_now_add=True)
+#     created_by = models.ForeignKey(
+#         settings.AUTH_USER_MODEL,
+#         on_delete=models.SET_NULL,
+#         null=True,
+#         blank=True,
+#         related_name='fares_created'
+#     )
+#     updated_at = models.DateTimeField(auto_now=True)
+#     updated_by = models.ForeignKey(
+#         settings.AUTH_USER_MODEL,
+#         on_delete=models.SET_NULL,
+#         null=True,
+#         blank=True,
+#         related_name='fares_updated'
+#     )
+    
+#     class Meta:
+#         # db_table = 'fare'
+#         db_table = 'mdb_fare'
+#         unique_together = ['route', 'from_stage', 'to_stage']
+#         indexes = [
+#             models.Index(fields=['route', 'from_stage', 'to_stage']),
+#             models.Index(fields=['company']),
+#         ]
+    
+#     def __str__(self):
+#         return f"{self.route.route_code}: {self.from_stage.stage_name} → {self.to_stage.stage_name} = ₹{self.fare_amount}"
+
 class Fare(models.Model):
-    """Fare matrix - from stage to stage pricing"""
-    route = models.ForeignKey(Route,on_delete=models.CASCADE,related_name='fares')
-    from_stage = models.ForeignKey(Stage,on_delete=models.PROTECT,related_name='fares_from',help_text="Start stage")
-    to_stage = models.ForeignKey(Stage,on_delete=models.PROTECT,related_name='fares_to',help_text="End stage")
-    fare_amount = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        validators=[MinValueValidator(Decimal('0.00'))],
-        help_text="Fare amount for this stage combination"
+    number = models.IntegerField(unique=True,blank=True,null=True)
+    row = models.IntegerField(default=0)        # ✅ indented correctly
+    col = models.IntegerField(default=0)        # ✅ indented correctly
+    fare_amount = models.IntegerField(default=0)
+    route = models.ForeignKey(
+        Route,
+        on_delete=models.CASCADE,
+        related_name='fares'
+    )
+    route_name = models.CharField(
+        max_length=100,
+        help_text="Denormalized route name snapshot",
+        blank=True,null=True
     )
     company = models.ForeignKey(
         'Company',
         on_delete=models.CASCADE,
         related_name='fares'
     )
-    
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -334,23 +383,22 @@ class Fare(models.Model):
         blank=True,
         related_name='fares_updated'
     )
-    
+
     class Meta:
-        # db_table = 'fare'
         db_table = 'mdb_fare'
-        unique_together = ['route', 'from_stage', 'to_stage']
+        unique_together = ['route', 'row', 'col']
         indexes = [
-            models.Index(fields=['route', 'from_stage', 'to_stage']),
+            models.Index(fields=['route', 'row', 'col']),
             models.Index(fields=['company']),
         ]
-    
+
     def __str__(self):
-        return f"{self.route.route_code}: {self.from_stage.stage_name} → {self.to_stage.stage_name} = ₹{self.fare_amount}"
+        return f"{self.route_name} - Row:{self.row} Col:{self.col} = {self.fare_amount}"
 
 
 class RouteBusType(models.Model):
     """Route-BusType mapping (routes can have multiple allowed bus types)"""
-    route = models.ForeignKey(Route,on_delete=models.CASCADE,related_name='allowed_bus_types')
+    route = models.ForeignKey(Route,on_delete=models.CASCADE,related_name='route_bus_types')
     bus_type = models.ForeignKey(BusType,on_delete=models.PROTECT,related_name='assigned_routes')
     company = models.ForeignKey('Company',on_delete=models.CASCADE,related_name='route_bus_types')
     

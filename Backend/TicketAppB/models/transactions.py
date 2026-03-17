@@ -3,16 +3,43 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator
 from django.conf import settings
-from .company import Company,Branch
+from .company import Company, Depot
+
+
+class RawDataLog(models.Model):
+    class typeChoices(models.TextChoices):
+        TRANSACTION = 'transaction', 'Transaction'
+        TRIP_CLOSE = 'trip_close', 'Trip Close'
+    
+    class statusChoices(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        PROCESSED = 'processed', 'Processed'
+        DUPLICATE = 'duplicate', 'Duplicate'
+        FAILED = 'failed', 'Failed'
+
+    raw_payload=models.TextField()
+    source=models.CharField(choices=typeChoices.choices, max_length=20, null=False, blank=False)
+    company_code=models.ForeignKey(Company, on_delete=models.PROTECT, related_name='raw_data', db_index=True, null=True, blank=True)
+    # Celery task only touches `pending` rows
+    status=models.CharField(choices=statusChoices.choices, max_length=20, null=False, blank=False,default=statusChoices.PENDING)
+    error_message=models.TextField(null=True, blank=True)
+    received_at=models.DateTimeField(auto_now_add=True)
+    processed_at=models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table="raw_data_log"
+        indexes=[
+            models.Index(fields=["status","received_at"]),
+        ]   
+
 
 # Transaction models (TransactionData, TripCloseData)
-
 class TransactionData(models.Model):
     # Payment Mode Choices
     class PaymentMode(models.IntegerChoices):
         CASH = 0, 'Cash'
         UPI = 1, 'UPI'
-    
+
     request_type      = models.CharField(max_length=20, null=True, blank=True)
     device_id         = models.CharField(max_length=20, null=True, blank=True)
     trip_number       = models.CharField(max_length=20, null=True, blank=True)
@@ -68,8 +95,8 @@ class TransactionData(models.Model):
         blank=True
     )
 
-    branch_code = models.ForeignKey(
-        'Branch',
+    depot_code = models.ForeignKey(
+        'Depot',
         on_delete=models.SET_NULL,
         related_name='transactions',
         null=True,
@@ -85,7 +112,7 @@ class TransactionData(models.Model):
         indexes = [
             models.Index(fields=["device_id", "ticket_date"]),
             models.Index(fields=["company_code"]),
-            models.Index(fields=["branch_code"]),
+            models.Index(fields=["depot_code"]),
         ]
         constraints = [
             models.UniqueConstraint(
@@ -133,14 +160,14 @@ class TripCloseData(models.Model):
         help_text="Company code"
     )
 
-    # Branch foreign key
-    branch_code = models.ForeignKey(
-        Branch,
+    # Depot foreign key
+    depot_code = models.ForeignKey(
+        Depot,
         on_delete=models.SET_NULL,
         related_name='trip_closes',
         null=True,
         blank=True,
-        help_text="Branch code"
+        help_text="Depot code"
     )
     
     schedule = models.IntegerField(
@@ -396,7 +423,7 @@ class TripCloseData(models.Model):
             models.Index(fields=["company_code"]),
             models.Index(fields=['start_date']),  # Date index
             models.Index(fields=['company_code', 'start_date']),  # Combined index
-            models.Index(fields=['branch_code']),  # Branch index
+            models.Index(fields=['depot_code']),  # Depot index
         ]
         
         unique_together = [

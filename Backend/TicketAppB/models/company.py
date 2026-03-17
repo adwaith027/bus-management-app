@@ -4,8 +4,7 @@ from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator
 from django.conf import settings
 
-# Company & Branch models
-
+# Company & Depot models
 class Company(models.Model):
     # Authentication Status Choices
     class AuthStatus(models.TextChoices):
@@ -58,9 +57,9 @@ class Company(models.Model):
     product_to_date = models.DateField(null=True, blank=True)
     
     # Additional License Fields
-    project_code = models.CharField(max_length=100, null=True, blank=True)
-    device_count = models.IntegerField(null=True, blank=True)
-    branch_count = models.IntegerField(null=True, blank=True)
+    device_count = models.IntegerField(default=0, null=True, blank=True)       # NoOfUPIDevice
+    depot_count = models.IntegerField(default=0, null=True, blank=True)       # NoOfDepot
+    mobile_device_count = models.IntegerField(default=2, null=True, blank=True) # NoOfMobileDevice
     
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
@@ -91,19 +90,19 @@ class Company(models.Model):
 
 
 
-class Branch(models.Model):
+class Depot(models.Model):
     company = models.ForeignKey(
         Company,
         on_delete=models.CASCADE,
-        related_name='branches'
+        related_name='depots'
     )
 
-    branch_code = models.CharField(
+    depot_code = models.CharField(
         max_length=50,
         unique=True
     )
 
-    branch_name = models.CharField(
+    depot_name = models.CharField(
         max_length=100
     )
 
@@ -112,13 +111,13 @@ class Branch(models.Model):
     state = models.CharField(max_length=100)
     zip_code = models.CharField(max_length=20)
 
-    # who created this branch
+    # who created this depot
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='branches_created'
+        related_name='depots_created'
     )
 
     is_active = models.BooleanField(default=True)
@@ -127,14 +126,14 @@ class Branch(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'branch'
-        unique_together = ['company', 'branch_code']
+        db_table = 'depot'
+        unique_together = ['company', 'depot_code']
         indexes = [
-            models.Index(fields=['company', 'branch_code']),
+            models.Index(fields=['company', 'depot_code']),
         ]
 
     def __str__(self):
-        return f"{self.branch_name} ({self.company.company_name})"
+        return f"{self.depot_name} ({self.company.company_name})"
 
 
 class Dealer(models.Model):
