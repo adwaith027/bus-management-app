@@ -51,35 +51,102 @@ export default function CompanyDashboard() {
   const formatActiveTotal = (a, t) =>
     a === null || t === null ? "--" : `${formatNumber(a)}/${formatNumber(t)}`;
 
+  const totalDailyCollection =
+    (metrics.collections.daily_cash || 0) + (metrics.collections.daily_upi || 0);
+
+  const selectedDateLabel = selectedDate
+    ? new Date(`${selectedDate}T00:00:00`).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+    : "";
+
   // ---- UI ----
   return (
-    <div className="min-h-screen bg-slate-100 animate-fade-in">
-      <div className="max-w-[1400px] mx-auto p-4">
-        {/* HEADER */}
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between bg-white rounded-xl shadow-sm border border-slate-200 p-5 mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Company Dashboard</h1>
-            <p className="text-slate-500 text-sm">Welcome back, {username}</p>
-          </div>
+    <div className="min-h-screen bg-slate-50 animate-fade-in">
+      <div className="relative overflow-hidden">
+        <div className="pointer-events-none absolute -top-24 left-1/2 h-72 w-[720px] -translate-x-1/2 rounded-full bg-gradient-to-r from-amber-100 via-sky-100 to-emerald-100 blur-3xl" />
+      </div>
 
-          <label className="flex items-center gap-2 text-sm text-slate-600 bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg shadow-sm">
-            <i className="fas fa-calendar-alt text-slate-500"></i>
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              max={new Date().toISOString().split("T")[0]}
-              className="bg-transparent outline-none text-slate-700 cursor-pointer"
-            />
-          </label>
+      <div className="max-w-[1400px] mx-auto p-3 sm:p-4 lg:p-6 relative">
+        {/* HEADER */}
+        <div className="relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm backdrop-blur">
+          <div className="absolute inset-0 bg-gradient-to-r from-white via-white to-slate-50" />
+          <div className="relative p-4 sm:p-5 lg:p-6 flex flex-col gap-5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                  {storedUser.company_name} Dashboard
+                </p>
+                <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">
+                  Company Overview
+                </h1>
+                <p className="text-slate-500 text-sm mt-1">
+                  Welcome back, {username}. Here’s your operational pulse for{" "}
+                  <span className="font-semibold text-slate-700">{selectedDateLabel}</span>.
+                </p>
+              </div>
+
+              <label className="flex items-center gap-2 text-sm text-slate-600 bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg shadow-sm w-fit">
+                <i className="fas fa-calendar-alt text-slate-500"></i>
+                <input
+                  aria-label="Select date"
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  max={new Date().toISOString().split("T")[0]}
+                  className="bg-transparent outline-none text-slate-700 cursor-pointer"
+                />
+              </label>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                  Daily Collection
+                </p>
+                <p className="text-xl font-bold text-slate-900 mt-2">
+                  {loading ? "..." : formatCurrency(totalDailyCollection)}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">Cash + UPI combined</p>
+              </div>
+              <div className="rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                  Monthly Till Date
+                </p>
+                <p className="text-xl font-bold text-slate-900 mt-2">
+                  {loading ? "..." : formatCurrency(metrics.collections.monthly_total)}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">Revenue trend snapshot</p>
+              </div>
+              <div className="rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                  Total Passengers
+                </p>
+                <p className="text-xl font-bold text-slate-900 mt-2">
+                  {loading ? "..." : formatNumber(metrics.operations.total_passengers)}
+                </p>
+                <p className="text-xs text-slate-500 mt-1">Across all routes</p>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* ===== COLLECTIONS ===== */}
-        <div className="flex items-center gap-2 mb-3">
-          <i className="fas fa-wallet text-indigo-600"></i>
-          <h2 className="text-lg font-semibold text-slate-800">Collection Overview</h2>
-        </div>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
+        <div className="mt-8 rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm p-4 sm:p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+              <i className="fas fa-wallet"></i>
+            </span>
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Collection Overview</h2>
+              <p className="text-xs text-slate-500">
+                Daily and month-to-date revenue distribution
+              </p>
+            </div>
+          </div>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <MetricCard
             title="Total Daily Collection"
             value={
@@ -115,14 +182,21 @@ export default function CompanyDashboard() {
             color="#f59e0b"
             loading={loading}
           />
+          </div>
         </div>
 
         {/* ===== OPERATIONS ===== */}
-        <div className="flex items-center gap-2 mb-3">
-          <i className="fas fa-bus text-indigo-600"></i>
-          <h2 className="text-lg font-semibold text-slate-800">Operations Overview</h2>
-        </div>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
+        <div className="mt-8 rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm p-4 sm:p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+              <i className="fas fa-bus"></i>
+            </span>
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Operations Overview</h2>
+              <p className="text-xs text-slate-500">Fleet activity and route performance</p>
+            </div>
+          </div>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <MetricCard
             title="Buses (Active/Total)"
             value={
@@ -172,14 +246,23 @@ export default function CompanyDashboard() {
             color="#3b82f6"
             loading={loading}
           />
+          </div>
         </div>
 
         {/* ===== SETTLEMENTS ===== */}
-        <div className="flex items-center gap-2 mb-3">
-          <i className="fas fa-file-invoice-dollar text-indigo-600"></i>
-          <h2 className="text-lg font-semibold text-slate-800">Settlements & Verification</h2>
-        </div>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
+        <div className="mt-8 rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm p-4 sm:p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+              <i className="fas fa-file-invoice-dollar"></i>
+            </span>
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">
+                Settlements & Verification
+              </h2>
+              <p className="text-xs text-slate-500">Transaction status and reconciliation</p>
+            </div>
+          </div>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <MetricCard
             title="Total Transactions"
             value={loading ? "..." : formatNumber(metrics.settlements.total_transactions)}
@@ -208,6 +291,7 @@ export default function CompanyDashboard() {
             color="#ef4444"
             loading={loading}
           />
+          </div>
         </div>
       </div>
     </div>

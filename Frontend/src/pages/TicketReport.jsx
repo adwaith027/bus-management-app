@@ -695,9 +695,9 @@ export default function TicketReport() {
                 <th className="px-4 py-3 font-semibold">Date</th>
                 <th className="px-4 py-3 font-semibold">Time</th>
                 <th className="px-4 py-3 font-semibold">Branch</th>
-                <th className="px-4 py-3 font-semibold">Total Tickets</th>
+                <th className="px-4 py-3 font-semibold">Total Count</th>
                 <th className="px-4 py-3 font-semibold">Amount</th>
-                <th className="px-4 py-3 font-semibold">Payment</th>
+                <th className="px-4 py-3 font-semibold">Payment Type</th>
                 <th className="px-4 py-3 font-semibold">Info</th>
               </tr>
             </thead>

@@ -17,8 +17,32 @@ export default function Sidebar() {
       await api.post(`${BASE_URL}/logout/`);
     } catch {}
     finally {
-      localStorage.clear();
+      localStorage.removeItem("user");
+      localStorage.removeItem("authToken");
+      localStorage.removeItem("refreshToken");
+      localStorage.removeItem("userRole");
       navigate("/login");
+    }
+  };
+
+  const handleReleaseDevice = async () => {
+    const deviceUid = localStorage.getItem("device_uid");
+    if (!deviceUid) {
+      window.alert("No device UID found for release.");
+      return;
+    }
+
+    try {
+      await api.post(`${BASE_URL}/release-device/`, { device_uid: deviceUid });
+      localStorage.removeItem("device_uid");
+      localStorage.removeItem("user");
+      localStorage.removeItem("authToken");
+      localStorage.removeItem("refreshToken");
+      localStorage.removeItem("userRole");
+      navigate("/login");
+    } catch (err) {
+      const message = err.response?.data?.message || err.response?.data?.error || "Failed to release device";
+      window.alert(message);
     }
   };
 
@@ -200,6 +224,28 @@ export default function Sidebar() {
                     {!isCollapsed && <span>Users</span>}
                   </NavLink>
                 </li>
+
+                <li>
+                  <NavLink
+                    to="/dashboard/dealers"
+                    className={({ isActive }) => linkClass(isActive)}
+                    onClick={() => setIsOpen(false)}
+                  >
+                    <i className="fa-solid fa-handshake w-5 text-center text-lg"></i>
+                    {!isCollapsed && <span>Dealers</span>}
+                  </NavLink>
+                </li>
+
+                <li>
+                  <NavLink
+                    to="/dashboard/device-approvals"
+                    className={({ isActive }) => linkClass(isActive)}
+                    onClick={() => setIsOpen(false)}
+                  >
+                    <i className="fa-solid fa-mobile-screen-button w-5 text-center text-lg"></i>
+                    {!isCollapsed && <span>Device Approvals</span>}
+                  </NavLink>
+                </li>
               </>
             )}
 
@@ -291,6 +337,36 @@ export default function Sidebar() {
                 </li>
               </>
             )}
+
+            {/* {role === "dealer_user" && (
+              <>
+                <li>
+                  <NavLink
+                    to="/dashboard/dealer-dashboard"
+                    className={({ isActive }) => linkClass(isActive)}
+                    onClick={() => setIsOpen(false)}
+                  >
+                    <i className="fa-solid fa-clipboard-list w-5 text-center text-lg"></i>
+                    {!isCollapsed && <span>Dealer Dashboard</span>}
+                  </NavLink>
+                </li>
+              </>
+            )} */}
+
+            {/* {role === "executive_user" && (
+              <>
+                <li>
+                  <NavLink
+                    to="/dashboard/executive-dashboard"
+                    className={({ isActive }) => linkClass(isActive)}
+                    onClick={() => setIsOpen(false)}
+                  >
+                    <i className="fa-solid fa-briefcase w-5 text-center text-lg"></i>
+                    {!isCollapsed && <span>Executive Dashboard</span>}
+                  </NavLink>
+                </li>
+              </>
+            )} */}
           </ul>
         </nav>
 
@@ -317,6 +393,19 @@ export default function Sidebar() {
           </div>
 
           {/* Logout */}
+          {role !== "superadmin" && (
+            <button style={{cursor:"pointer"}}
+              onClick={handleReleaseDevice}
+              className={`mt-2 w-full flex items-center px-3 py-2 rounded-lg transition
+                text-slate-600 hover:bg-amber-50 hover:text-amber-700
+                ${isCollapsed ? "lg:justify-center space-x-0" : "space-x-3"}
+              `}
+            >
+              <i className="fa-solid fa-link-slash w-5 text-center"></i>
+              {!isCollapsed && <span className="text-sm font-medium">Release Device</span>}
+            </button>
+          )}
+
           <button style={{cursor:"pointer"}}
             onClick={handleLogout}
             className={`mt-2 w-full flex items-center px-3 py-2 rounded-lg transition

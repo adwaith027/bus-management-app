@@ -55,7 +55,11 @@ export default function ProtectedRoute() {
       // Company admin restrictions: cannot access superadmin pages
       if (userRole === 'company_admin') {
         if (path.includes('/companies') || 
-            path.includes('/users')) {
+            path.includes('/users') ||
+            path.includes('/device-approvals') ||
+            path.includes('/dealers') ||
+            path.includes('/executive-dashboard') ||
+            path.includes('/dealer-dashboard')) {
           window.alert('Access Denied: This page is only for System Admins');
           navigate('/dashboard', { replace: true });
         }
@@ -64,10 +68,43 @@ export default function ProtectedRoute() {
       if (userRole === 'user') {
         if (path.includes('/companies') || 
             path.includes('/users') ||
+            path.includes('/device-approvals') ||
             path.includes('/branches') || 
             path.includes('/ticket-report') || 
-            path.includes('/trip-close-report')) {
+            path.includes('/trip-close-report') ||
+            path.includes('/dealers') ||
+            path.includes('/dealer-dashboard') ||
+            path.includes('/executive-dashboard')) {
           window.alert('Access Denied: This page is only for Administrators');
+          navigate('/dashboard', { replace: true });
+        }
+      }
+
+      if (userRole === 'executive_user') {
+        if (path.includes('/companies') || 
+            path.includes('/users') ||
+            path.includes('/device-approvals') ||
+            path.includes('/branches') || 
+            path.includes('/ticket-report') || 
+            path.includes('/trip-close-report') ||
+            path.includes('/dealers') ||
+            path.includes('/dealer-dashboard')) {
+          window.alert('Access Denied: This page is only for Administrators');
+          navigate('/dashboard', { replace: true });
+        }
+      }
+
+      if (userRole === 'dealer_user') {
+        if (path.includes('/companies') || 
+            path.includes('/users') ||
+            path.includes('/device-approvals') ||
+            path.includes('/branches') || 
+            path.includes('/ticket-report') || 
+            path.includes('/trip-close-report') ||
+            path.includes('/settlements') ||
+            path.includes('/dealers') ||
+            path.includes('/executive-dashboard')) {
+          window.alert('Access Denied: This page is only for Dealers');
           navigate('/dashboard', { replace: true });
         }
       }

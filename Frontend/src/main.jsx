@@ -16,6 +16,10 @@ import TicketReport from './pages/TicketReport'
 import TripcloseReport from './pages/TripcloseReport'
 import BranchListing from './pages/BranchListing'
 import SettlementPage from './pages/SettlementPage'
+import DealerManagement from './pages/DealerManagement'
+import DealerDashboard from './pages/DealerDashboard'
+import ExecutiveDashboard from './pages/ExecutiveDashboard'
+import DeviceApprovals from './pages/DeviceApprovals'
 import NotFound from './components/NotFound'
 
 const router = createBrowserRouter([
@@ -69,6 +73,22 @@ const router = createBrowserRouter([
           {
             path: 'settlements',
             element: <SettlementPage />
+          },
+          {
+            path: 'dealers',
+            element: <DealerManagement />
+          },
+          {
+            path: 'device-approvals',
+            element: <DeviceApprovals />
+          },
+          {
+            path: 'dealer-dashboard',
+            element: <DealerDashboard />
+          },
+          {
+            path: 'executive-dashboard',
+            element: <ExecutiveDashboard />
           },
         ]
       }

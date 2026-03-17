@@ -39,7 +39,8 @@ export default function Login() {
     try {
       const login_data = { 
         username: trimmedUsername, 
-        password: trimmedPassword 
+        password: trimmedPassword,
+        device_uid: localStorage.getItem("device_uid") || null,
       };
 
       // API CALL
@@ -68,15 +69,34 @@ export default function Login() {
       
     } catch (err) {
       console.error('Login error:', err);
+      const backendCode = err.response?.data?.error_code;
+      const backendMessage = err.response?.data?.message || err.response?.data?.error;
       
       // ERROR HANDLING
-      if (err.response) {
+      if (backendCode === "DEVICE_REGISTRATION_REQUIRED") {
+        const generatedUid = err.response?.data?.details?.device_uid;
+        if (generatedUid) {
+          localStorage.setItem("device_uid", generatedUid);
+          setError(backendMessage || "Device registered. Wait for superadmin approval and retry.");
+        } else {
+          setError("Device registration failed. Backend did not return device UID.");
+        }
+      } else if (backendCode === "DEVICE_UNAUTHORIZED") {
+        setError(backendMessage || "Login from this device is unauthorized.");
+      } else if (backendCode === "DEVICE_UID_ALREADY_BOUND") {
+        setError(backendMessage || "This device is linked to another user. Release this device before trying again.");
+      } else if (backendCode === "DEVICE_UID_INVALID_OR_RELEASED") {
+        setError(backendMessage || "This device UID was released or is invalid. Retry login to re-register this device.");
+      } else if (err.response) {
         switch (err.response.status) {
           case 401:
-            setError('Invalid username or password');
+            setError(backendMessage || 'Invalid username or password');
+            break;
+          case 403:
+            setError(backendMessage || 'Account is inactive. Contact administrator.');
             break;
           case 400:
-            setError(err.response.data?.error || 'Invalid input. Please check your credentials.');
+            setError(backendMessage || 'Invalid input. Please check your credentials.');
             break;
           case 429:
             setError('Too many login attempts. Please try again later.');
@@ -85,7 +105,7 @@ export default function Login() {
             setError('Server error. Please try again later.');
             break;
           default:
-            setError(err.response.data?.error || 'Login failed. Please try again.');
+            setError(backendMessage || 'Login failed. Please try again.');
         }
       } else if (err.request) {
         setError('Network error. Please check your connection.');
