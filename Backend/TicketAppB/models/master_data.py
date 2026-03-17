@@ -31,7 +31,8 @@ class BusType(models.Model):
     )
     
     class Meta:
-        db_table = 'bus_type'
+        # db_table = 'bus_type'
+        db_table = 'mdb_bus_type'
         unique_together = ['company', 'bustype_code']
         indexes = [
             models.Index(fields=['company', 'bustype_code']),
@@ -66,7 +67,8 @@ class EmployeeType(models.Model):
     )
     
     class Meta:
-        db_table = 'employee_type'
+        # db_table = 'employee_type'
+        db_table = 'mdb_employee_type'
         unique_together = ['company', 'emp_type_code']
         indexes = [
             models.Index(fields=['company', 'emp_type_code']),
@@ -104,7 +106,8 @@ class Employee(models.Model):
     )
     
     class Meta:
-        db_table = 'employee'
+        # db_table = 'employee'
+        db_table = 'mdb_employee'
         unique_together = ['company', 'employee_code']
         indexes = [
             models.Index(fields=['company', 'employee_code']),
@@ -140,7 +143,8 @@ class Currency(models.Model):
     )
     
     class Meta:
-        db_table = 'currency'
+        # db_table = 'currency'
+        db_table = 'mdb_currency'
         verbose_name_plural = 'Currencies'
         unique_together = ['company', 'currency']
         indexes = [
@@ -176,7 +180,8 @@ class Stage(models.Model):
     )
     
     class Meta:
-        db_table = 'stage'
+        # db_table = 'stage'
+        db_table = 'mdb_stage'
         unique_together = ['company', 'stage_code']
         indexes = [
             models.Index(fields=['company', 'stage_code']),
@@ -231,7 +236,8 @@ class Route(models.Model):
     )
     
     class Meta:
-        db_table = 'route'
+        # db_table = 'route'
+        db_table = 'mdb_route'
         unique_together = ['company', 'route_code']
         indexes = [
             models.Index(fields=['company', 'route_code']),
@@ -279,7 +285,8 @@ class RouteStage(models.Model):
     )
     
     class Meta:
-        db_table = 'route_stage'
+        # db_table = 'route_stage'
+        db_table = 'mdb_route_stage'
         unique_together = [
             ['route', 'stage'],
             ['route', 'sequence_no']
@@ -329,7 +336,8 @@ class Fare(models.Model):
     )
     
     class Meta:
-        db_table = 'fare'
+        # db_table = 'fare'
+        db_table = 'mdb_fare'
         unique_together = ['route', 'from_stage', 'to_stage']
         indexes = [
             models.Index(fields=['route', 'from_stage', 'to_stage']),
@@ -364,7 +372,8 @@ class RouteBusType(models.Model):
     )
     
     class Meta:
-        db_table = 'route_bus_type'
+        # db_table = 'route_bus_type'
+        db_table = 'mdb_route_bus_type'
         unique_together = ['route', 'bus_type']
         indexes = [
             models.Index(fields=['route']),
@@ -406,7 +415,8 @@ class VehicleType(models.Model):
     )
     
     class Meta:
-        db_table = 'vehicle_type'
+        # db_table = 'vehicle_type'
+        db_table = 'mdb_vehicle_type'
         unique_together = ['company', 'bus_reg_num']
         indexes = [
             models.Index(fields=['company', 'bus_reg_num']),
@@ -548,7 +558,8 @@ class Settings(models.Model):
     )
 
     class Meta:
-        db_table = 'settings'
+        # db_table = 'settings'
+        db_table = 'mdb_settings'
         verbose_name_plural = 'Settings'
 
     def __str__(self):

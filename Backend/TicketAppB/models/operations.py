@@ -48,7 +48,8 @@ class ExpenseMaster(models.Model):
     )
     
     class Meta:
-        db_table = 'expense_master'
+        # db_table = 'expense_master'
+        db_table = 'mdb_expense_master'
         unique_together = ['company', 'expense_code']
         indexes = [
             models.Index(fields=['company', 'expense_code']),
@@ -128,7 +129,8 @@ class Expense(models.Model):
     )
     
     class Meta:
-        db_table = 'expense'
+        # db_table = 'expense'
+        db_table = 'mdb_expense'
         indexes = [
             models.Index(fields=['company', 'date']),
             models.Index(fields=['palmtec_id', 'date']),
@@ -194,7 +196,8 @@ class CrewAssignment(models.Model):
     )
     
     class Meta:
-        db_table = 'crew_assignment'
+        # db_table = 'crew_assignment'
+        db_table = 'mdb_crew_assignment'
         indexes = [
             models.Index(fields=['company', 'vehicle']),
             models.Index(fields=['driver']),
@@ -255,7 +258,8 @@ class InspectorDetails(models.Model):
     )
     
     class Meta:
-        db_table = 'inspector_details'
+        # db_table = 'inspector_details'
+        db_table = 'mdb_inspector_details'
         indexes = [
             models.Index(fields=['company', 'date']),
             models.Index(fields=['tripmaster_ref_id']),

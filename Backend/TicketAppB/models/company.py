@@ -135,3 +135,113 @@ class Branch(models.Model):
 
     def __str__(self):
         return f"{self.branch_name} ({self.company.company_name})"
+
+
+class Dealer(models.Model):
+    dealer_code = models.CharField(max_length=50, unique=True)
+    dealer_name = models.CharField(max_length=150)
+    contact_person = models.CharField(max_length=100)
+    contact_number = models.CharField(max_length=20)
+    email = models.EmailField(unique=True)
+    address = models.TextField()
+    city = models.CharField(max_length=100)
+    state = models.CharField(max_length=100)
+    zip_code = models.CharField(max_length=20)
+    gst_number = models.CharField(max_length=20, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='dealers_created'
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'dealer'
+        indexes = [
+            models.Index(fields=['dealer_code']),
+            models.Index(fields=['dealer_name']),
+            models.Index(fields=['is_active']),
+        ]
+
+    def __str__(self):
+        return f"{self.dealer_code} - {self.dealer_name}"
+
+
+class DealerCustomerMapping(models.Model):
+    dealer = models.ForeignKey(
+        Dealer,
+        on_delete=models.CASCADE,
+        related_name='company_mappings'
+    )
+    company = models.ForeignKey(
+        Company,
+        on_delete=models.CASCADE,
+        related_name='dealer_mappings'
+    )
+    is_active = models.BooleanField(default=True)
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='dealer_company_mappings_created'
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'dealer_customer_mapping'
+        unique_together = ['dealer', 'company']
+        indexes = [
+            models.Index(fields=['dealer', 'company']),
+            models.Index(fields=['company']),
+            models.Index(fields=['is_active']),
+        ]
+
+    def __str__(self):
+        return f"{self.dealer.dealer_name} -> {self.company.company_name}"
+
+
+class ExecutiveCompanyMapping(models.Model):
+    executive_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='executive_company_mappings'
+    )
+    company = models.ForeignKey(
+        Company,
+        on_delete=models.CASCADE,
+        related_name='executive_mappings'
+    )
+    is_active = models.BooleanField(default=True)
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='executive_company_mappings_created'
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'executive_company_mapping'
+        unique_together = ['executive_user', 'company']
+        indexes = [
+            models.Index(fields=['executive_user', 'company']),
+            models.Index(fields=['company']),
+            models.Index(fields=['is_active']),
+        ]
+
+    def __str__(self):
+        return f"{self.executive_user.username} -> {self.company.company_name}"
