@@ -1,16 +1,6 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 
 const Modal = ({ isOpen, onClose, title, children }) => {
-  // Prevent background scrolling when modal is open
-  useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'unset';
-    }
-    return () => { document.body.style.overflow = 'unset'; };
-  }, [isOpen]);
-
   if (!isOpen) return null;
 
   return (
@@ -18,13 +8,13 @@ const Modal = ({ isOpen, onClose, title, children }) => {
       
       {/* Backdrop with Blur */}
       <div 
-        className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity duration-300"
+        className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity duration-300 pointer-events-none"
         onClick={onClose}
       ></div>
 
       {/* Modal Content */}
       <div 
-        className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl flex flex-col max-h-[90vh] animate-modal-pop border border-slate-100"
+        className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl flex flex-col max-h-[90vh] animate-modal-pop border border-slate-100 pointer-events-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

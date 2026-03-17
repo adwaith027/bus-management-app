@@ -2,16 +2,25 @@ import { useNavigate } from 'react-router-dom';
 import { useState,useEffect } from "react";
 
 const NotFound = () => {
+
   // Define the number of seconds to wait before redirection
   const [seconds, setSeconds] = useState(3); 
+
   // Get the navigation function from useNavigate hook
   const navigate = useNavigate(); 
 
+  const user=localStorage.getItem('user');
+  
   useEffect(() => {
     // redirect to login if timeout reached 0
     if (seconds === 0) {
+      // If user is logged in, redirect to dashboard
+      if(user){
+        navigate('/dashboard');
+      }else{
         navigate('/login');
         return;
+      }
     }
 
     const countdown = setInterval(() => {
@@ -31,7 +40,7 @@ const NotFound = () => {
             <p className="text-lg font-medium text-gray-700 mb-2">Page Not Found</p>
 
             <p className="text-sm text-gray-500">
-            Redirecting to login in
+            Redirecting in
             <span className="font-semibold text-gray-700"> {seconds} </span>
             seconds…
             </p>

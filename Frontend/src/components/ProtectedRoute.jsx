@@ -1,6 +1,6 @@
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import api, { BASE_URL } from '../assets/js/axiosConfig';
+import api, { BASE_URL, refreshApi } from '../assets/js/axiosConfig';  // imported refreshApi
 import {BarLoader,BeatLoader,BounceLoader,CircleLoader,ClimbingBoxLoader,ClipLoader,ClockLoader,DotLoader,FadeLoader,GridLoader,HashLoader,MoonLoader,PacmanLoader,PropagateLoader,PulseLoader,PuffLoader,RingLoader,RiseLoader,RotateLoader,ScaleLoader,SkewLoader,SquareLoader,SyncLoader} from "react-spinners";
 
 export default function ProtectedRoute() {
@@ -17,11 +17,15 @@ export default function ProtectedRoute() {
 
   const verifyAuthFromBackend = async () => {
     try {
-      const response = await api.get(`${BASE_URL}/verify-auth/`);
+      // Step 1: Refresh token first using refreshApi (no interceptor loops)
+      // If this fails, the user's session is truly expired → go to login
+      await refreshApi.post(`${BASE_URL}/token/refresh`);
+
+      // Step 2: Now verify auth with a guaranteed fresh token
+      const response = await api.get(`${BASE_URL}/verify-auth`);
       if (response.data.authenticated) {
         setIsAuthenticated(true);
         setUserRole(response.data.user.role);
-        // Update localStorage with verified user data
         localStorage.setItem('user', JSON.stringify(response.data.user));
       } else {
         setIsAuthenticated(false);
@@ -41,12 +45,14 @@ export default function ProtectedRoute() {
   useEffect(() => {
     if (!loading && isAuthenticated && userRole) {
       const path = location.pathname;
+      const isMasterDataPath = path.includes('/master-data/');
       
       // Superadmin restrictions: cannot access company admin pages
       if (userRole === 'superadmin') {
-        if (path.includes('/branches') || 
+        if (path.includes('/depots') || 
             path.includes('/ticket-report') || 
-            path.includes('/trip-close-report')) {
+            path.includes('/trip-close-report') ||
+            isMasterDataPath) {
           window.alert('Access Denied: This page is only for Company Admins');
           navigate('/dashboard', { replace: true });
         }
@@ -69,9 +75,10 @@ export default function ProtectedRoute() {
         if (path.includes('/companies') || 
             path.includes('/users') ||
             path.includes('/device-approvals') ||
-            path.includes('/branches') || 
+            path.includes('/depots') || 
             path.includes('/ticket-report') || 
             path.includes('/trip-close-report') ||
+            isMasterDataPath ||
             path.includes('/dealers') ||
             path.includes('/dealer-dashboard') ||
             path.includes('/executive-dashboard')) {
@@ -84,9 +91,10 @@ export default function ProtectedRoute() {
         if (path.includes('/companies') || 
             path.includes('/users') ||
             path.includes('/device-approvals') ||
-            path.includes('/branches') || 
+            path.includes('/depots') || 
             path.includes('/ticket-report') || 
             path.includes('/trip-close-report') ||
+            isMasterDataPath ||
             path.includes('/dealers') ||
             path.includes('/dealer-dashboard')) {
           window.alert('Access Denied: This page is only for Administrators');
@@ -98,9 +106,10 @@ export default function ProtectedRoute() {
         if (path.includes('/companies') || 
             path.includes('/users') ||
             path.includes('/device-approvals') ||
-            path.includes('/branches') || 
+            path.includes('/depots') || 
             path.includes('/ticket-report') || 
             path.includes('/trip-close-report') ||
+            isMasterDataPath ||
             path.includes('/settlements') ||
             path.includes('/dealers') ||
             path.includes('/executive-dashboard')) {
@@ -121,10 +130,6 @@ export default function ProtectedRoute() {
         height: '100vh',
         fontSize: '18px'
       }}>
-        {/* Loading... */}
-        {/* <ClimbingBoxLoader /> */}
-        {/* <GridLoader /> */}
-        {/* <HashLoader /> */}
         <PropagateLoader /> 
       </div>
     );
