@@ -14,13 +14,22 @@ import CompanyListing from './pages/CompanyListing'
 import UserListing from './pages/UserListing'
 import TicketReport from './pages/TicketReport'
 import TripcloseReport from './pages/TripcloseReport'
-import BranchListing from './pages/BranchListing'
+import DepotListing from './pages/DepotListing'
 import SettlementPage from './pages/SettlementPage'
 import DealerManagement from './pages/DealerManagement'
-import DealerDashboard from './pages/DealerDashboard'
-import ExecutiveDashboard from './pages/ExecutiveDashboard'
 import DeviceApprovals from './pages/DeviceApprovals'
 import NotFound from './components/NotFound'
+import MdbImport from './pages/MdbImport'
+import BusTypeListing from './pages/BusTypeListing'
+import EmployeeTypeListing from './pages/EmployeeTypeListing'
+import StageListing from './pages/StageListing'
+import CurrencyListing from './pages/CurrencyListing'
+import EmployeeListing from './pages/EmployeeListing'
+import VehicleListing from './pages/VehicleListing'
+import RouteListing from './pages/RouteListing'
+import CrewAssignmentListing from './pages/CrewAssignmentListing'
+import FareEditor from './pages/FareEditor'
+import SettingsPage from './pages/SettingsPage'
 
 const router = createBrowserRouter([
   {
@@ -59,8 +68,8 @@ const router = createBrowserRouter([
             element: <UserListing />
           },
           {
-            path: 'branches',
-            element: <BranchListing />
+            path: 'depots',
+            element: <DepotListing />
           },
           {
             path: 'ticket-report',
@@ -83,12 +92,48 @@ const router = createBrowserRouter([
             element: <DeviceApprovals />
           },
           {
-            path: 'dealer-dashboard',
-            element: <DealerDashboard />
+            path: 'data-import',
+            element: <MdbImport/>
           },
           {
-            path: 'executive-dashboard',
-            element: <ExecutiveDashboard />
+            path: 'master-data/bus-types',
+            element: <BusTypeListing />
+          },
+          {
+            path: 'master-data/employee-types',
+            element: <EmployeeTypeListing />
+          },
+          {
+            path: 'master-data/stages',
+            element: <StageListing />
+          },
+          {
+            path: 'master-data/currencies',
+            element: <CurrencyListing />
+          },
+          {
+            path: 'master-data/employees',
+            element: <EmployeeListing />
+          },
+          {
+            path: 'master-data/vehicles',
+            element: <VehicleListing />
+          },
+          {
+            path: 'master-data/routes',
+            element: <RouteListing />
+          },
+          {
+            path: 'master-data/fares',
+            element: <FareEditor />
+          },
+          {
+            path: 'master-data/crew-assignments',
+            element: <CrewAssignmentListing />
+          },
+          {
+            path: 'master-data/settings',
+            element: <SettingsPage />
           },
         ]
       }
