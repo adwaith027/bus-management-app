@@ -20,7 +20,7 @@ export default function AdminHome() {
   const fetchAdminData = async () => {
     try {
       setLoading(true);
-      const response = await api.get(`${BASE_URL}/get_admin_data/`);
+      const response = await api.get(`${BASE_URL}/get_admin_data`);
       if (response.data.message === "Success") {
         setSummary(response.data.data);
       }

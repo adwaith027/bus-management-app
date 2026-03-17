@@ -55,7 +55,7 @@ export default function Signup() {
       };
 
       // API CALL
-      const response = await api.post(`${BASE_URL}/signup/`, signup_data);
+      const response = await api.post(`${BASE_URL}/signup`, signup_data);
 
       setMessage(response.data.message || 'Account created successfully!');
       

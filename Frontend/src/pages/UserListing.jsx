@@ -28,7 +28,7 @@ export default function UserListing() {
 
   const handleLogout = async () => {
       try {
-        await api.post(`${BASE_URL}/logout/`);
+        await api.post(`${BASE_URL}/logout`);
       } catch {}
       finally {
         localStorage.removeItem("user");
@@ -58,7 +58,7 @@ export default function UserListing() {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const response = await api.get(`${BASE_URL}/get_users/`);
+      const response = await api.get(`${BASE_URL}/get_users`);
       setUsers(response.data.data || []);
     } catch (err) {
       console.error("Error fetching users:", err);
@@ -69,7 +69,7 @@ export default function UserListing() {
 
   const fetchCompanies = async () => {
     try {
-      const response = await api.get(`${BASE_URL}/customer-data/`);
+      const response = await api.get(`${BASE_URL}/customer-data`);
       setCompanies(response.data?.data || []); 
     } catch (err) {
       console.error("Error fetching companies:", err);
@@ -79,7 +79,7 @@ export default function UserListing() {
 
   const fetchExecutiveMappings = async () => {
     try {
-      const response = await api.get(`${BASE_URL}/executive-mappings/`);
+      const response = await api.get(`${BASE_URL}/executive-mappings`);
       setExecutiveMappings(response.data?.data || []);
     } catch (err) {
       console.error("Error fetching executive mappings:", err);
@@ -173,7 +173,7 @@ export default function UserListing() {
   const handleCreateExecutiveMapping = async (e) => {
     e.preventDefault();
     try {
-      const response = await api.post(`${BASE_URL}/create-executive-mapping/`, executiveMappingForm);
+      const response = await api.post(`${BASE_URL}/create-executive-mapping`, executiveMappingForm);
       if (response?.status === 201) {
         window.alert(response.data.message || 'Mapping created');
         setExecutiveMappingForm({ executive_user: '', company: '', is_active: true });
@@ -187,7 +187,7 @@ export default function UserListing() {
 
   const handleToggleExecutiveMapping = async (mapping) => {
     try {
-      const response = await api.put(`${BASE_URL}/update-executive-mapping/${mapping.id}/`, {
+      const response = await api.put(`${BASE_URL}/update-executive-mapping/${mapping.id}`, {
         is_active: !mapping.is_active
       });
       if (response?.status === 200) {
@@ -213,10 +213,10 @@ export default function UserListing() {
           role: formData.role,
           company_id: formData.company_id
         };
-        response = await api.put(`${BASE_URL}/update_user/${editingUser.id}/`, updateData);
+        response = await api.put(`${BASE_URL}/update_user/${editingUser.id}`, updateData);
       } else if (modalMode === 'create') {
         // Create new user (with password)
-        response = await api.post(`${BASE_URL}/create_user/`, formData);
+        response = await api.post(`${BASE_URL}/create_user`, formData);
       }
 
       if (response?.status === 200 || response?.status === 201) {
@@ -236,7 +236,7 @@ export default function UserListing() {
   // ========== PASSWORD CHANGE HANDLER ==========
   const handlePasswordChange = async (newPassword) => {
     try {
-      const response = await api.post(`${BASE_URL}/change_user_password/${editingUser.id}/`, {
+      const response = await api.post(`${BASE_URL}/change_user_password/${editingUser.id}`, {
         new_password: newPassword
       });
       

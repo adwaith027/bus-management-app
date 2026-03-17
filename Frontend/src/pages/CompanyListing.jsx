@@ -37,7 +37,7 @@ export default function CompanyListing() {
   const fetchCompanies = async () => {
     setLoading(true);
     try {
-      const response = await api.get(`${BASE_URL}/customer-data/`);
+      const response = await api.get(`${BASE_URL}/customer-data`);
       const companyData = response.data?.data || [];
       setCompanies(companyData);
     } catch (err) {
@@ -121,9 +121,9 @@ export default function CompanyListing() {
     try {
       let response;
       if (modalMode === 'edit') {
-        response = await api.put(`${BASE_URL}/update-company-details/${editingCompany.id}/`, formData);
+        response = await api.put(`${BASE_URL}/update-company-details/${editingCompany.id}`, formData);
       } else if (modalMode === 'create') {
-        response = await api.post(`${BASE_URL}/create-company/`, formData);
+        response = await api.post(`${BASE_URL}/create-company`, formData);
       }
 
       if (response?.status === 200 || response?.status === 201) {
@@ -154,7 +154,7 @@ export default function CompanyListing() {
   const handleRegisterLicense = async (companyId) => {
     setRegisteringLicense(prev => ({ ...prev, [companyId]: true }));
     try {
-      const response = await api.post(`${BASE_URL}/register-company-license/${companyId}/`);
+      const response = await api.post(`${BASE_URL}/register-company-license/${companyId}`);
       if (response.status === 200) {
         window.alert(response.data.message || 'Company registered successfully!');
         fetchCompanies();
@@ -170,7 +170,7 @@ export default function CompanyListing() {
  
   const handleValidateLicense = async (companyId) => {
     try {
-      const response = await api.post(`${BASE_URL}/validate-company-license/${companyId}/`);
+      const response = await api.post(`${BASE_URL}/validate-company-license/${companyId}`);
       if (response.status === 200) {
         window.alert(response.data.message || 'License validation started!');
         fetchCompanies();

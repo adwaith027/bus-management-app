@@ -12,7 +12,7 @@ export default function DealerDashboard() {
   const fetchMappedCompanies = async () => {
     setLoading(true);
     try {
-      const response = await api.get(`${BASE_URL}/dealer-dashboard/`);
+      const response = await api.get(`${BASE_URL}/dealer-dashboard`);
       setCompanies(response.data?.data || []);
     } catch (err) {
       console.error('Error fetching dealer dashboard:', err);

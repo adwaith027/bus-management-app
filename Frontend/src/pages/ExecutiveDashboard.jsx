@@ -12,7 +12,7 @@ export default function ExecutiveDashboard() {
   const fetchMappedCompanies = async () => {
     setLoading(true);
     try {
-      const response = await api.get(`${BASE_URL}/executive-dashboard/`);
+      const response = await api.get(`${BASE_URL}/executive-dashboard`);
       setCompanies(response.data?.data || []);
     } catch (err) {
       console.error('Error fetching executive dashboard:', err);

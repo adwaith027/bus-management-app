@@ -44,7 +44,7 @@ export default function Login() {
       };
 
       // API CALL
-      const response = await api.post(`${BASE_URL}/login/`, login_data);
+      const response = await api.post(`${BASE_URL}/login`, login_data);
       
       // TOKEN & USER STORAGE
       if (response.data.token || response.data.access_token) {
@@ -73,20 +73,22 @@ export default function Login() {
       const backendMessage = err.response?.data?.message || err.response?.data?.error;
       
       // ERROR HANDLING
-      if (backendCode === "DEVICE_REGISTRATION_REQUIRED") {
+      if (backendCode === "DEVICE_PENDING_APPROVAL") {
+        // First-time registration: backend returns device_uid in details — save it
+        // so subsequent login attempts automatically send it
         const generatedUid = err.response?.data?.details?.device_uid;
         if (generatedUid) {
           localStorage.setItem("device_uid", generatedUid);
-          setError(backendMessage || "Device registered. Wait for superadmin approval and retry.");
-        } else {
-          setError("Device registration failed. Backend did not return device UID.");
         }
-      } else if (backendCode === "DEVICE_UNAUTHORIZED") {
-        setError(backendMessage || "Login from this device is unauthorized.");
+        setError(backendMessage || "Device registered. Wait for superadmin approval and retry.");
+      } else if (backendCode === "DEVICE_INACTIVE") {
+        setError(backendMessage || "Device has been revoked. Contact administrator.");
       } else if (backendCode === "DEVICE_UID_ALREADY_BOUND") {
-        setError(backendMessage || "This device is linked to another user. Release this device before trying again.");
-      } else if (backendCode === "DEVICE_UID_INVALID_OR_RELEASED") {
-        setError(backendMessage || "This device UID was released or is invalid. Retry login to re-register this device.");
+        setError(backendMessage || "This device is linked to another user. Contact administrator.");
+      } else if (backendCode === "DEVICE_LIMIT_REACHED") {
+        setError(backendMessage || "Maximum active devices reached. Another device must log out first.");
+      } else if (backendCode === "DEVICE_UID_REQUIRED") {
+        setError(backendMessage || "Device ID is required for mobile login.");
       } else if (err.response) {
         switch (err.response.status) {
           case 401:

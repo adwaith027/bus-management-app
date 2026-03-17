@@ -44,9 +44,9 @@ export default function DealerManagement() {
     setLoading(true);
     try {
       const [dealersRes, companiesRes, mappingsRes] = await Promise.all([
-        api.get(`${BASE_URL}/dealers/`),
-        api.get(`${BASE_URL}/customer-data/`),
-        api.get(`${BASE_URL}/dealer-mappings/`)
+        api.get(`${BASE_URL}/dealers`),
+        api.get(`${BASE_URL}/customer-data`),
+        api.get(`${BASE_URL}/dealer-mappings`)
       ]);
       setDealers(dealersRes.data?.data || []);
       setCompanies(companiesRes.data?.data || []);
@@ -133,13 +133,13 @@ export default function DealerManagement() {
     try {
       let response;
       if (modalMode === 'create') {
-        response = await api.post(`${BASE_URL}/create-dealer/`, formData);
+        response = await api.post(`${BASE_URL}/create-dealer`, formData);
       } else {
         const updateData = { ...formData };
         delete updateData.user_username;
         delete updateData.user_email;
         delete updateData.user_password;
-        response = await api.put(`${BASE_URL}/update-dealer-details/${editingDealer.id}/`, updateData);
+        response = await api.put(`${BASE_URL}/update-dealer-details/${editingDealer.id}`, updateData);
       }
 
       if (response?.status === 200 || response?.status === 201) {
@@ -158,7 +158,7 @@ export default function DealerManagement() {
   const handleCreateMapping = async (e) => {
     e.preventDefault();
     try {
-      const response = await api.post(`${BASE_URL}/create-dealer-mapping/`, mappingForm);
+      const response = await api.post(`${BASE_URL}/create-dealer-mapping`, mappingForm);
       if (response?.status === 201) {
         window.alert(response.data.message || 'Mapping created!');
         setMappingForm({ dealer: '', company: '', is_active: true });
@@ -172,7 +172,7 @@ export default function DealerManagement() {
 
   const handleToggleMapping = async (mapping) => {
     try {
-      const response = await api.put(`${BASE_URL}/update-dealer-mapping/${mapping.id}/`, {
+      const response = await api.put(`${BASE_URL}/update-dealer-mapping/${mapping.id}`, {
         is_active: !mapping.is_active
       });
       if (response?.status === 200) {

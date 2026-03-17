@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ExcelJS from 'exceljs';
 import api, { BASE_URL } from '../assets/js/axiosConfig';
+// import cacheManager from '../utils/reportCache';
+import cacheManager from '../assets/js/reportCache';
+
 
 export default function TripcloseReport() {
   // ===== STATE MANAGEMENT =====
@@ -22,7 +25,7 @@ export default function TripcloseReport() {
     palmtecId: 'ALL',
     routeCode: 'ALL',
     tripNo: '',
-    branchCode: 'ALL'
+    depotCode: 'ALL'
   });
   
   // Applied filters
@@ -74,19 +77,52 @@ export default function TripcloseReport() {
     };
   }, []);
 
-  // Initialize with today's date and fetch data
+  // Initialize with cached date range or today's date, and fetch data
   useEffect(() => {
-    const today = getTodayDate();
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    const userId = user.id;
+
+    // Try to restore previous date range from cache
+    const cachedDateRange = cacheManager.getDateRange('tripclose', userId);
+    let startDate, endDate;
+
+    if (cachedDateRange) {
+      startDate = cachedDateRange.fromDate;
+      endDate = cachedDateRange.toDate;
+    } else {
+      // Default to today if no cached date range
+      const today = getTodayDate();
+      startDate = today;
+      endDate = today;
+    }
+
+    // Update filters with restored/default dates
     setFilters(prev => ({
       ...prev,
-      startDate: today,
-      endDate: today
+      startDate,
+      endDate
     }));
     setAppliedFilters({
-      startDate: today,
-      endDate: today
+      startDate,
+      endDate
     });
-    fetchTripData(today, today);
+
+    // Try to load from cache first
+    const cacheKey = cacheManager.getCacheKey('tripclose', userId, startDate, endDate);
+    const cachedData = cacheManager.get(cacheKey);
+
+    if (cachedData) {
+      // Load from cache
+      setTripData(cachedData);
+      if (cachedData.length > 0) {
+        latestTimestampRef.current = cachedData[0].created_at;
+      }
+      setIsPolling(true);
+      setLastUpdated(new Date());
+    } else {
+      // Fetch from API if no cache
+      fetchTripData(startDate, endDate);
+    }
   }, []);
 
   // Polling effect
@@ -169,6 +205,13 @@ export default function TripcloseReport() {
           const fetchedData = response.data.data || [];
           setTripData(fetchedData);
           
+          // Cache the data and date range
+          const user = JSON.parse(localStorage.getItem("user") || "{}");
+          const userId = user.id;
+          const cacheKey = cacheManager.getCacheKey('tripclose', userId, startDate, endDate);
+          cacheManager.set(cacheKey, fetchedData);
+          cacheManager.setDateRange('tripclose', userId, startDate, endDate);
+          
           if (fetchedData.length > 0) {
             latestTimestampRef.current = fetchedData[0].created_at;
           }
@@ -221,12 +264,12 @@ export default function TripcloseReport() {
   const getUniqueOptions = () => {
     const palmtecIds = [...new Set(tripData.map(t => t.palmtec_id).filter(Boolean))].sort();
     const routeCodes = [...new Set(tripData.map(t => t.route_code).filter(Boolean))].sort();
-    const branchCodes = [...new Set(tripData.map(t => t.branch_code).filter(Boolean))].sort();
+    const depotCodes = [...new Set(tripData.map(t => t.depot_code).filter(Boolean))].sort();
     
-    return { palmtecIds, routeCodes, branchCodes };
+    return { palmtecIds, routeCodes, depotCodes };
   };
 
-  const { palmtecIds, routeCodes, branchCodes } = getUniqueOptions();
+  const { palmtecIds, routeCodes, depotCodes } = getUniqueOptions();
 
   // ===== FILTER LOGIC =====
   const getFilteredData = () =>
@@ -239,8 +282,8 @@ export default function TripcloseReport() {
         if (item.route_code !== filters.routeCode) return false;
       }
 
-      if (filters.branchCode && filters.branchCode !== 'ALL') {
-        if (item.branch_code !== filters.branchCode) return false;
+      if (filters.depotCode && filters.depotCode !== 'ALL') {
+        if (item.depot_code !== filters.depotCode) return false;
       }
 
       if (filters.tripNo) {
@@ -281,6 +324,12 @@ export default function TripcloseReport() {
     
     setDateError('');
     
+    // Invalidate cache for old date range
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    const userId = user.id;
+    const oldCacheKey = cacheManager.getCacheKey('tripclose', userId, appliedFilters.startDate, appliedFilters.endDate);
+    cacheManager.invalidate(oldCacheKey);
+    
     setIsPolling(false);
     if (pollingIntervalRef.current) {
       clearInterval(pollingIntervalRef.current);
@@ -303,13 +352,20 @@ export default function TripcloseReport() {
 
   const clearFilters = () => {
     const today = getTodayDate();
+    
+    // Invalidate cache for current date range
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    const userId = user.id;
+    const oldCacheKey = cacheManager.getCacheKey('tripclose', userId, appliedFilters.startDate, appliedFilters.endDate);
+    cacheManager.invalidate(oldCacheKey);
+    
     setFilters({
       startDate: today,
       endDate: today,
       palmtecId: 'ALL',
       routeCode: 'ALL',
       tripNo: '',
-      branchCode: 'ALL'
+      depotCode: 'ALL'
     });
     setAppliedFilters({
       startDate: today,
@@ -335,7 +391,7 @@ export default function TripcloseReport() {
     worksheet.columns = [
       { header: 'ID', key: 'id', width: 10 },
       { header: 'Device ID', key: 'palmtec_id', width: 16 },
-      { header: 'Branch Code', key: 'branch_code', width: 14 },
+      { header: 'Depot Code', key: 'depot_code', width: 14 },
       { header: 'Route', key: 'route_code', width: 12 },
       { header: 'Trip No', key: 'trip_no', width: 10 },
       { header: 'Schedule', key: 'schedule', width: 14 },
@@ -356,7 +412,7 @@ export default function TripcloseReport() {
       worksheet.addRow({
         id: item.id,
         palmtec_id: item.palmtec_id,
-        branch_code: item.branch_code || '-',
+        depot_code: item.depot_code || '-',
         route_code: item.route_code,
         trip_no: item.trip_no,
         schedule: item.schedule,
@@ -602,14 +658,14 @@ export default function TripcloseReport() {
           </div>
 
           <div className="flex flex-col">
-            <label className="text-xs font-medium text-slate-500 mb-1">Branch Code</label>
+            <label className="text-xs font-medium text-slate-500 mb-1">Depot Code</label>
             <select
-              value={filters.branchCode}
-              onChange={(e) => handleClientFilter('branchCode', e.target.value)}
+              value={filters.depotCode}
+              onChange={(e) => handleClientFilter('depotCode', e.target.value)}
               className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-slate-500 focus:border-slate-500"
             >
               <option value="ALL">ALL</option>
-              {branchCodes.map(code => (
+              {depotCodes.map(code => (
                 <option key={code} value={code}>{code}</option>
               ))}
             </select>
@@ -668,7 +724,7 @@ export default function TripcloseReport() {
             <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 text-xs uppercase tracking-wide">
               <tr>
                 <th className="px-4 py-3 font-semibold">Device ID</th>
-                <th className="px-4 py-3 font-semibold">Branch</th>
+                <th className="px-4 py-3 font-semibold">Depot</th>
                 <th className="px-4 py-3 font-semibold">Schedule</th>
                 <th className="px-4 py-3 font-semibold">Trip No</th>
                 <th className="px-4 py-3 font-semibold">Route</th>
@@ -694,7 +750,7 @@ export default function TripcloseReport() {
                         {item.palmtec_id}
                       </span>
                     </td>
-                    <td className="px-4 py-3">{item.branch_code || "-"}</td>
+                    <td className="px-4 py-3">{item.depot_code || "-"}</td>
                     <td className="px-4 py-3">{item.schedule}</td>
                     <td className="px-4 py-3">{item.trip_no}</td>
                     <td className="px-4 py-3">{item.route_code || "-"}</td>
@@ -808,8 +864,8 @@ export default function TripcloseReport() {
                     <div className="text-sm text-slate-800 mt-1">{selectedTrip.palmtec_id}</div>
                   </div>
                   <div>
-                    <div className="text-xs text-slate-500 font-medium">Branch Code</div>
-                    <div className="text-sm text-slate-800 mt-1">{selectedTrip.branch_code || "-"}</div>
+                    <div className="text-xs text-slate-500 font-medium">Depot Code</div>
+                    <div className="text-sm text-slate-800 mt-1">{selectedTrip.depot_code || "-"}</div>
                   </div>
                   <div>
                     <div className="text-xs text-slate-500 font-medium">Route Code</div>
