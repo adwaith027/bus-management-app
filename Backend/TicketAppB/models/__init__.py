@@ -1,13 +1,13 @@
 # Auth models
-from .auth import CustomUser
+from .auth import CustomUser, UserDeviceMapping
 
-AUTH_MODELS = ['CustomUser',]
+AUTH_MODELS = ['CustomUser', 'UserDeviceMapping']
 
 
 # Company models
-from .company import Company, Branch
+from .company import Company, Branch, Dealer, DealerCustomerMapping, ExecutiveCompanyMapping
 
-COMPANY_MODELS = ['Company','Branch',]
+COMPANY_MODELS = ['Company','Branch','Dealer','DealerCustomerMapping','ExecutiveCompanyMapping',]
 
 
 # Master data models
