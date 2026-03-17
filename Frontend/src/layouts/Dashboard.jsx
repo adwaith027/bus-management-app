@@ -4,9 +4,9 @@ import Sidebar from '../components/Sidebar';
 
 export default function Dashboard() {
   return (
-    <div className="flex min-h-screen bg-slate-150 text-slate-900">
+    <div className="flex min-h-screen overflow-x-hidden bg-slate-100 text-slate-900">
       <Sidebar />
-      <main className="flex-1 p-4 pt-20 sm:p-6 lg:p-8 lg:pt-8 overflow-y-auto">
+      <main className="min-w-0 flex-1 overflow-y-auto pt-20 lg:pt-0">
         <Outlet />
       </main>
     </div>
