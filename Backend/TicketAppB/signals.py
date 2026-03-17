@@ -2,10 +2,11 @@ import traceback
 from django.utils import timezone
 from django.dispatch import receiver
 from decimal import Decimal, ROUND_HALF_UP
-from django.db.models.signals import post_save
-from .models import MosambeeTransaction, TransactionData
+from django.db.models.signals import post_save, pre_save
+from .models import MosambeeTransaction, TransactionData, Route, Fare
 
 
+# MOSAMBEE TRANSACTION SIGNALS
 @receiver(post_save, sender=MosambeeTransaction)
 def auto_reconcile_mosambee_payment(sender, instance, created, **kwargs):
     """
@@ -16,25 +17,16 @@ def auto_reconcile_mosambee_payment(sender, instance, created, **kwargs):
     2. Checks if payment was successful (responseCode = '0', '00', or '000')
     3. If successful, tries to match with bus ticket
     4. Updates reconciliation_status based on result
-    
-    Args:
-        sender: The model class (MosambeeTransaction)
-        instance: The actual transaction object that was saved
-        created: Boolean - True if this is a new record, False if update
-        **kwargs: Additional arguments
     """
     
     # STEP 1: Only process NEW transactions
     if not created:
-        # This is an UPDATE, not a new transaction
-        # Don't run reconciliation again
         return
     
     print(f"🔄 Processing new transaction: TXN-{instance.transactionID}")
     
     # STEP 2: Check if payment was successful
     if not instance.is_payment_successful:
-        # Payment declined/failed
         print(f"❌ Payment declined: TXN-{instance.transactionID} (Code: {instance.responseCode})")
         instance.processing_status = MosambeeTransaction.ProcessingStatus.PENDING_VERIFICATION
         instance.save()
@@ -91,7 +83,9 @@ def auto_reconcile_mosambee_payment(sender, instance, created, **kwargs):
         print(f"✅ Amounts match: ₹{instance.transactionAmount}")
         
         # CHECK 4: Is ticket already paid?
-        existing_payment = MosambeeTransaction.objects.filter(related_ticket=ticket).exclude(id=instance.id).first()
+        existing_payment = MosambeeTransaction.objects.filter(
+            related_ticket=ticket
+        ).exclude(id=instance.id).first()
         
         if existing_payment:
             print(f"⚠️ Duplicate payment detected: TXN-{existing_payment.transactionID}")
@@ -115,19 +109,63 @@ def auto_reconcile_mosambee_payment(sender, instance, created, **kwargs):
         print(f"✅ Reconciliation complete: TXN-{instance.transactionID}")
         
     except Exception as e:
-        # ERROR: Something went wrong
         print(f"❌ Reconciliation error: {str(e)}")
         traceback.print_exc()
-        
         instance.reconciliation_error = f"Reconciliation error: {str(e)}"
         instance.processing_status = MosambeeTransaction.ProcessingStatus.PENDING_VERIFICATION
         instance.save()
 
-# OPTIONAL: Add more signal handlers
 
-# Example: Send notification when payment is auto-matched
-# @receiver(post_save, sender=MosambeeTransaction)
-# def send_payment_notification(sender, instance, created, **kwargs):
-#     if instance.reconciliation_status == MosambeeTransaction.ReconciliationStatus.AUTO_MATCHED:
-#         # Send email/SMS notification
-#         pass
+# ROUTE SIGNALS
+@receiver(pre_save, sender=Route)
+def capture_old_route_name(sender, instance, **kwargs):
+    """
+    Capture old route_name before save happens.
+    Attaches old name to instance so post_save can compare.
+
+    Flow:
+    1. Only runs for existing routes (not new ones)
+    2. Fetches current DB value before it gets overwritten
+    3. Stores it temporarily on the instance object
+    """
+
+    # Only for existing routes (pk exists)
+    if instance.pk:
+        try:
+            old = Route.objects.get(pk=instance.pk)
+            # Temporarily attach old name to instance
+            instance._old_route_name = old.route_name
+        except Route.DoesNotExist:
+            instance._old_route_name = None
+    else:
+        # New route being created
+        instance._old_route_name = None
+
+
+@receiver(post_save, sender=Route)
+def sync_fare_route_name(sender, instance, created, **kwargs):
+    """
+    When a Route name is updated, sync route_name in all
+    related Fare records automatically.
+
+    Flow:
+    1. Skip if this is a new route (no fares exist yet)
+    2. Compare old name (captured in pre_save) with new name
+    3. If changed, bulk update all related Fare records
+    """
+
+    # STEP 1: Skip newly created routes
+    if created:
+        return
+
+    # STEP 2: Get old name captured by pre_save signal
+    old_name = getattr(instance, '_old_route_name', None)
+
+    # STEP 3: Only update if name actually changed
+    if old_name and old_name != instance.route_name:
+        updated_count = Fare.objects.filter(route=instance).update(
+            route_name=instance.route_name
+        )
+        print(f"✅ Synced route_name '{instance.route_name}' across {updated_count} Fare records")
+    else:
+        print(f"ℹ️ Route name unchanged - no Fare records updated")

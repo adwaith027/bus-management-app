@@ -1,5 +1,9 @@
 from rest_framework import serializers
-from .models import Company,CustomUser,TransactionData,TripCloseData,Branch,MosambeeTransaction,Dealer,DealerCustomerMapping,ExecutiveCompanyMapping,UserDeviceMapping
+from .models import Company,CustomUser,Depot
+from .models import TransactionData,TripCloseData,MosambeeTransaction
+from .models import DealerCustomerMapping,ExecutiveCompanyMapping,UserDeviceMapping
+from .models import Dealer,CrewAssignment,BusType,EmployeeType,Stage,Currency,Employee,VehicleType
+from .models import RouteStage,Route,Settings,RouteBusType,Fare
 
 class CompanySerializer(serializers.ModelSerializer):
     # Read-only fields that are computed or set by system
@@ -28,9 +32,9 @@ class CompanySerializer(serializers.ModelSerializer):
             'unique_identifier',
             'product_from_date',
             'product_to_date',
-            'project_code',
             'device_count',
-            'branch_count',
+            'depot_count',
+            'mobile_device_count',
             'created_at',
             'updated_at',
             'is_validated',
@@ -45,9 +49,9 @@ class CompanySerializer(serializers.ModelSerializer):
             'unique_identifier',
             'product_from_date',
             'product_to_date',
-            'project_code',
             'device_count',
-            'branch_count',
+            'depot_count',
+            'mobile_device_count',
             'created_at',
             'updated_at',
             'created_by',
@@ -105,6 +109,7 @@ class UserDeviceMappingSerializer(serializers.ModelSerializer):
             'device_type',
             'user_agent',
             'status',
+            'is_active',
             'approved_by',
             'approved_by_username',
             'approved_at',
@@ -262,7 +267,7 @@ class TicketDataSerializer(serializers.ModelSerializer):
             'ticket_status',
             'payment_mode_display',
             'reference_number',
-            'branch_code',
+            'depot_code',
             'created_at',
             # EXCLUDED: raw_payload, company_code
         ]
@@ -305,7 +310,7 @@ class TripCloseDataSerializer(serializers.ModelSerializer):
             "id",
             "palmtec_id",
             # EXCLUDED: company_code
-            "branch_code",  
+            "depot_code",  
             "schedule",
             "trip_no",
             "route_code",
@@ -389,17 +394,17 @@ class TripCloseDataSerializer(serializers.ModelSerializer):
         return None
     
 
-class BranchSerializer(serializers.ModelSerializer):
+class DepotSerializer(serializers.ModelSerializer):
     company = serializers.PrimaryKeyRelatedField(read_only=True)
     created_by = serializers.PrimaryKeyRelatedField(read_only=True)
     
     class Meta:
-        model=Branch
+        model=Depot
         fields=[
             'id',
             'company',
-            'branch_code',
-            'branch_name',
+            'depot_code',
+            'depot_name',
             'address',
             'city',
             'state',
@@ -574,4 +579,499 @@ class SettlementVerificationSerializer(serializers.Serializer):
             MosambeeTransaction.objects.get(id=value)
         except MosambeeTransaction.DoesNotExist:
             raise serializers.ValidationError("Transaction not found")
+        return value
+    
+
+
+# =============================================================================
+# MASTER DATA SERIALIZERS
+# Append these to the bottom of your existing serializers.py
+# Also add these imports at the top of serializers.py:
+#   from .models import (BusType, EmployeeType, Employee, Currency,
+#                        Stage, Route, RouteStage, VehicleType,
+#                        Settings, CrewAssignment)
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# SECTION 1 — Simple lookup/master tables
+# BusType, EmployeeType, Stage, Currency
+# These are the simplest — just code + name, scoped to a company.
+# -----------------------------------------------------------------------------
+
+class BusTypeSerializer(serializers.ModelSerializer):
+    # company and audit fields are set by the view, never by the frontend
+    company    = serializers.PrimaryKeyRelatedField(read_only=True)
+    created_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    updated_by = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model  = BusType
+        fields = [
+            'id',
+            'bustype_code',
+            'name',
+            'is_active',
+            'company',
+            'created_by',
+            'updated_by',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'company', 'created_by', 'updated_by', 'created_at', 'updated_at']
+
+
+class EmployeeTypeSerializer(serializers.ModelSerializer):
+    company    = serializers.PrimaryKeyRelatedField(read_only=True)
+    created_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    updated_by = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model  = EmployeeType
+        fields = [
+            'id',
+            'emp_type_code',
+            'emp_type_name',
+            'company',
+            'created_by',
+            'updated_by',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'company', 'created_by', 'updated_by', 'created_at', 'updated_at']
+
+
+class StageSerializer(serializers.ModelSerializer):
+    company    = serializers.PrimaryKeyRelatedField(read_only=True)
+    created_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    updated_by = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model  = Stage
+        fields = [
+            'id',
+            'stage_code',
+            'stage_name',
+            'is_deleted',
+            'company',
+            'created_by',
+            'updated_by',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'company', 'created_by', 'updated_by', 'created_at', 'updated_at']
+
+
+class CurrencySerializer(serializers.ModelSerializer):
+    company    = serializers.PrimaryKeyRelatedField(read_only=True)
+    created_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    updated_by = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model  = Currency
+        fields = [
+            'id',
+            'currency',
+            'country',
+            'company',
+            'created_by',
+            'updated_by',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'company', 'created_by', 'updated_by', 'created_at', 'updated_at']
+
+
+# -----------------------------------------------------------------------------
+# SECTION 2 — Employee (has a FK to EmployeeType)
+# The frontend sends emp_type as an integer ID.
+# DRF's PrimaryKeyRelatedField handles the lookup automatically.
+# password here is the device PIN, not a Django auth password.
+# -----------------------------------------------------------------------------
+
+class EmployeeSerializer(serializers.ModelSerializer):
+    company    = serializers.PrimaryKeyRelatedField(read_only=True)
+    created_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    updated_by = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    # We also expose the type name as a read-only display field
+    # so the frontend table can show "Driver" instead of just ID 3
+    emp_type_name = serializers.CharField(source='emp_type.emp_type_name', read_only=True)
+
+    class Meta:
+        model  = Employee
+        fields = [
+            'id',
+            'employee_code',
+            'employee_name',
+            'emp_type',        # writable FK — frontend sends the ID
+            'emp_type_name',   # read-only display label
+            'phone_no',
+            'password',        # device PIN, visible to company admin
+            'is_deleted',
+            'company',
+            'created_by',
+            'updated_by',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'company', 'created_by', 'updated_by', 'created_at', 'updated_at', 'emp_type_name']
+
+    def validate_emp_type(self, value):
+        """
+        Ensure the chosen EmployeeType belongs to the same company.
+        We get the company from the serializer context, which the view must pass in.
+        Usage in view: EmployeeSerializer(data=request.data, context={'company': user.company})
+        """
+        company = self.context.get('company')
+        if company and value.company != company:
+            raise serializers.ValidationError("Selected employee type does not belong to your company.")
+        return value
+
+
+# -----------------------------------------------------------------------------
+# SECTION 3 — Vehicle (has a FK to BusType)
+# Same pattern as Employee — frontend sends bus_type as an ID.
+# bus_type_name is added as a read-only display label for the table.
+# -----------------------------------------------------------------------------
+
+class VehicleTypeSerializer(serializers.ModelSerializer):
+    company    = serializers.PrimaryKeyRelatedField(read_only=True)
+    created_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    updated_by = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    bus_type_name = serializers.CharField(source='bus_type.name', read_only=True)
+
+    class Meta:
+        model  = VehicleType
+        fields = [
+            'id',
+            'bus_reg_num',
+            'bus_type',         # writable FK
+            'bus_type_name',    # read-only display label
+            'is_deleted',
+            'company',
+            'created_by',
+            'updated_by',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'company', 'created_by', 'updated_by', 'created_at', 'updated_at', 'bus_type_name']
+
+    def validate_bus_type(self, value):
+        """Ensure the chosen BusType belongs to this company."""
+        company = self.context.get('company')
+        if company and value.company != company:
+            raise serializers.ValidationError("Selected bus type does not belong to your company.")
+        return value
+
+
+# -----------------------------------------------------------------------------
+# SECTION 4 — Route
+# RouteStageSerializer and RouteBusTypeSerializer are defined below (SECTION 4b)
+# before RouteSerializer so Python can reference them when building RouteSerializer.
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# SECTION 5 — CrewAssignment
+# Links driver + conductor + cleaner + vehicle.
+# All 4 are FK fields — frontend sends IDs.
+# Display labels added for the listing table.
+# The VIEW is responsible for validating emp_type matches the role
+# (driver must be DRIVER type, etc.) — kept out of serializer for simplicity.
+# -----------------------------------------------------------------------------
+
+class CrewAssignmentSerializer(serializers.ModelSerializer):
+    company    = serializers.PrimaryKeyRelatedField(read_only=True)
+    created_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    updated_by = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    # Read-only display labels for the listing table
+    driver_name    = serializers.CharField(source='driver.employee_name', read_only=True)
+    conductor_name = serializers.CharField(source='conductor.employee_name', read_only=True)
+    cleaner_name   = serializers.CharField(source='cleaner.employee_name', read_only=True)
+    vehicle_reg    = serializers.CharField(source='vehicle.bus_reg_num', read_only=True)
+
+    class Meta:
+        model  = CrewAssignment
+        fields = [
+            'id',
+            'driver',           # writable FK
+            'driver_name',
+            'conductor',        # writable FK (nullable)
+            'conductor_name',
+            'cleaner',          # writable FK (nullable)
+            'cleaner_name',
+            'vehicle',          # writable FK
+            'vehicle_reg',
+            'company',
+            'created_by',
+            'updated_by',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'company', 'created_by', 'updated_by',
+            'created_at', 'updated_at',
+            'driver_name', 'conductor_name', 'cleaner_name', 'vehicle_reg',
+        ]
+
+
+# -----------------------------------------------------------------------------
+# SECTION 6 — Settings (OneToOne with Company)
+# Only one record per company — no create from frontend, only get + update.
+# All fields are writable except the system ones.
+# Grouped here the same way the model groups them.
+# -----------------------------------------------------------------------------
+
+class SettingsSerializer(serializers.ModelSerializer):
+    company    = serializers.PrimaryKeyRelatedField(read_only=True)
+    created_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    updated_by = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model  = Settings
+        fields = [
+            'id',
+
+            # Fare percentages
+            'half_per',
+            'con_per',
+            'st_max_amt',
+            'st_min_con',
+            'phy_per',
+            'round_amt',
+            'luggage_unit_rate',
+
+            # Display / ticket header-footer
+            'main_display',
+            'main_display2',
+            'header1',
+            'header2',
+            'header3',
+            'footer1',
+            'footer2',
+
+            # Device identifier
+            'palmtec_id',
+
+            # Boolean feature flags
+            'roundoff',
+            'round_up',
+            'remove_ticket_flag',
+            'stage_font_flag',
+            'next_fare_flag',
+            'odometer_entry',
+            'ticket_no_big_font',
+            'crew_check',
+            'gprs_enable',
+            'tripsend_enable',
+            'schedulesend_enable',
+            'sendpend',
+            'inspect_rpt',
+            'st_roundoff_enable',
+            'st_fare_edit',
+            'multiple_pass',
+            'simple_report',
+            'inspector_sms',
+            'auto_shut_down',
+            'userpswd_enable',
+
+            # Integer settings
+            'report_flag',
+            'language_option',
+            'stage_updation_msg',
+            'default_stage',
+            'report_font',
+            'st_roundoff_amt',
+
+            # Communication / FTP
+            'ph_no2',
+            'ph_no3',
+            'access_point',
+            'dest_adds',
+            'username',
+            'password',
+            'uploadpath',
+            'downloadpath',
+            'http_url',
+
+            # String feature flags
+            'smart_card',
+            'exp_enable',
+            'ftp_enable',
+            'gprs_enable_message',
+            'sendbill_enable',
+
+            # Passwords & currency
+            'user_pwd',
+            'master_pwd',
+            'currency',
+
+            # Audit
+            'company',
+            'created_by',
+            'updated_by',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'company', 'created_by', 'updated_by', 'created_at', 'updated_at']
+
+
+
+# -----------------------------------------------------------------------------
+# SECTION 4b — Route supporting serializers
+# These must be defined BEFORE RouteSerializer since it references them.
+# -----------------------------------------------------------------------------
+
+class RouteStageSerializer(serializers.ModelSerializer):
+    """
+    Serializer for RouteStage records (stops on a route).
+    Used for inline display within Route forms and FareEditor.
+    stage_code is needed by FareEditor matrix headers.
+    validate_stage ensures stages belong to the same company.
+    """
+    company    = serializers.PrimaryKeyRelatedField(read_only=True)
+    created_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    stage_name = serializers.CharField(source='stage.stage_name', read_only=True)
+    stage_code = serializers.CharField(source='stage.stage_code', read_only=True)
+
+    class Meta:
+        model = RouteStage
+        fields = [
+            'id',
+            'stage',           # writable FK (frontend sends stage ID)
+            'stage_name',      # read-only display — used in RouteListing and FareEditor
+            'stage_code',      # read-only display — used in FareEditor matrix headers
+            'sequence_no',
+            'distance',
+            'stage_local_lang',
+            'company',
+            'created_by',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'company', 'created_by', 'created_at', 'updated_at', 'stage_name', 'stage_code']
+
+    def validate_stage(self, value):
+        """Ensure the chosen Stage belongs to this company."""
+        company = self.context.get('company')
+        if company and value.company != company:
+            raise serializers.ValidationError("Selected stage does not belong to your company.")
+        return value
+
+
+class RouteBusTypeSerializer(serializers.ModelSerializer):
+    """
+    Serializer for RouteBusType records (allowed bus types per route).
+    Frontend does not use this yet — kept ready for future use.
+    """
+    company       = serializers.PrimaryKeyRelatedField(read_only=True)
+    created_by    = serializers.PrimaryKeyRelatedField(read_only=True)
+    bus_type_code = serializers.CharField(source='bus_type.bustype_code', read_only=True)
+    bus_type_name = serializers.CharField(source='bus_type.name', read_only=True)
+
+    class Meta:
+        model = RouteBusType
+        fields = [
+            'id',
+            'bus_type',
+            'bus_type_code',
+            'bus_type_name',
+            'company',
+            'created_by',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'company', 'created_by', 'created_at', 'updated_at', 'bus_type_code', 'bus_type_name']
+
+    def validate_bus_type(self, value):
+        """Ensure the chosen BusType belongs to this company."""
+        company = self.context.get('company')
+        if company and value.company != company:
+            raise serializers.ValidationError("Selected bus type does not belong to your company.")
+        return value
+
+
+class RouteSerializer(serializers.ModelSerializer):
+    company    = serializers.PrimaryKeyRelatedField(read_only=True)
+    created_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    updated_by = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    bus_type_name = serializers.CharField(source='bus_type.name', read_only=True)
+    route_stages  = RouteStageSerializer(many=True, read_only=True)
+    route_bus_types = RouteBusTypeSerializer(many=True, read_only=True)  # future-ready
+
+    class Meta:
+        model  = Route
+        fields = [
+            'id',
+            'route_code',
+            'route_name',
+            'min_fare',
+            'fare_type',
+            'bus_type',
+            'bus_type_name',
+            'use_stop',
+            'half',
+            'luggage',
+            'student',
+            'adjust',
+            'conc',
+            'ph',
+            'start_from',
+            'pass_allow',
+            'is_deleted',
+            'company',
+            'created_by',
+            'updated_by',
+            'created_at',
+            'updated_at',
+            'route_stages',    # used by RouteListing and FareEditor
+            'route_bus_types', # future use
+        ]
+        read_only_fields = [
+            'id', 'company', 'created_by', 'updated_by', 'created_at', 'updated_at',
+            'bus_type_name', 'route_stages', 'route_bus_types',
+        ]
+
+    def validate_bus_type(self, value):
+        company = self.context.get('company')
+        if company and value.company != company:
+            raise serializers.ValidationError("Selected bus type does not belong to your company.")
+        return value
+    
+
+
+class FareSerializer(serializers.ModelSerializer):
+    """
+    Serializer for Fare records (fare matrix - row/col based).
+    Used for bulk fare table editing.
+    """
+    company    = serializers.PrimaryKeyRelatedField(read_only=True)
+    created_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    route_name = serializers.CharField(read_only=True)
+    
+    class Meta:
+        model = Fare
+        fields = [
+            'id',
+            'number',
+            'row',
+            'col',
+            'fare_amount',
+            'route',
+            'route_name',
+            'company',
+            'created_by',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'route_name', 'company', 'created_by', 'created_at', 'updated_at']
+    
+    def validate_route(self, value):
+        """Ensure the route belongs to this company."""
+        company = self.context.get('company')
+        if company and value.company != company:
+            raise serializers.ValidationError("Selected route does not belong to your company.")
         return value
