@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Company,CustomUser,TransactionData,TripCloseData,Branch,MosambeeTransaction
+from .models import Company,CustomUser,TransactionData,TripCloseData,Branch,MosambeeTransaction,Dealer,DealerCustomerMapping,ExecutiveCompanyMapping,UserDeviceMapping
 
 class CompanySerializer(serializers.ModelSerializer):
     # Read-only fields that are computed or set by system
@@ -86,6 +86,131 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model=CustomUser
         fields='__all__'
+
+
+class UserDeviceMappingSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source='user.username', read_only=True)
+    company_name = serializers.CharField(source='user.company.company_name', read_only=True)
+    approved_by_username = serializers.CharField(source='approved_by.username', read_only=True)
+
+    class Meta:
+        model = UserDeviceMapping
+        fields = [
+            'id',
+            'user',
+            'username',
+            'company_name',
+            'username_snapshot',
+            'device_uid',
+            'device_type',
+            'user_agent',
+            'status',
+            'approved_by',
+            'approved_by_username',
+            'approved_at',
+            'last_seen_at',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = fields
+
+
+class DealerSerializer(serializers.ModelSerializer):
+    created_by = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = Dealer
+        fields = [
+            'id',
+            'dealer_code',
+            'dealer_name',
+            'contact_person',
+            'contact_number',
+            'email',
+            'address',
+            'city',
+            'state',
+            'zip_code',
+            'gst_number',
+            'is_active',
+            'created_by',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'id',
+            'created_by',
+            'created_at',
+            'updated_at',
+        ]
+
+
+class DealerCustomerMappingSerializer(serializers.ModelSerializer):
+    created_by = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = DealerCustomerMapping
+        fields = [
+            'id',
+            'dealer',
+            'company',
+            'is_active',
+            'created_by',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'id',
+            'created_by',
+            'created_at',
+            'updated_at',
+        ]
+
+    def validate(self, attrs):
+        dealer = attrs.get('dealer') or getattr(self.instance, 'dealer', None)
+        company = attrs.get('company') or getattr(self.instance, 'company', None)
+        if dealer and company:
+            existing = DealerCustomerMapping.objects.filter(dealer=dealer, company=company)
+            if self.instance:
+                existing = existing.exclude(pk=self.instance.pk)
+            if existing.exists():
+                raise serializers.ValidationError("This dealer is already mapped to the selected company.")
+        return attrs
+
+
+class ExecutiveCompanyMappingSerializer(serializers.ModelSerializer):
+    created_by = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = ExecutiveCompanyMapping
+        fields = [
+            'id',
+            'executive_user',
+            'company',
+            'is_active',
+            'created_by',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'id',
+            'created_by',
+            'created_at',
+            'updated_at',
+        ]
+
+    def validate(self, attrs):
+        executive_user = attrs.get('executive_user') or getattr(self.instance, 'executive_user', None)
+        company = attrs.get('company') or getattr(self.instance, 'company', None)
+        if executive_user and executive_user.role != 'executive_user':
+            raise serializers.ValidationError("Selected user is not an executive_user.")
+        if executive_user and company:
+            existing = ExecutiveCompanyMapping.objects.filter(executive_user=executive_user, company=company)
+            if self.instance:
+                existing = existing.exclude(pk=self.instance.pk)
+            if existing.exists():
+                raise serializers.ValidationError("This executive user is already mapped to the selected company.")
+        return attrs
 
 
 class TicketDataSerializer(serializers.ModelSerializer):
