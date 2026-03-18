@@ -71,3 +71,7 @@ htmlcov/
 *.bak
 *.tmp
 *.zip
+
+# Project-specific files (already pushed - preventing re-commits)
+backend changes.txt
+frontend changes.txt
