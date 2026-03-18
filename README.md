@@ -2,13 +2,13 @@
 
 <div align="center">
 
-![License](https://img.shields.io/badge/license-Non--Commercial-blue.svg)
+![License](https://img.shields.io/badge/license-Private-red.svg)
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![Django](https://img.shields.io/badge/django-5.2-green.svg)
 ![React](https://img.shields.io/badge/react-18.0-blue.svg)
-![Version](https://img.shields.io/badge/version-1.0-orange.svg)
+![Version](https://img.shields.io/badge/version-1.1-orange.svg)
 
-Open-source multi-tenant platform for bus fleet operations with real-time ticketing, payment reconciliation, and comprehensive reporting.
+Private multi-tenant platform for bus fleet operations with real-time ticketing, payment reconciliation, and comprehensive reporting.
 
 </div>
 
@@ -30,8 +30,9 @@ The **Bus Ticketing Management System** streamlines bus operations for transport
 ### 🏢 Company & User Management
 - Multi-company support with external license validation
 - User management with role-based access control
-- Branch organization across locations
+- Depot organization across locations
 - Password management with session termination
+- Device approval workflow for security
 
 ### 💳 Transaction Processing
 - Real-time ticket data collection from handheld devices
@@ -39,7 +40,7 @@ The **Bus Ticketing Management System** streamlines bus operations for transport
 - Trip close reports with financial summaries
 - Passenger breakdown (Full, Half, Student, Senior, Physical, Luggage)
 
-### 💰 Payment Reconciliation (NEW v1.0)
+### 💰 Payment Reconciliation
 - **Mosambee Payment Gateway Integration**
 - **Automatic matching** of UPI payments to tickets
 - **Intelligent detection**: Amount mismatches, duplicates, missing tickets
@@ -48,17 +49,43 @@ The **Bus Ticketing Management System** streamlines bus operations for transport
 - **Real-time polling** with 15-second updates
 
 ### 📊 Reporting & Analytics
-- Transaction reports with date/device/branch/payment filters
+- Transaction reports with date/device/depot/payment filters
 - Trip close reports with route and schedule analytics
 - Excel export (ExcelJS)
 - Dashboard metrics for collections, operations, settlements
 - Summary cards with live KPIs
+- Multiple specialized dashboards (Company, Dealer, Executive)
+
+### 🚌 Master Data Management (NEW v1.1)
+- **Bus Types** - Bus category management with company isolation
+- **Vehicles/Buses** - Individual bus tracking and assignment
+- **Routes** - Route definition and management
+- **Stages** - Transit stages/hubs per route
+- **Fares** - Dynamic fare tables per route and bus type
+- **MDB Import** - Bulk import from Microsoft Access files
+- **Currencies** - Multi-currency support
+
+### 👥 Crew Management (NEW v1.1)
+- **Employee Types** - Driver, Conductor, Inspector roles
+- **Employees** - Staff directory with type classification
+- **Crew Assignments** - Dynamic trip-wise crew scheduling
+- **Inspector Details** - Inspector mapping to routes
+
+### 🏢 Dealer & Executive Management (NEW v1.1)
+- **Dealer Management** - Third-party dealer registration and mappings
+- **Executive Mappings** - Executive territory management
+- **Specialized Dashboards** - Role-specific views with transaction visibility
+
+### 🏪 Operational Management (NEW v1.1)
+- **Depot Management** - Transit hub/depot configuration
+- **Settings Management** - System and company-level configurations
 
 ### 🔐 Security
 - JWT authentication with HTTP-only cookies
 - Auto token refresh on expiration
 - Checksum validation for payment data
 - Role-based UI rendering
+- Device authentication & approval workflow
 
 ---
 
@@ -69,6 +96,9 @@ The **Bus Ticketing Management System** streamlines bus operations for transport
 - MySQL 8.0+ with timezone support (Asia/Kolkata)
 - JWT Authentication (30-min access, 7-day refresh)
 - Django Signals for auto-reconciliation
+- **Celery + Redis** for async task processing
+- **MDB Parser** for bulk data import from Access files
+- **Flower** for Celery task monitoring
 
 **Frontend**
 - React 18 with Vite
@@ -76,6 +106,7 @@ The **Bus Ticketing Management System** streamlines bus operations for transport
 - Tailwind CSS
 - Axios with auto-refresh interceptors
 - ExcelJS for exports
+- Dynamic form builders for master data CRUD
 
 ---
 
@@ -185,7 +216,7 @@ PRODUCT_AUTH_ENDPOINT=/ProductAuthentication
 MOSAMBEE_SALT=your-mosambee-salt-key
 
 # App Info
-APP_VERSION=1.0.0
+APP_VERSION=1.1.0
 PROJECT_NAME=Bus Ticketing System
 ```
 
@@ -200,8 +231,8 @@ PROJECT_NAME=Bus Ticketing System
 - Create/edit users across all companies
 - View system-wide metrics
 
-**Company Admin** (formerly Branch Admin)
-- Manage branches within company
+**Company Admin**
+- Manage depots within company
 - Access transaction/trip reports
 - Verify payment settlements
 
@@ -242,27 +273,92 @@ POST /token/refresh/
 GET  /verify-auth/
 ```
 
-**Companies**
+**Companies & Depots**
 ```http
 GET  /customer-data/
 POST /create-company/
 PUT  /update-company-details/{id}/
 POST /register-company-license/{id}/
 POST /validate-company-license/{id}/
+GET  /get_company_dashboard_metrics/
+GET  /get_admin_data/
+GET  /depots/
+POST /create-depot/
+PUT  /update-depot-details/{id}/
 ```
 
-**Users & Branches**
+**Users & Device Management**
 ```http
 GET  /get_users/
 POST /create_user/
 PUT  /update_user/{id}/
 POST /change_user_password/{id}/
-GET  /branches/
-POST /create-branch/
-PUT  /update-branch-details/{id}/
+GET  /device-approvals/
+POST /device-approvals/{id}/approve/
+POST /device-approvals/{id}/revoke/
 ```
 
-**Transactions (Device Endpoints)**
+**Master Data - Transport (NEW)**
+```http
+GET  /masterdata/bus-types/
+POST /masterdata/bus-types/create/
+PUT  /masterdata/bus-types/update/{id}/
+GET  /masterdata/stages/
+POST /masterdata/stages/create/
+PUT  /masterdata/stages/update/{id}/
+GET  /masterdata/routes/
+POST /masterdata/routes/create/
+PUT  /masterdata/routes/update/{id}/
+GET  /masterdata/vehicles/
+POST /masterdata/vehicles/create/
+PUT  /masterdata/vehicles/update/{id}/
+GET  /masterdata/fares/editor/{route_id}/
+PUT  /masterdata/fares/update/{route_id}/
+GET  /masterdata/dropdowns/bus-types/
+GET  /masterdata/dropdowns/stages/
+GET  /masterdata/dropdowns/vehicles/
+```
+
+**Master Data - Crew (NEW)**
+```http
+GET  /masterdata/employee-types/
+POST /masterdata/employee-types/create/
+PUT  /masterdata/employee-types/update/{id}/
+GET  /masterdata/employees/
+POST /masterdata/employees/create/
+PUT  /masterdata/employees/update/{id}/
+GET  /masterdata/crew-assignments/
+POST /masterdata/crew-assignments/create/
+PUT  /masterdata/crew-assignments/update/{id}/
+DELETE /masterdata/crew-assignments/delete/{id}/
+GET  /masterdata/dropdowns/employee-types/
+GET  /masterdata/dropdowns/employees/
+```
+
+**Operational Management (NEW)**
+```http
+GET  /masterdata/currencies/
+POST /masterdata/currencies/create/
+PUT  /masterdata/currencies/update/{id}/
+GET  /masterdata/settings/
+```
+
+**Dealer & Executive Management (NEW)**
+```http
+GET  /dealers/
+POST /create-dealer/
+PUT  /update-dealer-details/{id}/
+GET  /dealer-mappings/
+POST /create-dealer-mapping/
+PUT  /update-dealer-mapping/{id}/
+GET  /dealer-dashboard/
+GET  /executive-mappings/
+POST /create-executive-mapping/
+PUT  /update-executive-mapping/{id}/
+GET  /executive-dashboard/
+```
+
+**Transaction Data (Device Endpoints)**
 ```http
 GET /getTicket?fn={pipe_delimited_data}
 GET /getTripClose?fn={pipe_delimited_data}
@@ -274,12 +370,17 @@ GET /get_all_transaction_data?from_date={date}&to_date={date}&since={timestamp}
 GET /get_all_trip_close_data?from_date={date}&to_date={date}&since={timestamp}
 ```
 
-**Settlements (NEW)**
+**Settlements & Payments**
 ```http
-POST /mosambee-settlement-data/           # Mosambee webhook
+POST /postSettlementDetails/           # Mosambee webhook
 GET  /get_settlement_data?from_date={}&to_date={}
-POST /verify_settlement/                  # Manager action
+POST /verify_settlement/                # Manager action
 GET  /get_settlement_summary?from_date={}&to_date={}
+```
+
+**Data Import (NEW)**
+```http
+POST /import-mdb/  # MDB file upload & bulk import
 ```
 
 ### Device Data Format
@@ -304,31 +405,71 @@ bus-ticketing-system/
 │   ├── Backend/
 │   │   └── settings.py              # Django config (Timezone: Asia/Kolkata)
 │   ├── TicketAppB/
-│   │   ├── models.py                # Company, User, Branch, Transaction, TripClose, Mosambee
+│   │   ├── models/
+│   │   │   ├── auth.py              # CustomUser, UserDevice Mapping
+│   │   │   ├── company.py           # Company, Depot, CustomUser
+│   │   │   ├── master_data.py       # Bus Types, Routes, Stages, Fares, Employees, Currency
+│   │   │   ├── operations.py        # Crew Assignments, Expenses, Inspector Details
+│   │   │   ├── transactions.py      # TransactionData, TripCloseData
+│   │   │   ├── payments.py          # MosambeeTransaction, Settlement
+│   │   │   └── managers.py          # Custom QuerySet managers
 │   │   ├── serializers.py           # DRF serializers
-│   │   ├── signals.py               # Auto-reconciliation logic (NEW)
+│   │   ├── signals.py               # Auto-reconciliation logic
+│   │   ├── tasks.py                 # Celery async tasks
 │   │   ├── views/
-│   │   │   ├── auth_views.py
-│   │   │   ├── company_views.py
-│   │   │   ├── user_views.py
-│   │   │   ├── branch_views.py
-│   │   │   ├── data_views.py        # Polling support with 'since'
-│   │   │   └── mosambee_views.py    # Settlement APIs (NEW)
+│   │   │   ├── auth_views.py        # Login, signup, token refresh
+│   │   │   ├── company_views.py     # Company & license management
+│   │   │   ├── user_views.py        # User CRUD
+│   │   │   ├── depot_views.py       # Depot management
+│   │   │   ├── data_views.py        # Device data ingestion + polling
+│   │   │   ├── mosambee_views.py    # Settlement & reconciliation
+│   │   │   ├── transport_views.py   # Bus types, Routes, Stages, Vehicles, Fares
+│   │   │   ├── crew_views.py        # Employee types, Employees, Crew assignments
+│   │   │   ├── dealer_views.py      # Dealer & mapping management
+│   │   │   ├── executive_views.py   # Executive territory management
+│   │   │   ├── device_approval_views.py  # Device security workflow
+│   │   │   ├── mdb_views.py         # MDB file import service
+│   │   │   ├── settings_views.py    # Global settings
+│   │   │   └── utils.py             # Helper functions
+│   │   ├── migrations/              # Database versioning
 │   │   └── apps.py                  # Signal registration
 │   └── .env
 │
 ├── Frontend/
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── NotFound.jsx         # 404 handler (NEW)
-│   │   │   ├── ProtectedRoute.jsx   # Auth guard (company_admin role)
+│   │   │   ├── ProtectedRoute.jsx   # Auth guard
 │   │   │   └── ...
 │   │   ├── pages/
-│   │   │   ├── SettlementPage.jsx   # Full settlement UI (NEW)
-│   │   │   ├── TicketReport.jsx     # Polling support
-│   │   │   ├── TripcloseReport.jsx  # Polling support
+│   │   │   ├── Login.jsx
+│   │   │   ├── Signup.jsx
+│   │   │   ├── AdminHome.jsx        # Super admin dashboard
+│   │   │   ├── CompanyDashboard.jsx # Company admin dashboard
+│   │   │   ├── DepotDashboard.jsx   # Depot view
+│   │   │   ├── UserHome.jsx         # Regular user dashboard
+│   │   │   ├── DealerDashboard.jsx  # Dealer view
+│   │   │   ├── ExecutiveDashboard.jsx # Executive view
+│   │   │   ├── CompanyListing.jsx
+│   │   │   ├── DepotListing.jsx
+│   │   │   ├── UserListing.jsx
+│   │   │   ├── BusTypeListing.jsx
+│   │   │   ├── VehicleListing.jsx
+│   │   │   ├── RouteListing.jsx
+│   │   │   ├── StageListing.jsx
+│   │   │   ├── FareEditor.jsx       # Dynamic fare table editor
+│   │   │   ├── EmployeeTypeListing.jsx
+│   │   │   ├── EmployeeListing.jsx
+│   │   │   ├── CrewAssignmentListing.jsx
+│   │   │   ├── CurrencyListing.jsx
+│   │   │   ├── DealerManagement.jsx
+│   │   │   ├── DeviceApprovals.jsx  # Device security workflow
+│   │   │   ├── MdbImport.jsx        # Master data import UI
+│   │   │   ├── TicketReport.jsx     # Transaction reports
+│   │   │   ├── TripcloseReport.jsx  # Trip reports
+│   │   │   ├── SettlementPage.jsx   # Payment settlement UI
+│   │   │   ├── SettingsPage.jsx     # Global settings
 │   │   │   └── ...
-│   │   └── main.jsx                 # Router (404 route added)
+│   │   └── main.jsx                 # Router with 404 handling
 │   └── .env
 │
 └── README.md
@@ -338,12 +479,9 @@ bus-ticketing-system/
 
 ## 🗺️ Roadmap
 
-### ✅ Completed (v1.0)
+### ✅ Completed (v1.0+)
 
-- [x] Multi-tenant company management
-- [x] License validation with polling
-- [x] User management (company_admin role)
-- [x] Branch management
+- [x] Depot management
 - [x] Transaction & trip data collection
 - [x] Reports with filters & Excel export
 - [x] **Payment reconciliation (Mosambee)**
@@ -351,79 +489,67 @@ bus-ticketing-system/
 - [x] **Settlement verification UI**
 - [x] **Cursor-based polling (since parameter)**
 - [x] **404 handler with auto-redirect**
+- [x] **Master data models** (Bus Types, Routes, Stages, Vehicles, Fares)
+- [x] **Master data CRUD interfaces** (all listings & editors)
+- [x] **Crew management** (Employee Types, Employees, Crew Assignments)
+- [x] **MDB import service** (bulk data import from Access files)
+- [x] **Dealer & Executive mappings** (multi-party role support)
+- [x] **Device approval workflow** (secure device authentication)
+- [x] **Currency management**
+- [x] **Settings management**
+- [x] **Multiple specialized dashboards** (Admin, Company, Dealer, Executive)
 
-### 🚧 Upcoming (v1.1)
+### 🚧 Upcoming (v1.2)
 
-- [ ] **404 smart redirect** (dashboard if logged in, login if not)
-- [ ] **Master data models** (Bus, Route, Stage, Fare from mdb_models.py)
-- [ ] Branch dashboard backend implementation
+- [ ] Inspector assignment and routing integration
+- [ ] Advanced expense tracking and reconciliation
 - [ ] Batch settlement processing
+- [ ] Real-time GPS tracking integration
+- [ ] Route optimization algorithms
 
 ### 📅 Future (v2.0+)
 
-- [ ] Bus/Route/Stage/Fare CRUD interfaces
-- [ ] GPS tracking integration
-- [ ] Driver roster management
-- [ ] Mobile conductor app
-- [ ] Automated settlement reminders
+- [ ] Mobile conductor app (React Native)
+- [ ] Driver roster and leave management
+- [ ] Automated settlement reminders & notifications
 - [ ] Multi-language support
+- [ ] Predictive maintenance alerts
+- [ ] Advanced analytics & business intelligence dashboards
 
 ---
-
-## 🤝 Contributing
-
-This project is open-source under a **non-commercial license**.
-
-**How to Contribute:**
-1. Fork the repo
-2. Create feature branch: `git checkout -b feature/your-feature`
-3. Commit changes: `git commit -m "feat: add feature"`
-4. Push: `git push origin feature/your-feature`
-5. Open Pull Request
-
-**Priority Areas:**
-- 🔴 Master data CRUD (Bus, Route, Fare, Stage)
-- 🔴 Branch dashboard metrics API
-- 🟡 Settlement batch processing
-- 🟢 UI/UX improvements
-
----
-
-## 📜 License
-
-**Non-Commercial Open Source License**
-
-✅ **Allowed**: Personal use, education, non-profit, modifications (with attribution)  
-❌ **Not Allowed**: Commercial use, selling, SaaS offerings
-
 
 ## 📊 Project Status
 
-**Current Version**: 1.0  
+**Current Version**: 1.1  
 **Status**: Active Development  
-**Last Updated**: January 2025
+**Last Updated**: March 2026
 
 ---
 
-## 🔧 Key Changes in v1.0
+## 🔧 Key Changes in v1.1
 
 ### New Features
-- **Mosambee Payment Gateway Integration** with checksum validation
-- **Auto-Reconciliation** using Django signals
-- **Settlement Verification** with manager workflow
-- **Real-time Polling** (15s intervals, cursor-based with `since`)
-- **404 Handler** with countdown redirect
+- **Master Data Management**: Complete CRUD for Bus Types, Routes, Stages, Vehicles, Fares
+- **Crew Management**: Employee Types, Employees, Crew Assignment workflows
+- **Dealer & Executive Support**: Multi-party role management and dashboards
+- **MDB Import Service**: Bulk import from Microsoft Access database files
+- **Device Approval Workflow**: Secure device-to-user binding
+- **Depot Management**: Transit hub configuration
+- **Currency Support**: Multi-currency master data
+- **Settings Management**: Global system and company-level configurations
+- **Specialized Dashboards**: Admin, Company, Dealer, Executive views
+
+### Dashboard Enhancements
+- Multiple role-based dashboard views (Admin, Company, Dealer, Executive)
+- Dealer-specific transaction visibility
+- Executive territory management and analytics
 
 ### Technical Updates
-- **Role Rename**: `branch_admin` → `company_admin`
-- **Timezone**: UTC → `Asia/Kolkata`
-- **JWT Expiry**: 60min → 30min (access token)
-- **Polling Support**: Added `since` parameter to ticket/trip APIs
-
-### Database
-- New model: `MosambeeTransaction` (50+ fields)
-- Auto-reconciliation via `post_save` signal
-- Status tracking: processing, verification, reconciliation
+- Modular model structure (auth.py, company.py, master_data.py, operations.py, transactions.py, payments.py)
+- Extended view layer (15+ view modules for different functional areas)
+- Comprehensive API for master data CRUD operations
+- Enhanced device security with approval workflow
+- MDB file parsing and bulk import engine
 
 ---
 
