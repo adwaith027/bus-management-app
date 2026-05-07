@@ -45,7 +45,7 @@ class BusType(models.Model):
 
 class EmployeeType(models.Model):
     """Employee type/role master data"""
-    emp_type_code = models.CharField(max_length=50,help_text="Employee type code")
+    emp_type_code = models.CharField(max_length=50, null=True, blank=True, help_text="Employee type code (set by MDB import only)")
     emp_type_name = models.CharField(max_length=100,help_text="Driver, Conductor, Cleaner, etc.")
     company = models.ForeignKey('Company',on_delete=models.CASCADE,related_name='employee_types')
     
@@ -433,6 +433,32 @@ class RouteBusType(models.Model):
         return f"{self.route.route_code} - {self.bus_type.name}"
 
 
+class RouteDepot(models.Model):
+    """Route-Depot mapping (a route can be operated from multiple depots)"""
+    route  = models.ForeignKey(Route,   on_delete=models.CASCADE, related_name='route_depots')
+    depot  = models.ForeignKey('Depot', on_delete=models.CASCADE, related_name='route_depots')
+    company = models.ForeignKey('Company', on_delete=models.CASCADE, related_name='route_depots')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='route_depots_created'
+    )
+
+    class Meta:
+        db_table = 'mdb_route_depot'
+        unique_together = ['route', 'depot']
+        indexes = [
+            models.Index(fields=['route'],   name='mdb_route_depot_route_idx'),
+            models.Index(fields=['company'], name='mdb_route_depot_company_idx'),
+        ]
+
+    def __str__(self):
+        return f"{self.route.route_code} → {self.depot.depot_name}"
+
+
 class VehicleType(models.Model):
     """Individual vehicle/bus registration"""
     bus_type = models.ForeignKey(
@@ -534,8 +560,6 @@ class Settings(models.Model):
     footer1 = models.CharField(max_length=100, null=True, blank=True)
     footer2 = models.CharField(max_length=100, null=True, blank=True)
     
-    palmtec_id = models.CharField(max_length=50,null=True,blank=True,help_text="Device identifier")
-    
     # Boolean flags
     roundoff = models.BooleanField(default=False)
     round_up = models.BooleanField(default=False)
@@ -612,3 +636,101 @@ class Settings(models.Model):
 
     def __str__(self):
         return f"Settings for {self.company.company_name}"
+
+
+class SettingsProfile(models.Model):
+    """
+    Named settings template that can be applied to one or more ETM devices.
+    palmtec_id is the numeric device identifier the client assigns in the profile.
+    """
+
+    LANGUAGE_CHOICES = [(0, 'Malayalam'), (1, 'Tamil')]
+    FONT_CHOICES     = [(0, 'Normal'),    (1, 'Condensed')]
+
+    company = models.ForeignKey(
+        'Company',
+        on_delete=models.CASCADE,
+        related_name='settings_profiles',
+    )
+    name = models.CharField(max_length=100)
+    palmtec_id = models.PositiveIntegerField(null=True, blank=True, help_text="Client-assigned device identifier (max 6 digits)")
+
+    # ── Passwords ────────────────────────────────────────────────────────────
+    user_pwd   = models.CharField(max_length=255, null=True, blank=True)
+    master_pwd = models.CharField(max_length=255, null=True, blank=True)
+
+    # ── Fare percentages & amounts ───────────────────────────────────────────
+    half_per          = models.DecimalField(max_digits=5,  decimal_places=2, default=Decimal('50.00'))
+    con_per           = models.DecimalField(max_digits=5,  decimal_places=2, default=Decimal('0.00'))
+    phy_per           = models.DecimalField(max_digits=5,  decimal_places=2, default=Decimal('0.00'))
+    round_amt         = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    luggage_unit_rate = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+
+    # ── Ticket display ───────────────────────────────────────────────────────
+    main_display  = models.CharField(max_length=50,  null=True, blank=True)
+    main_display2 = models.CharField(max_length=50,  null=True, blank=True)
+    header1       = models.CharField(max_length=100, null=True, blank=True)
+    header2       = models.CharField(max_length=100, null=True, blank=True)
+    header3       = models.CharField(max_length=100, null=True, blank=True)
+    footer1       = models.CharField(max_length=100, null=True, blank=True)
+    footer2       = models.CharField(max_length=100, null=True, blank=True)
+
+    # ── Language & font ──────────────────────────────────────────────────────
+    language_option = models.IntegerField(default=0, choices=LANGUAGE_CHOICES)
+    report_font     = models.IntegerField(default=0, choices=FONT_CHOICES)
+
+    # ── ST fare settings ─────────────────────────────────────────────────────
+    st_fare_edit = models.BooleanField(default=False)
+    st_max_amt   = models.CharField(max_length=5,  default='0', blank=True)
+    st_ratio     = models.CharField(max_length=2,  default='0', blank=True)
+    st_min_amt   = models.CharField(max_length=6,  default='0', blank=True)
+
+    # ── ST roundoff ──────────────────────────────────────────────────────────
+    st_roundoff_enable = models.BooleanField(default=False)
+    st_roundoff_amt    = models.CharField(max_length=3, default='0', blank=True)
+
+    # ── Boolean feature flags ────────────────────────────────────────────────
+    roundoff            = models.BooleanField(default=False)
+    round_up            = models.BooleanField(default=False)
+    remove_ticket_flag  = models.BooleanField(default=False)
+    stage_font_flag     = models.BooleanField(default=False)
+    next_fare_flag      = models.BooleanField(default=False)
+    odometer_entry      = models.BooleanField(default=False)
+    ticket_no_big_font  = models.BooleanField(default=False)
+    crew_check          = models.BooleanField(default=False)
+    tripsend_enable     = models.BooleanField(default=False)
+    schedulesend_enable = models.BooleanField(default=False)
+    inspect_rpt         = models.BooleanField(default=False)
+    multiple_pass       = models.BooleanField(default=False)
+    simple_report       = models.BooleanField(default=False)
+    inspector_sms       = models.BooleanField(default=False)
+    auto_shut_down      = models.BooleanField(default=False)
+    userpswd_enable     = models.BooleanField(default=False)
+    exp_enable          = models.BooleanField(default=False)
+
+    # ── Integer settings ─────────────────────────────────────────────────────
+    stage_updation_msg = models.IntegerField(default=0)
+    default_stage      = models.IntegerField(default=0)
+
+    # ── Audit ────────────────────────────────────────────────────────────────
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='settings_profiles_created',
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='settings_profiles_updated',
+    )
+
+    class Meta:
+        db_table = 'settings_profiles'
+        unique_together = [('company', 'name')]
+
+    def __str__(self):
+        return f"{self.name} ({self.company.company_name})"

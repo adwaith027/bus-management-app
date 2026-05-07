@@ -240,3 +240,29 @@ class MosambeeTransaction(models.Model):
             user.role in ['manager', 'company_admin', 'superadmin'] and
             self.verification_status == self.VerificationStatus.UNVERIFIED
         )
+
+
+class MosambeePayoutCallback(models.Model):
+    statementId = models.CharField(max_length=100, unique=True, db_index=True)
+    payoutAmount = models.DecimalField(max_digits=15, decimal_places=2)
+    utrNumber = models.CharField(max_length=100, db_index=True)
+    payoutDate = models.DateTimeField()
+    payoutAccount = models.CharField(max_length=50)
+    payoutBank = models.CharField(max_length=100)
+    payoutStatus = models.CharField(max_length=50)
+
+    # Array fields stored as JSON
+    transactions = models.JSONField(default=list)
+    deductions = models.JSONField(default=list)
+
+    raw_request_data = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'mosambee_payout_callback'
+        verbose_name = 'Mosambee Payout Callback'
+        verbose_name_plural = 'Mosambee Payout Callbacks'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Payout {self.statementId} | ₹{self.payoutAmount} | {self.payoutBank} | {self.payoutStatus}"

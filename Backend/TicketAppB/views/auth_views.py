@@ -1,14 +1,18 @@
 import secrets
 from django.utils import timezone
+from django.db import transaction
+from datetime import date, timedelta
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.decorators import api_view
 from rest_framework_simplejwt.exceptions import TokenError
 from django.contrib.auth import get_user_model, authenticate
 from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
-from datetime import date
 from ..models import Company, UserDeviceMapping
 from django.conf import settings
+
+# Slots not refreshed within this window are treated as expired (handles app crashes / force-kills)
+DEVICE_SESSION_TTL_HOURS = getattr(settings, "DEVICE_SESSION_TTL_HOURS", 24)
 
 User = get_user_model()
 
@@ -36,12 +40,16 @@ def _get_active_device_count_for_company(company, exclude_device_uid=None):
     """
     Count how many APPROVED + is_active mappings exist
     across all users of a given company.
+    Slots where last_seen_at has passed DEVICE_SESSION_TTL_HOURS are
+    excluded — they are considered stale (app crashed / force-killed).
     Optionally exclude a specific device_uid (for re-login checks).
     """
+    cutoff = timezone.now() - timedelta(hours=DEVICE_SESSION_TTL_HOURS)
     qs = UserDeviceMapping.objects.filter(
         user__company=company,
         status=UserDeviceMapping.DeviceStatus.APPROVED,
         is_active=True,
+        last_seen_at__gte=cutoff,
     )
     if exclude_device_uid:
         qs = qs.exclude(device_uid=exclude_device_uid)
@@ -106,6 +114,7 @@ def _build_token_response(user, company):
             "role": user.role,
             "is_verified": user.is_verified,
             "company_name": company.company_name if company else None,
+            "company_id": company.company_id if company else None,
             "valid_till": valid_till,
             "license_status": company.authentication_status if company else None,
         }
@@ -156,6 +165,7 @@ def get_user_from_cookie(request):
         return user
     except (TokenError, User.DoesNotExist):
         return None
+
 
 
 # Signup
@@ -250,7 +260,7 @@ def login_view(request):
     company = user.company
     if company:
         if company.product_to_date and date.today() > company.product_to_date:
-            return Response({"error": "License Expired. Contact Administrator"}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"error": f"License Expired (ID: {company.company_id}). Contact Administrator"}, status=status.HTTP_403_FORBIDDEN)
 
         if company.authentication_status and company.authentication_status != Company.AuthStatus.APPROVED:
             return Response({"error": "Pending License Approval. Contact Administrator"}, status=status.HTTP_403_FORBIDDEN)
@@ -326,24 +336,29 @@ def login_view(request):
         }, status=status.HTTP_403_FORBIDDEN)
 
     # ── Step 8: Approved device — check active session slot count ──
-    # If device is already active (re-login), skip the slot count check
+    # If device is already active (re-login), skip the slot count check.
+    # The company row is locked for the duration of the check + claim to
+    # prevent two simultaneous logins from both passing the count check.
     if not mapping.is_active:
-        active_count = _get_active_device_count_for_company(
-            company=company,
-            exclude_device_uid=device_uid,
-        )
-        allowed = company.mobile_device_count if company and company.mobile_device_count else 0
+        with transaction.atomic():
+            Company.objects.select_for_update().get(pk=company.pk)
 
-        if active_count >= allowed:
-            return Response({
-                "error_code": "DEVICE_LIMIT_REACHED",
-                "error": f"Maximum active device limit ({allowed}) reached for your company.",
-                "message": "Another active device must log out before this device can log in.",
-            }, status=status.HTTP_403_FORBIDDEN)
+            active_count = _get_active_device_count_for_company(
+                company=company,
+                exclude_device_uid=device_uid,
+            )
+            allowed = company.mobile_device_count if company and company.mobile_device_count else 0
 
-        # Slot available — mark this device as active
-        mapping.is_active = True
-        mapping.save(update_fields=["is_active", "updated_at"])
+            if active_count >= allowed:
+                return Response({
+                    "error_code": "DEVICE_LIMIT_REACHED",
+                    "error": f"Maximum active device limit ({allowed}) reached for your company.",
+                    "message": "Another active device must log out before this device can log in.",
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            # Slot available — mark this device as active
+            mapping.is_active = True
+            mapping.save(update_fields=["is_active", "updated_at"])
 
     # ── Issue tokens ──
     user.last_login = timezone.now()
@@ -352,7 +367,7 @@ def login_view(request):
 
 
 # Logout
-# Purpose: Clear cookies and deactivate device slot if mobile.
+# Purpose: Clear cookies, deactivate device slot if mobile, and blacklist the refresh token.
 @api_view(["POST"])
 def logout_view(request):
     device_uid = request.data.get("device_uid")
@@ -364,12 +379,20 @@ def logout_view(request):
             mapping.is_active = False
             mapping.save(update_fields=["is_active", "updated_at"])
 
-    # Browser logout — just clear cookies (no device_uid sent)
+    # Blacklist the refresh token asynchronously so the response is not delayed.
+    # The cookie is deleted below — the client loses the token immediately regardless.
+    refresh_token_str = request.COOKIES.get("refresh_token")
+    if refresh_token_str:
+        from TicketAppB.tasks import blacklist_refresh_token
+        blacklist_refresh_token.delay(refresh_token_str)
+
     return _build_logout_response("Logged out successfully")
 
 
 # Token Refresh
 # Purpose: Issue a new access token using the refresh token cookie.
+# Mobile apps should send device_uid in the POST body so last_seen_at stays
+# current, preventing the slot from expiring under the TTL while the app is active.
 @api_view(["POST"])
 def refresh_token_view(request):
     refresh_token = request.COOKIES.get("refresh_token")
@@ -380,6 +403,14 @@ def refresh_token_view(request):
     try:
         refresh = RefreshToken(refresh_token)
         new_access_token = str(refresh.access_token)
+
+        # Keep the device slot alive as long as the app is actively refreshing tokens
+        device_uid = request.data.get("device_uid")
+        if device_uid:
+            UserDeviceMapping.objects.filter(
+                device_uid=device_uid,
+                is_active=True,
+            ).update(last_seen_at=timezone.now())
 
         response = Response({"message": "Token refreshed successfully"})
         response.set_cookie(
@@ -420,6 +451,7 @@ def verify_auth(request):
             "role": user.role,
             "is_verified": user.is_verified,
             "company_name": company.company_name if company else None,
+            "company_id": company.company_id if company else None,
             "valid_till": valid_till,
             "license_status": company.authentication_status if company else None,
         }

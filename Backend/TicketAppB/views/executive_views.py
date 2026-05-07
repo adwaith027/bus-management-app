@@ -14,7 +14,7 @@ User = get_user_model()
 
 def _sync_executive_user_active(executive_user_id):
     has_active = ExecutiveCompanyMapping.objects.filter(executive_user_id=executive_user_id, is_active=True).exists()
-    User.objects.filter(id=executive_user_id, role='executive_user').update(is_active=has_active)
+    User.objects.filter(id=executive_user_id, role='executive').update(is_active=has_active)
 
 
 @api_view(['POST'])
@@ -74,7 +74,7 @@ def executive_dashboard(request):
     user = get_user_from_cookie(request)
     if not user:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    if user.role != 'executive_user':
+    if user.role != 'executive':
         return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
 
     mappings = ExecutiveCompanyMapping.objects.filter(

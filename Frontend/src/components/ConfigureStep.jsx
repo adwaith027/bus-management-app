@@ -1,10 +1,6 @@
-import { useState } from 'react';
-
 // ---------------------------------------------------------------
 // ConfigureStep — Step 2
-// Responsible for: company select, password toggle, import trigger
-// All state that needs to persist lives in the parent (MdbImport.jsx)
-// Local state here: showPassword (only UI-level, no need in parent)
+// Responsible for: company select + import trigger
 // ---------------------------------------------------------------
 
 // The tables this import covers — purely informational for the user
@@ -38,21 +34,12 @@ export default function ConfigureStep({
   selectedCompanyId,
   onCompanyChange,
 
-  // Password
-  isPasswordProtected,
-  mdbPassword,
-  onPasswordProtectedChange,
-  onPasswordChange,
-
   // Actions
   onBack,
   onImport,
   importing,
   importError,
 }) {
-  // showPassword is purely a UI toggle — doesn't need to live in parent
-  const [showPassword, setShowPassword] = useState(false);
-
   return (
     <div className="space-y-5">
       <div>
@@ -101,72 +88,7 @@ export default function ConfigureStep({
         </select>
       </div>
 
-      {/* ---- Password Section ---- */}
-      {/*
-        Password field is hidden behind a checkbox.
-        When checkbox is unchecked, password is cleared (handled in parent via onPasswordProtectedChange).
-        showPassword toggle is local — only affects the input type, no need to persist it.
-      */}
-      <div className="space-y-3 border border-slate-200 rounded-xl p-4 bg-slate-50">
-        <label className="flex items-start gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={isPasswordProtected}
-            onChange={(e) => onPasswordProtectedChange(e.target.checked)}
-            className="mt-0.5 w-4 h-4 rounded border-slate-300 text-slate-800 focus:ring-slate-500 cursor-pointer"
-          />
-          <div>
-            <p className="text-sm font-medium text-slate-700">This file is password protected</p>
-            <p className="text-xs text-slate-400 mt-0.5">Check this if your .mdb file requires a password to open.</p>
-          </div>
-        </label>
-
-        {/* Only show password input if checkbox is checked */}
-        {isPasswordProtected && (
-          <div className="space-y-1.5 pt-1">
-            <label className="text-sm font-medium text-slate-700">
-              MDB Password <span className="text-red-500">*</span>
-            </label>
-            <div className="relative">
-              <input
-                type={showPassword ? 'text' : 'password'}
-                value={mdbPassword}
-                onChange={(e) => onPasswordChange(e.target.value)}
-                placeholder="Enter file password"
-                className="w-full px-3 py-2 pr-10 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-500 transition-all"
-              />
-              {/* Eye toggle — local UI state only */}
-              <button
-                type="button"
-                onClick={() => setShowPassword(prev => !prev)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                tabIndex={-1}
-              >
-                {showPassword ? (
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 4.411m0 0L21 21" />
-                  </svg>
-                ) : (
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                  </svg>
-                )}
-              </button>
-            </div>
-            <p className="text-xs text-amber-600 flex items-center gap-1">
-              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              Note: Some newer Access encryption formats may not be supported.
-            </p>
-          </div>
-        )}
-      </div>
+      {/* ---- Password Section hidden — mdbtools does not enforce MDB passwords ---- */}
 
       {/* ---- Tables info panel ---- */}
       {/* Informational only — shows user what will be imported */}
@@ -210,7 +132,7 @@ export default function ConfigureStep({
         </button>
         <button
           onClick={onImport}
-          disabled={importing || !selectedCompanyId || (isPasswordProtected && !mdbPassword.trim())}
+          disabled={importing || !selectedCompanyId}
           className="px-5 py-2 text-sm font-medium text-white bg-slate-800 rounded-lg hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm flex items-center gap-2"
         >
           {importing ? (

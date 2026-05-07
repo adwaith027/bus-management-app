@@ -5,9 +5,9 @@ AUTH_MODELS = ['CustomUser', 'UserDeviceMapping']
 
 
 # Company models
-from .company import Company, Depot, Dealer, DealerCustomerMapping, ExecutiveCompanyMapping
+from .company import Company, Depot, Dealer, DealerCustomerMapping, ExecutiveCompanyMapping, ETMDevice
 
-COMPANY_MODELS = ['Company','Depot','Dealer','DealerCustomerMapping','ExecutiveCompanyMapping',]
+COMPANY_MODELS = ['Company','Depot','Dealer','DealerCustomerMapping','ExecutiveCompanyMapping','ETMDevice',]
 
 
 # Master data models
@@ -21,8 +21,10 @@ from .master_data import (
     RouteStage,
     Fare,
     RouteBusType,
+    RouteDepot,
     VehicleType,
     Settings,
+    SettingsProfile,
 )
 
 MASTER_DATA_MODELS = [
@@ -35,8 +37,10 @@ MASTER_DATA_MODELS = [
     'RouteStage',
     'Fare',
     'RouteBusType',
+    'RouteDepot',
     'VehicleType',
     'Settings',
+    'SettingsProfile',
 ]
 
 
@@ -57,9 +61,9 @@ from .transactions import (TransactionData,TripCloseData,RawDataLog,)
 TRANSACTION_MODELS = ['TransactionData','TripCloseData','RawDataLog',]
 
 # Payment models
-from .payments import MosambeeTransaction
+from .payments import MosambeeTransaction, MosambeePayoutCallback
 
-PAYMENT_MODELS = ['MosambeeTransaction',]
+PAYMENT_MODELS = ['MosambeeTransaction', 'MosambeePayoutCallback',]
 
 
 # Public export surface

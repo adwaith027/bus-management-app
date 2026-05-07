@@ -1,25 +1,20 @@
 import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
-  // Top-level nav icons
   LayoutDashboard, Building2, Users, Handshake,
   SmartphoneNfc, FileInput, Warehouse, Database,
   BarChart2, Receipt, LogOut, Menu,
   AlertTriangle, XCircle, QrCode,
   ChevronDown, ChevronLeft, ChevronRight,
-  // Sub-link icons (Master Data)
-  Bus, Coins, UserCog, UserRound, MapPin,
-  Route, Truck, CalendarCog, BadgeDollarSign, Settings,
-  // Sub-link icons (Reports)
-  Ticket, TrendingDown,
+  Coins, Users2,
+  Route, Truck, CalendarCog, Settings,
+  Ticket, TrendingDown, IndianRupee, Cpu, MonitorDown,
 } from "lucide-react";
 import api, { BASE_URL } from "../assets/js/axiosConfig";
 import cacheManager from "../assets/js/reportCache";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SECTION 1 — SUB-LINK
-// Each dropdown item has a small icon + label.
-// The icon is always visible; label collapses with max-w/opacity.
+// SUB-LINK
 // ─────────────────────────────────────────────────────────────────────────────
 function SubLink({ to, icon: Icon, label, onClose }) {
   return (
@@ -27,26 +22,21 @@ function SubLink({ to, icon: Icon, label, onClose }) {
       to={to}
       onClick={onClose}
       className={({ isActive }) =>
-        `flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm transition-colors duration-150 ${
+        `flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm transition-colors duration-150 ${
           isActive
-            ? "text-indigo-600 bg-indigo-50 font-semibold"
-            : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+            ? "bg-slate-100 text-slate-900 font-semibold"
+            : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"
         }`
       }
     >
-      {Icon && <Icon size={14} className="shrink-0 opacity-70" />}
+      {Icon && <Icon size={13} className="shrink-0" />}
       <span>{label}</span>
     </NavLink>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SECTION 2 — NAV ITEM (top-level link)
-//
-// KEY RULES for no-jitter:
-//   • Icon has fixed left padding (px-4) and is NEVER repositioned.
-//   • Label stays in the DOM — only max-w + opacity animate.
-//   • No gap/justify toggling (those cause positional jumps).
+// NAV ITEM
 // ─────────────────────────────────────────────────────────────────────────────
 function NavItem({ to, icon: Icon, label, isCollapsed, onClose, end }) {
   return (
@@ -56,18 +46,15 @@ function NavItem({ to, icon: Icon, label, isCollapsed, onClose, end }) {
         end={end}
         onClick={onClose}
         className={({ isActive }) =>
-          `flex items-center rounded-lg px-4 py-[7px] text-base transition-colors duration-150
-          ${
+          `flex items-center rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150 ${
             isActive
-              ? "bg-indigo-50 text-indigo-700 font-semibold border-l-4 border-indigo-600"
-              : "text-slate-600 hover:bg-slate-100 hover:text-slate-900 border-l-4 border-transparent"
+              ? "bg-slate-100 text-slate-900"
+              : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
           }`
         }
       >
-        {/* Icon — pinned, never shifts */}
-        <Icon size={18} className="shrink-0" />
+        <Icon size={17} className="shrink-0" />
 
-        {/* Label — fades + slides out, icon position unchanged */}
         <span
           className={`ml-3 whitespace-nowrap overflow-hidden transition-all duration-300 ${
             isCollapsed ? "max-w-0 opacity-0" : "max-w-[200px] opacity-100"
@@ -81,10 +68,7 @@ function NavItem({ to, icon: Icon, label, isCollapsed, onClose, end }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SECTION 3 — DROPDOWN SECTION
-//
-// Same icon-pinned pattern.
-// Dropdown body stays in DOM (max-h animation) — no mount/unmount jitter.
+// DROPDOWN SECTION
 // ─────────────────────────────────────────────────────────────────────────────
 function DropdownSection({ icon: Icon, label, isCollapsed, isOpen, onToggle, children }) {
   return (
@@ -92,33 +76,29 @@ function DropdownSection({ icon: Icon, label, isCollapsed, isOpen, onToggle, chi
       <button
         onClick={onToggle}
         style={{ cursor: "pointer" }}
-        className="w-full flex items-center px-4 py-[7px] rounded-lg text-base transition-colors duration-150
-          text-slate-600 hover:bg-slate-100 hover:text-slate-900 border-l-4 border-transparent"
+        className="w-full flex items-center px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 text-slate-600 hover:bg-slate-50 hover:text-slate-900"
       >
-        {/* Icon — always pinned at same position */}
-        <Icon size={18} className="shrink-0" />
+        <Icon size={17} className="shrink-0" />
 
-        {/* Label + chevron — collapse as one unit */}
         <span
           className={`ml-3 flex items-center justify-between flex-1 whitespace-nowrap overflow-hidden transition-all duration-300 ${
             isCollapsed ? "max-w-0 opacity-0" : "max-w-[220px] opacity-100"
           }`}
         >
-          <span className="font-medium">{label}</span>
+          <span>{label}</span>
           <ChevronDown
             size={14}
-            className={`shrink-0 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+            className={`shrink-0 transition-transform duration-200 ${isOpen ? "rotate-180 text-slate-800" : "text-slate-400"}`}
           />
         </span>
       </button>
 
-      {/* Dropdown body — always in DOM, height-animated only */}
       <div
         className={`overflow-hidden transition-all duration-300 ${
           isCollapsed || !isOpen ? "max-h-0 opacity-0" : "max-h-[600px] opacity-100"
         }`}
       >
-        <div className="pl-[44px] pr-2 pt-1 pb-2 space-y-0.5">
+        <div className="ml-3 pl-5 border-l border-slate-200 mt-1 mb-1 space-y-0.5">
           {children}
         </div>
       </div>
@@ -127,19 +107,19 @@ function DropdownSection({ icon: Icon, label, isCollapsed, isOpen, onToggle, chi
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SECTION 4 — SECTION LABEL
+// SECTION LABEL
 // ─────────────────────────────────────────────────────────────────────────────
 function SectionLabel({ label, isCollapsed }) {
   if (isCollapsed) {
     return (
       <li>
-        <div className="border-t border-slate-200 mx-3 my-3" />
+        <div className="border-t border-slate-200 mx-2 my-2" />
       </li>
     );
   }
   return (
-    <li className="px-4 pt-3 pb-1">
-      <span className="text-[10.5px] text-slate-400 uppercase tracking-widest font-bold select-none">
+    <li className="px-3 pt-4 pb-1">
+      <span className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold select-none">
         {label}
       </span>
     </li>
@@ -147,7 +127,7 @@ function SectionLabel({ label, isCollapsed }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SECTION 5 — MAIN SIDEBAR
+// MAIN SIDEBAR
 // ─────────────────────────────────────────────────────────────────────────────
 export default function Sidebar() {
   const [isOpen,         setIsOpen]         = useState(false);
@@ -177,8 +157,9 @@ export default function Sidebar() {
     if (!validTill) return null;
     const [day, month, year] = validTill.split("-");
     const days = Math.ceil((new Date(year, month - 1, day) - new Date()) / 86400000);
-    if (days <= 0)  return { message: "License Expired!",                                    type: "error"   };
-    if (days <= 10) return { message: `License expires in ${days} day${days !== 1 ? "s":""}`, type: "warning" };
+    if (days < 0)   return { message: "License Expired!",                                       type: "error"   };
+    if (days === 0) return { message: "License expires today!",                                  type: "error"   };
+    if (days <= 10) return { message: `License expires in ${days} day${days !== 1 ? "s" : ""}`, type: "warning" };
     return null;
   };
   const warning = getLicenseWarning();
@@ -214,60 +195,48 @@ export default function Sidebar() {
       <aside
         className={`
           fixed top-0 left-0 h-screen z-40 flex flex-col
-          bg-slate-50 border-r border-slate-200
+          bg-white border-r border-slate-200
           transition-all duration-300 ease-in-out
           ${isOpen ? "translate-x-0" : "-translate-x-full"}
           lg:translate-x-0
-          ${isCollapsed ? "lg:w-[80px]" : "lg:w-72"}
+          ${isCollapsed ? "lg:w-[72px]" : "lg:w-64"}
         `}
       >
 
         {/* ── HEADER ──────────────────────────────────────────────────────── */}
-        {/*
-          Logo is pinned at left with fixed px-4 padding — never moves.
-          Text collapses via max-w + opacity — doesn't affect logo position.
+        <div className="relative h-16 flex items-center border-b border-slate-100 bg-white flex-shrink-0 px-4">
 
-          Collapse button is OUTSIDE the header's flex flow entirely.
-          It uses absolute positioning on the sidebar's right edge (top-center).
-          This means it never competes with logo/text for space and is
-          always at the same visual position regardless of collapsed state.
-        */}
-        <div className="relative h-20 flex items-center border-b border-slate-200/60 bg-slate-50 flex-shrink-0 px-4">
-
-          {/* Logo icon — always at same x position, never moves */}
-          <div className="w-9 h-9 rounded-lg bg-indigo-600 text-white flex items-center justify-center shadow-md shrink-0">
-            <QrCode size={17} />
+          {/* Logo icon — dark container */}
+          <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center shrink-0">
+            <QrCode size={15} />
           </div>
 
-          {/* Brand text — fades + collapses right, zero effect on logo */}
+          {/* Brand text */}
           <div
             className={`ml-3 overflow-hidden transition-all duration-300 ${
               isCollapsed ? "max-w-0 opacity-0" : "max-w-[160px] opacity-100"
             }`}
           >
-            <p className="text-[13.5px] font-black text-slate-800 tracking-tight whitespace-nowrap leading-tight">
-              Palmtec Amphibia <span className="text-indigo-600">QR</span>
+            <p className="text-[15px] font-black text-black tracking-tight whitespace-nowrap leading-tight">
+              Palmtec Amphibia
             </p>
+            <p className="text-[10px] text-slate-500 tracking-widest font-semibold whitespace-nowrap">QR</p>
           </div>
 
-          {/*
-            Collapse toggle — absolutely positioned, anchored to sidebar's
-            right edge vertically centered. Completely removed from flex flow
-            so it cannot push or be pushed by any other element.
-          */}
+          {/* Collapse toggle */}
           <button
             onClick={handleCollapse}
             style={{ cursor: "pointer" }}
-            className="hidden lg:flex absolute right-[-13px] top-1/2 -translate-y-1/2
+            className="hidden lg:flex absolute right-[-12px] top-1/2 -translate-y-1/2
               items-center justify-center w-6 h-6 rounded-full
               bg-white border border-slate-200 shadow-sm
-              text-slate-400 hover:text-indigo-600 hover:border-indigo-300
+              text-slate-400 hover:text-slate-700 hover:border-slate-300
               transition-colors duration-150 z-10 shrink-0"
           >
-            {isCollapsed ? <ChevronRight size={13} /> : <ChevronLeft size={13} />}
+            {isCollapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
           </button>
 
-          {/* Mobile close button — only visible on small screens */}
+          {/* Mobile close */}
           <button
             onClick={close}
             style={{ cursor: "pointer" }}
@@ -275,7 +244,7 @@ export default function Sidebar() {
               text-slate-400 hover:text-slate-700 hover:bg-slate-100
               transition-colors duration-150"
           >
-            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
@@ -290,35 +259,65 @@ export default function Sidebar() {
           {warning && (
             <div className={`mx-3 mt-3 px-3 py-2.5 rounded-lg text-xs flex items-start gap-2 ${
               warning.type === "error"
-                ? "bg-red-50 border border-red-200 text-red-700"
-                : "bg-amber-50 border border-amber-200 text-amber-700"
+                ? "bg-red-50 border border-red-300 text-red-700"
+                : "bg-orange-50 border border-orange-300 text-orange-700"
             }`}>
               {warning.type === "error"
-                ? <XCircle size={14} className="mt-0.5 shrink-0" />
-                : <AlertTriangle size={14} className="mt-0.5 shrink-0" />}
+                ? <XCircle size={13} className="mt-0.5 shrink-0 text-red-600" />
+                : <AlertTriangle size={13} className="mt-0.5 shrink-0 text-orange-600" />}
               <div>
                 <p className="font-semibold">{warning.message}</p>
-                <p className="text-[10px] opacity-70 mt-0.5">Valid till: {user?.valid_till}</p>
+                <p className={`text-[10px] mt-0.5 font-medium ${warning.type === "error" ? "text-red-600" : "text-orange-600"}`}>Valid till: {user?.valid_till}</p>
               </div>
             </div>
           )}
         </div>
 
         {/* ── NAVIGATION ──────────────────────────────────────────────────── */}
-        <nav className="flex-1 overflow-y-auto py-2 px-2 custom-scrollbar">
+        <nav className="flex-1 overflow-y-auto py-3 px-3 custom-scrollbar">
           <ul className="space-y-0.5">
 
-            <NavItem to="/dashboard" end icon={LayoutDashboard} label="Dashboard" isCollapsed={isCollapsed} onClose={close} />
+            {role !== "production" && (
+              <NavItem to="/dashboard" end icon={LayoutDashboard} label="Dashboard" isCollapsed={isCollapsed} onClose={close} />
+            )}
 
             {/* Superadmin */}
             {role === "superadmin" && (
               <>
                 <SectionLabel label="Administration" isCollapsed={isCollapsed} />
-                <NavItem to="/dashboard/companies"        icon={Building2}     label="Companies"        isCollapsed={isCollapsed} onClose={close} />
+                <NavItem to="/dashboard/clients"          icon={Handshake}     label="Clients"          isCollapsed={isCollapsed} onClose={close} />
                 <NavItem to="/dashboard/users"            icon={Users}         label="Users"            isCollapsed={isCollapsed} onClose={close} />
-                <NavItem to="/dashboard/dealers"          icon={Handshake}     label="Dealers"          isCollapsed={isCollapsed} onClose={close} />
+                <NavItem to="/dashboard/device-registry"  icon={Cpu}           label="Device Registry"  isCollapsed={isCollapsed} onClose={close} />
                 <NavItem to="/dashboard/device-approvals" icon={SmartphoneNfc} label="Device Approvals" isCollapsed={isCollapsed} onClose={close} />
                 <NavItem to="/dashboard/data-import"      icon={FileInput}     label="MDB Data Import"  isCollapsed={isCollapsed} onClose={close} />
+              </>
+            )}
+
+            {/* Executive */}
+            {role === "executive" && (
+              <>
+                <SectionLabel label="Administration" isCollapsed={isCollapsed} />
+                <NavItem to="/dashboard/companies"       icon={Building2}     label="Companies"       isCollapsed={isCollapsed} onClose={close} />
+                <NavItem to="/dashboard/users"           icon={Users}         label="Users"           isCollapsed={isCollapsed} onClose={close} />
+                <NavItem to="/dashboard/device-registry" icon={Cpu}           label="Device Registry" isCollapsed={isCollapsed} onClose={close} />
+              </>
+            )}
+
+            {/* Dealer Admin */}
+            {role === "dealer_admin" && (
+              <>
+                <SectionLabel label="My Portfolio" isCollapsed={isCollapsed} />
+                <NavItem to="/dashboard/companies"       icon={Building2} label="My Companies"    isCollapsed={isCollapsed} onClose={close} />
+                <NavItem to="/dashboard/users"           icon={Users}     label="Users"           isCollapsed={isCollapsed} onClose={close} />
+                <NavItem to="/dashboard/device-registry" icon={Cpu}       label="Device Registry" isCollapsed={isCollapsed} onClose={close} />
+              </>
+            )}
+
+            {/* Production User */}
+            {role === "production" && (
+              <>
+                <SectionLabel label="Production" isCollapsed={isCollapsed} />
+                <NavItem to="/dashboard/device-registry" icon={Cpu} label="Device Upload" isCollapsed={isCollapsed} onClose={close} />
               </>
             )}
 
@@ -333,28 +332,26 @@ export default function Sidebar() {
                   isCollapsed={isCollapsed} isOpen={masterDataOpen}
                   onToggle={() => setMasterDataOpen(p => !p)}
                 >
-                  <SubLink to="/dashboard/master-data/bus-types"       icon={Bus}             label="Bus Types"        onClose={close} />
                   <SubLink to="/dashboard/master-data/currencies"       icon={Coins}           label="Currencies"       onClose={close} />
-                  <SubLink to="/dashboard/master-data/employee-types"   icon={UserCog}         label="Employee Types"   onClose={close} />
-                  <SubLink to="/dashboard/master-data/employees"        icon={UserRound}       label="Employees"        onClose={close} />
-                  <SubLink to="/dashboard/master-data/stages"           icon={MapPin}          label="Stages"           onClose={close} />
-                  <SubLink to="/dashboard/master-data/routes"           icon={Route}           label="Routes"           onClose={close} />
+                  <SubLink to="/dashboard/master-data/employees"         icon={Users2}          label="Employee"         onClose={close} />
                   <SubLink to="/dashboard/master-data/vehicles"         icon={Truck}           label="Vehicles"         onClose={close} />
-                  <SubLink to="/dashboard/master-data/crew-assignments" icon={CalendarCog}     label="Crew Assignments" onClose={close} />
-                  <SubLink to="/dashboard/master-data/fares"            icon={BadgeDollarSign} label="Fare"             onClose={close} />
+                  <SubLink to="/dashboard/master-data/routes"           icon={Route}           label="Routes"           onClose={close} />
+                  <SubLink to="/dashboard/master-data/crew-assignments" icon={CalendarCog} label="Crew Assignments" onClose={close} />
+                  <SubLink to="/dashboard/master-data/expense-master"   icon={IndianRupee} label="Expense Master"   onClose={close} />
                   <SubLink to="/dashboard/master-data/settings"         icon={Settings}        label="Settings"         onClose={close} />
                 </DropdownSection>
 
+                <NavItem to="/dashboard/device-download"          icon={MonitorDown} label="Device Download" isCollapsed={isCollapsed} onClose={close} />
                 <DropdownSection
                   icon={BarChart2} label="Reports"
                   isCollapsed={isCollapsed} isOpen={reportsOpen}
                   onToggle={() => setReportsOpen(p => !p)}
                 >
-                  <SubLink to="/dashboard/ticket-report"     icon={Ticket}      label="Ticket Report" onClose={close} />
-                  <SubLink to="/dashboard/trip-close-report" icon={TrendingDown} label="Trip Close"   onClose={close} />
+                  <SubLink to="/dashboard/ticket-report"     icon={Ticket}       label="Ticket Report" onClose={close} />
+                  <SubLink to="/dashboard/trip-close-report" icon={TrendingDown} label="Trip Close"    onClose={close} />
                 </DropdownSection>
 
-                <NavItem to="/dashboard/settlements" icon={Receipt} label="Settlements" isCollapsed={isCollapsed} onClose={close} />
+                <NavItem to="/dashboard/settlements/transactions" icon={Receipt} label="Settlements" isCollapsed={isCollapsed} onClose={close} />
               </>
             )}
 
@@ -362,11 +359,11 @@ export default function Sidebar() {
         </nav>
 
         {/* ── FOOTER ──────────────────────────────────────────────────────── */}
-        <div className="border-t border-slate-200 px-2 pt-3 pb-4 bg-slate-50 flex-shrink-0 space-y-0.5">
+        <div className="border-t border-slate-100 px-3 pt-3 pb-4 bg-slate-50/80 flex-shrink-0 space-y-1">
 
-          {/* User chip — avatar pinned left, text collapses */}
-          <div className="flex items-center rounded-lg px-2 py-1.5">
-            <div className="w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
+          {/* User chip */}
+          <div className="flex items-center rounded-xl px-2 py-2">
+            <div className="w-7 h-7 rounded-lg bg-slate-900 text-white flex items-center justify-center text-xs font-bold shrink-0">
               {username.charAt(0).toUpperCase()}
             </div>
             <div
@@ -374,23 +371,23 @@ export default function Sidebar() {
                 isCollapsed ? "max-w-0 opacity-0" : "max-w-[160px] opacity-100"
               }`}
             >
-              <p className="text-[15px] font-semibold text-slate-800 truncate whitespace-nowrap">{username}</p>
-              <p className="text-[10px] text-slate-500 uppercase tracking-wide whitespace-nowrap">
+              <p className="text-[13px] font-semibold text-slate-800 truncate whitespace-nowrap leading-tight">{username}</p>
+              <p className="text-[10px] text-slate-400 uppercase tracking-wide whitespace-nowrap">
                 {role?.replace(/_/g, " ")}
               </p>
             </div>
           </div>
 
-          {/* Logout — icon pinned, text collapses */}
+          {/* Logout */}
           <button
             onClick={handleLogout}
             style={{ cursor: "pointer" }}
-            className="w-full flex items-center px-4 py-1.5 rounded-lg text-base
-              text-slate-600 hover:bg-red-50 hover:text-red-600 transition-colors duration-150"
+            className="w-full flex items-center px-3 py-2 rounded-xl text-sm font-medium
+              text-slate-500 hover:bg-red-50 hover:text-red-600 transition-colors duration-150"
           >
-            <LogOut size={17} className="shrink-0" />
+            <LogOut size={16} className="shrink-0" />
             <span
-              className={`ml-3 font-medium whitespace-nowrap overflow-hidden transition-all duration-300 ${
+              className={`ml-3 whitespace-nowrap overflow-hidden transition-all duration-300 ${
                 isCollapsed ? "max-w-0 opacity-0" : "max-w-[160px] opacity-100"
               }`}
             >
@@ -404,17 +401,22 @@ export default function Sidebar() {
               isCollapsed ? "max-h-0 opacity-0" : "max-h-10 opacity-100"
             }`}
           >
-            <p className="text-center text-[10px] text-slate-400 pt-1 tracking-wide">
-              © Softland India Ltd — All Rights Reserved
-            </p>
+            <div className="flex flex-col items-center gap-0.5 pt-1">
+              <p className="text-[10px] font-semibold text-slate-600 tracking-wide">
+                © Softland India Ltd
+              </p>
+              <p className="text-[9px] text-slate-500 tracking-wider uppercase">
+                All Rights Reserved
+              </p>
+            </div>
           </div>
         </div>
       </aside>
 
-      {/* Desktop spacer — mirrors sidebar width exactly */}
+      {/* Desktop spacer */}
       <div
         className={`hidden lg:block shrink-0 transition-all duration-300 ${
-          isCollapsed ? "w-[80px]" : "w-72"
+          isCollapsed ? "w-[72px]" : "w-64"
         }`}
       />
     </>

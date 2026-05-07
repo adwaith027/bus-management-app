@@ -1,9 +1,10 @@
 import logging
 from decimal import Decimal,InvalidOperation
-from datetime import datetime,timezone
+from datetime import datetime,timezone,timedelta
+from zoneinfo import ZoneInfo
 from django.utils import timezone as tz
 from rest_framework import status
-from ..models import TransactionData,TripCloseData,Company,MosambeeTransaction
+from ..models import TransactionData,TripCloseData,Company,MosambeeTransaction,MosambeePayoutCallback
 from django.http import HttpResponse,JsonResponse
 from .auth_views import get_user_from_cookie
 from rest_framework.response import Response
@@ -253,6 +254,149 @@ def mosambee_settlement_data(request):
         return JsonResponse({'status': 500,'message': 'Data Entry failed'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@csrf_exempt
+def mosambee_payout_callback(request):
+    try:
+        if request.method != 'POST':
+            return JsonResponse({'statusCode': '500'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({'statusCode': '500'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Support both camelCase and snake_case field names as Mosambee's own spec is inconsistent
+        statement_id = data.get('statementId')
+        payout_amount = data.get('payoutAmount') or data.get('actual_payout_amount')
+        utr_number = data.get('utrNumber') or data.get('utr_number')
+        payout_date_str = data.get('payoutDate') or data.get('payout_date')
+        payout_account = data.get('payoutAccount') or data.get('payout_account')
+        payout_bank = data.get('payoutBank') or data.get('payout_bank')
+        payout_status = data.get('payoutStatus') or data.get('payout_status')
+        transactions = data.get('transactions', [])
+        deductions = data.get('deductions', [])
+
+        # Validate required fields
+        missing = [name for name, val in {
+            'statementId': statement_id,
+            'payoutAmount': payout_amount,
+            'utrNumber': utr_number,
+            'payoutDate': payout_date_str,
+            'payoutAccount': payout_account,
+            'payoutBank': payout_bank,
+            'payoutStatus': payout_status,
+            'transactions': transactions,
+        }.items() if not val and val != 0]
+
+        if missing:
+            logger.warning(f"Payout callback missing fields: {missing}")
+            return JsonResponse({'statusCode': '500'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            payout_date = datetime.fromisoformat(payout_date_str)
+        except ValueError:
+            logger.warning(f"Payout callback invalid payoutDate: {payout_date_str}")
+            return JsonResponse({'statusCode': '500'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Handle repost — same statementId received again
+        existing = MosambeePayoutCallback.objects.filter(statementId=statement_id).first()
+        if existing:
+            logger.info(f"Payout callback repost received for statementId: {statement_id}")
+            return JsonResponse({'statusCode': '100'}, status=status.HTTP_200_OK)
+
+        payout = MosambeePayoutCallback.objects.create(
+            statementId=statement_id,
+            payoutAmount=payout_amount,
+            utrNumber=utr_number,
+            payoutDate=payout_date,
+            payoutAccount=payout_account,
+            payoutBank=payout_bank,
+            payoutStatus=payout_status,
+            transactions=transactions,
+            deductions=deductions,
+            raw_request_data=data,
+        )
+
+        # Link each transaction in the payout to MosambeeTransaction
+        linked = 0
+        for txn in transactions:
+            txn_id = txn.get('transactionId') or txn.get('transactionID')
+            if not txn_id:
+                continue
+            updated = MosambeeTransaction.objects.filter(transactionID=str(txn_id)).update(
+                settlement_batch_id=statement_id,
+                settled_at=payout_date,
+                settlement_amount=txn.get('amount'),
+            )
+            linked += updated
+
+        logger.info(f"Payout {statement_id} received, linked {linked} transactions")
+        return JsonResponse({'statusCode': '100'}, status=status.HTTP_200_OK)
+
+    except Exception:
+        logger.exception("Error processing payout callback")
+        return JsonResponse({'statusCode': '500'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def get_payout_data(request):
+    user = get_user_from_cookie(request)
+    if not user:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if user.role not in ['company_admin', 'depot_admin', 'admin', 'super_admin']:
+        return Response({'error': 'Insufficient permissions'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        from_date = request.GET.get('from_date')
+        to_date = request.GET.get('to_date')
+
+        if not from_date or not to_date:
+            return Response({'error': 'from_date and to_date are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        IST = ZoneInfo('Asia/Kolkata')
+        from_dt = datetime.strptime(from_date, '%Y-%m-%d').replace(tzinfo=IST)
+        to_dt = datetime.strptime(to_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=IST)
+
+        payouts = MosambeePayoutCallback.objects.filter(
+            payoutDate__gte=from_dt,
+            payoutDate__lte=to_dt,
+        ).order_by('-payoutDate')[:200]
+
+        result = []
+        for p in payouts:
+            # Gather linked transaction IDs from this payout
+            txn_ids = [str(t.get('transactionId') or t.get('transactionID', '')) for t in p.transactions]
+
+            # Count how many of those are verified in our system
+            verified_count = MosambeeTransaction.objects.filter(
+                transactionID__in=txn_ids,
+                verification_status='VERIFIED'
+            ).count()
+
+            result.append({
+                'id': p.id,
+                'statementId': p.statementId,
+                'payoutAmount': str(p.payoutAmount),
+                'utrNumber': p.utrNumber,
+                'payoutDate': p.payoutDate.isoformat(),
+                'payoutAccount': p.payoutAccount,
+                'payoutBank': p.payoutBank,
+                'payoutStatus': p.payoutStatus,
+                'transactions': p.transactions,
+                'deductions': p.deductions,
+                'transaction_count': len(p.transactions),
+                'verified_count': verified_count,
+                'created_at': p.created_at.isoformat(),
+            })
+
+        return Response({'message': 'success', 'data': result, 'count': len(result)}, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        logger.exception("Error fetching payout data")
+        return Response({'message': 'Failed to fetch payout data', 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @api_view(['GET'])
 def get_settlement_data(request):
     """
@@ -380,7 +524,7 @@ def verify_settlement(request):
             transaction.processing_status = MosambeeTransaction.ProcessingStatus.PENDING_VERIFICATION
 
         transaction.save()
-        
+
         # Return updated transaction
         response_serializer = MosambeeTransactionSerializer(transaction)
         

@@ -7,11 +7,12 @@
 /*
   Expected shape of `result` prop (must match what your Django view returns):
   {
-    imported: 150,          // total rows successfully saved
+    imported: 150,          // total rows newly created
+    existing: 20,           // total rows already in DB (re-import, no write)
     skipped: 5,             // total rows that failed / were skipped
     table_results: [        // per-table breakdown
-      { table: "BusType", imported: 10, skipped: 0 },
-      { table: "Employee", imported: 25, skipped: 2 },
+      { table: "BusType", imported: 10, existing: 3, skipped: 0 },
+      { table: "Employee", imported: 25, existing: 0, skipped: 2 },
       ...
     ],
     errors: [               // human-readable reasons for skipped rows
@@ -23,7 +24,7 @@
 */
 
 export default function ImportResults({ result, onReset }) {
-  const total = (result.imported ?? 0) + (result.skipped ?? 0);
+  const total = (result.imported ?? 0) + (result.existing ?? 0) + (result.skipped ?? 0);
   const hasErrors = result.errors && result.errors.length > 0;
   const isFullSuccess = result.skipped === 0;
 
@@ -60,21 +61,25 @@ export default function ImportResults({ result, onReset }) {
             {isFullSuccess ? 'Import completed successfully!' : 'Import completed with some issues'}
           </p>
           <p className={`text-sm mt-0.5 ${isFullSuccess ? 'text-emerald-600' : 'text-amber-600'}`}>
-            {result.imported} records imported, {result.skipped} records skipped
+            {result.imported} new, {result.existing ?? 0} already existed, {result.skipped} skipped
           </p>
         </div>
       </div>
 
       {/* ---- Stats Grid ---- */}
-      {/* Quick 3-number summary */}
-      <div className="grid grid-cols-3 gap-3">
+      {/* 4-number summary: total / new / existing / skipped */}
+      <div className="grid grid-cols-4 gap-3">
         <div className="bg-slate-50 rounded-lg p-3 text-center border border-slate-200">
           <p className="text-2xl font-bold text-slate-800">{total}</p>
-          <p className="text-xs text-slate-500 mt-0.5">Total Rows</p>
+          <p className="text-xs text-slate-500 mt-0.5">Total</p>
         </div>
         <div className="bg-emerald-50 rounded-lg p-3 text-center border border-emerald-200">
           <p className="text-2xl font-bold text-emerald-700">{result.imported}</p>
-          <p className="text-xs text-emerald-600 mt-0.5">Imported</p>
+          <p className="text-xs text-emerald-600 mt-0.5">New</p>
+        </div>
+        <div className="bg-slate-50 rounded-lg p-3 text-center border border-slate-200">
+          <p className="text-2xl font-bold text-slate-700">{result.existing ?? 0}</p>
+          <p className="text-xs text-slate-500 mt-0.5">Existing</p>
         </div>
         <div className="bg-red-50 rounded-lg p-3 text-center border border-red-200">
           <p className="text-2xl font-bold text-red-700">{result.skipped}</p>
@@ -92,7 +97,8 @@ export default function ImportResults({ result, onReset }) {
               <thead className="bg-slate-50">
                 <tr>
                   <th className="px-3 py-2 text-left font-medium text-slate-600">Table</th>
-                  <th className="px-3 py-2 text-right font-medium text-slate-600">Imported</th>
+                  <th className="px-3 py-2 text-right font-medium text-slate-600">New</th>
+                  <th className="px-3 py-2 text-right font-medium text-slate-600">Existing</th>
                   <th className="px-3 py-2 text-right font-medium text-slate-600">Skipped</th>
                 </tr>
               </thead>
@@ -101,6 +107,7 @@ export default function ImportResults({ result, onReset }) {
                   <tr key={i} className="border-t border-slate-100">
                     <td className="px-3 py-2 text-slate-700 font-medium">{t.table}</td>
                     <td className="px-3 py-2 text-right text-emerald-700">{t.imported}</td>
+                    <td className="px-3 py-2 text-right text-slate-500">{t.existing ?? 0}</td>
                     <td className={`px-3 py-2 text-right ${t.skipped > 0 ? 'text-red-600' : 'text-slate-400'}`}>
                       {t.skipped}
                     </td>

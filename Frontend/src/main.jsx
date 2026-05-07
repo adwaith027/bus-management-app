@@ -2,34 +2,44 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom'
 
+
 import './index.css'
 
-import Login from './pages/Login'
-import Signup from './pages/Signup'
+import Login from './pages/auth/Login'
+import Signup from './pages/auth/Signup'
 import Dashboard from './layouts/Dashboard'
 import RoleBasedHome from './components/RoleBasedHome'
 import ProtectedRoute from './components/ProtectedRoute'
 
-import CompanyListing from './pages/CompanyListing'
-import UserListing from './pages/UserListing'
-import TicketReport from './pages/TicketReport'
-import TripcloseReport from './pages/TripcloseReport'
-import DepotListing from './pages/DepotListing'
-import SettlementPage from './pages/SettlementPage'
-import DealerManagement from './pages/DealerManagement'
-import DeviceApprovals from './pages/DeviceApprovals'
+import CompanyListing from './pages/listings/CompanyListing'
+import Clients from './pages/listings/Clients'
+import UserListing from './pages/listings/UserListing'
+import DepotListing from './pages/listings/DepotListing'
+import VehicleCombined from './pages/listings/VehicleCombined'
+import CurrencyListing from './pages/listings/CurrencyListing'
+import RouteListing from './pages/listings/RouteListing'
+import EmployeeCombined from './pages/listings/EmployeeCombined'
+
+import CrewAssignmentListing from './pages/operations/CrewAssignmentListing'
+import DealerManagement from './pages/operations/DealerManagement'
+import DeviceApprovals from './pages/operations/DeviceApprovals'
+import DeviceRegistry from './pages/operations/DeviceRegistry'
+import FareEditor from './pages/operations/FareEditor'
+import StageEditor from './pages/operations/StageEditor'
+import ExpenseMasterPage from './pages/operations/ExpenseMasterPage'
+
+import TicketReport from './pages/reports/TicketReport'
+import TripcloseReport from './pages/reports/TripcloseReport'
+import SettlementsLayout from './pages/reports/settlements/SettlementsLayout'
+
+import TransactionPosting from './pages/reports/settlements/TransactionPosting'
+import PayoutPosting from './pages/reports/settlements/PayoutPosting'
+
+import MdbImport from './pages/tools/MdbImport'
+import SettingsPage from './pages/tools/SettingsPage'
+import DeviceDownload from './pages/tools/DeviceDownload'
+
 import NotFound from './components/NotFound'
-import MdbImport from './pages/MdbImport'
-import BusTypeListing from './pages/BusTypeListing'
-import EmployeeTypeListing from './pages/EmployeeTypeListing'
-import StageListing from './pages/StageListing'
-import CurrencyListing from './pages/CurrencyListing'
-import EmployeeListing from './pages/EmployeeListing'
-import VehicleListing from './pages/VehicleListing'
-import RouteListing from './pages/RouteListing'
-import CrewAssignmentListing from './pages/CrewAssignmentListing'
-import FareEditor from './pages/FareEditor'
-import SettingsPage from './pages/SettingsPage'
 
 const router = createBrowserRouter([
   {
@@ -60,6 +70,10 @@ const router = createBrowserRouter([
             element: <RoleBasedHome />
           },
           {
+            path: 'clients',
+            element: <Clients />
+          },
+          {
             path: 'companies',
             element: <CompanyListing />
           },
@@ -81,7 +95,12 @@ const router = createBrowserRouter([
           },
           {
             path: 'settlements',
-            element: <SettlementPage />
+            element: <SettlementsLayout />,
+            children: [
+              { index: true, element: <Navigate to="transactions" replace /> },
+              { path: 'transactions', element: <TransactionPosting /> },
+              { path: 'payouts', element: <PayoutPosting /> },
+            ]
           },
           {
             path: 'dealers',
@@ -92,20 +111,12 @@ const router = createBrowserRouter([
             element: <DeviceApprovals />
           },
           {
+            path: 'device-registry',
+            element: <DeviceRegistry />
+          },
+          {
             path: 'data-import',
             element: <MdbImport/>
-          },
-          {
-            path: 'master-data/bus-types',
-            element: <BusTypeListing />
-          },
-          {
-            path: 'master-data/employee-types',
-            element: <EmployeeTypeListing />
-          },
-          {
-            path: 'master-data/stages',
-            element: <StageListing />
           },
           {
             path: 'master-data/currencies',
@@ -113,11 +124,11 @@ const router = createBrowserRouter([
           },
           {
             path: 'master-data/employees',
-            element: <EmployeeListing />
+            element: <EmployeeCombined />
           },
           {
             path: 'master-data/vehicles',
-            element: <VehicleListing />
+            element: <VehicleCombined />
           },
           {
             path: 'master-data/routes',
@@ -128,12 +139,24 @@ const router = createBrowserRouter([
             element: <FareEditor />
           },
           {
+            path: 'master-data/stages',
+            element: <StageEditor />
+          },
+          {
+            path: 'master-data/expense-master',
+            element: <ExpenseMasterPage />
+          },
+          {
             path: 'master-data/crew-assignments',
             element: <CrewAssignmentListing />
           },
           {
             path: 'master-data/settings',
             element: <SettingsPage />
+          },
+          {
+            path: 'device-download',
+            element: <DeviceDownload />
           },
         ]
       }

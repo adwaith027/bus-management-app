@@ -219,7 +219,7 @@ class InspectorDetails(models.Model):
         Employee,
         on_delete=models.PROTECT,
         related_name='inspections',
-        limit_choices_to={'emp_type__emp_type_code': 'INSPECTOR'}
+        limit_choices_to={'emp_type__emp_type_name__iexact': 'Inspector'}
     )
     station_no = models.CharField(
         max_length=50,

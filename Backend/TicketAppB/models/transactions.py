@@ -41,8 +41,8 @@ class TransactionData(models.Model):
         UPI = 1, 'UPI'
 
     request_type      = models.CharField(max_length=20, null=True, blank=True)
-    device_id         = models.CharField(max_length=20, null=True, blank=True)
-    trip_number       = models.CharField(max_length=20, null=True, blank=True)
+    palmtec_id        = models.CharField(max_length=20, null=True, blank=True)
+    trip_number       = models.IntegerField(null=True, blank=True)
     ticket_number     = models.CharField(max_length=20, null=True, blank=True)
     ticket_date       = models.DateField(null=True, blank=True)
     ticket_time       = models.TimeField(null=True, blank=True)
@@ -103,6 +103,8 @@ class TransactionData(models.Model):
         blank=True
     )
 
+    # route_code = models.CharField(max_length=50, null=True, blank=True)
+
     raw_payload       = models.TextField()
 
     created_at        = models.DateTimeField(auto_now_add=True)
@@ -110,14 +112,14 @@ class TransactionData(models.Model):
     class Meta:
         db_table = "transaction_data"
         indexes = [
-            models.Index(fields=["device_id", "ticket_date"]),
+            models.Index(fields=["palmtec_id", "ticket_date"]),
             models.Index(fields=["company_code"]),
             models.Index(fields=["depot_code"]),
         ]
         constraints = [
             models.UniqueConstraint(
                 fields=[
-                    'device_id',
+                    'palmtec_id',
                     'trip_number',
                     'ticket_number',
                     'ticket_date',
@@ -128,7 +130,7 @@ class TransactionData(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.ticket_number} - {self.device_id}"
+        return f"{self.ticket_number} - {self.palmtec_id}"
     
     @property
     def calculate_total_tickets(self):

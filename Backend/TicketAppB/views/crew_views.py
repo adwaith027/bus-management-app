@@ -161,7 +161,9 @@ def get_employees(request):
 
     show_deleted = request.query_params.get('show_deleted', 'false').lower() == 'true'
     qs = Employee.objects.filter(company=company)
-    if not show_deleted:
+    if show_deleted:
+        qs = qs.filter(is_deleted=True)
+    else:
         qs = qs.filter(is_deleted=False)
 
     qs = qs.select_related('emp_type').order_by('id')
@@ -292,7 +294,7 @@ def get_employee_types_dropdown(request):
 
     data = list(
         EmployeeType.objects.filter(company=company)
-        .values('id', 'emp_type_code', 'emp_type_name')
+        .values('id', 'emp_type_name')
         .order_by('emp_type_name')
     )
     return Response({'message': 'Success', 'data': data}, status=status.HTTP_200_OK)

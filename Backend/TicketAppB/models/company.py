@@ -32,6 +32,17 @@ class Company(models.Model):
     state = models.CharField(max_length=100)
     zip_code = models.CharField(max_length=20)
     
+    # Client Type
+    class ClientType(models.TextChoices):
+        COMPANY = 'company', 'Company'
+        DEALER_COMPANY = 'dealer_company', 'Dealer Company'
+
+    client_type = models.CharField(
+        max_length=20,
+        choices=ClientType.choices,
+        default=ClientType.COMPANY,
+    )
+
     # License Information
     number_of_licence = models.IntegerField(default=0)
     authentication_status = models.CharField(
@@ -148,6 +159,7 @@ class Dealer(models.Model):
     zip_code = models.CharField(max_length=20)
     gst_number = models.CharField(max_length=20, null=True, blank=True)
     is_active = models.BooleanField(default=True)
+    number_of_licence = models.IntegerField(default=0)
 
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -207,6 +219,69 @@ class DealerCustomerMapping(models.Model):
 
     def __str__(self):
         return f"{self.dealer.dealer_name} -> {self.company.company_name}"
+
+
+class ETMDevice(models.Model):
+    class DeviceType(models.TextChoices):
+        ETM = 'ETM', 'ETM (Electronic Ticket Machine)'
+        ANDROID = 'ANDROID', 'Android App Device'
+
+    class AllocationStatus(models.TextChoices):
+        STOCK = 'Stock', 'Stock'
+        DEALER_POOL = 'DealerPool', 'Dealer Pool'
+        ALLOCATED = 'Allocated', 'Allocated'
+        INACTIVE = 'Inactive', 'Inactive'
+
+    serial_number = models.CharField(max_length=100, unique=True)
+    device_type = models.CharField(
+        max_length=20,
+        choices=DeviceType.choices,
+        default=DeviceType.ETM,
+    )
+
+    company = models.ForeignKey(
+        Company,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='etm_devices',
+    )
+    dealer = models.ForeignKey(
+        Dealer,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='etm_devices',
+    )
+
+    allocation_status = models.CharField(
+        max_length=20,
+        choices=AllocationStatus.choices,
+        default=AllocationStatus.STOCK,
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='etm_devices_created',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'etm_device'
+        indexes = [
+            models.Index(fields=['serial_number']),
+            models.Index(fields=['company', 'allocation_status']),
+            models.Index(fields=['dealer']),
+            models.Index(fields=['allocation_status']),
+        ]
+
+    def __str__(self):
+        company_name = self.company.company_name if self.company else 'Unassigned'
+        return f"{self.serial_number} ({self.device_type}) — {company_name}"
 
 
 class ExecutiveCompanyMapping(models.Model):

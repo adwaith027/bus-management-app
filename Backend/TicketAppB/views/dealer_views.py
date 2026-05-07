@@ -2,11 +2,12 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.decorators import api_view
 from django.contrib.auth import get_user_model
+from django.db.models import Count, Q
 
-from ..models import Dealer, DealerCustomerMapping, Company, CustomUser
+from ..models import Dealer, DealerCustomerMapping, Company, CustomUser, ETMDevice
 from ..serializers import DealerSerializer, DealerCustomerMappingSerializer, CompanySerializer
 from .auth_views import get_user_from_cookie
-from .utils import _is_superadmin
+from .utils import _is_superadmin, _is_dealer_admin
 
 
 User = get_user_model()
@@ -14,7 +15,7 @@ User = get_user_model()
 
 def _sync_dealer_users_active(dealer_id):
     has_active = DealerCustomerMapping.objects.filter(dealer_id=dealer_id, is_active=True).exists()
-    CustomUser.objects.filter(dealer_id=dealer_id, role='dealer_user').update(is_active=has_active)
+    CustomUser.objects.filter(dealer_id=dealer_id, role='dealer_admin').update(is_active=has_active)
 
 
 @api_view(['POST'])
@@ -51,7 +52,7 @@ def create_dealer(request):
         username=username,
         email=email,
         password=password,
-        role='dealer_user',
+        role='dealer_admin',
         dealer=dealer,
         is_verified=True
     )
@@ -148,19 +149,74 @@ def update_dealer_mapping(request, pk):
 
 @api_view(['GET'])
 def dealer_dashboard(request):
+    """
+    Dealer admin dashboard.
+    Returns the dealer's mapped companies with per-company device breakdowns.
+    Also accessible to superadmin when ?dealer=<id> is provided.
+    """
     user = get_user_from_cookie(request)
     if not user:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    if user.role != 'dealer_user':
+
+    # Superadmin can pass ?dealer=<id> to inspect any dealer's dashboard
+    if _is_superadmin(user):
+        dealer_id = request.query_params.get('dealer')
+        if not dealer_id:
+            return Response({'error': 'Pass ?dealer=<id> as superadmin'}, status=status.HTTP_400_BAD_REQUEST)
+    elif _is_dealer_admin(user):
+        dealer_id = user.dealer_id
+        if not dealer_id:
+            return Response({'message': 'No dealer mapped to user'}, status=status.HTTP_400_BAD_REQUEST)
+    else:
         return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
-    if not user.dealer_id:
-        return Response({'message': 'No dealer mapped to user'}, status=status.HTTP_400_BAD_REQUEST)
 
     mappings = DealerCustomerMapping.objects.filter(
-        dealer_id=user.dealer_id,
+        dealer_id=dealer_id,
         is_active=True
     ).select_related('company')
 
-    companies = [m.company for m in mappings]
-    serializer = CompanySerializer(companies, many=True)
-    return Response({'message': 'Success', 'data': serializer.data}, status=status.HTTP_200_OK)
+    company_ids = [m.company_id for m in mappings]
+
+    # Device counts per company in one query
+    device_counts = (
+        ETMDevice.objects.filter(company_id__in=company_ids)
+        .values('company_id')
+        .annotate(
+            total=Count('id'),
+            active=Count('id', filter=Q(allocation_status=ETMDevice.AllocationStatus.ALLOCATED)),
+            pending=Count('id', filter=Q(allocation_status=ETMDevice.AllocationStatus.DEALER_POOL)),
+            expired=Count('id', filter=Q(allocation_status=ETMDevice.AllocationStatus.INACTIVE)),
+        )
+    )
+    device_map = {row['company_id']: row for row in device_counts}
+
+    companies_data = []
+    for mapping in mappings:
+        company = mapping.company
+        dc = device_map.get(company.id, {})
+        company_dict = CompanySerializer(company).data
+        company_dict['devices'] = {
+            'total': dc.get('total', 0),
+            'active': dc.get('active', 0),
+            'pending': dc.get('pending', 0),
+            'expired': dc.get('expired', 0),
+        }
+        companies_data.append(company_dict)
+
+    # Dealer-level totals
+    total_devices = sum(d['devices']['total'] for d in companies_data)
+    active_devices = sum(d['devices']['active'] for d in companies_data)
+    pending_devices = sum(d['devices']['pending'] for d in companies_data)
+
+    return Response({
+        'message': 'Success',
+        'data': {
+            'companies': companies_data,
+            'summary': {
+                'total_companies': len(companies_data),
+                'total_devices': total_devices,
+                'active_devices': active_devices,
+                'pending_devices': pending_devices,
+            }
+        }
+    }, status=status.HTTP_200_OK)

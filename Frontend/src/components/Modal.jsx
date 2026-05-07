@@ -1,20 +1,20 @@
 import React from 'react';
 
-const Modal = ({ isOpen, onClose, title, children }) => {
+const Modal = ({ isOpen, onClose, title, children, wide = false }) => {
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
-      
+
       {/* Backdrop with Blur */}
-      <div 
+      <div
         className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity duration-300 pointer-events-none"
         onClick={onClose}
       ></div>
 
       {/* Modal Content */}
-      <div 
-        className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl flex flex-col max-h-[90vh] animate-modal-pop border border-slate-100 pointer-events-auto"
+      <div
+        className={`relative w-full ${wide ? 'max-w-5xl' : 'max-w-2xl'} bg-white rounded-2xl shadow-2xl flex flex-col max-h-[90vh] animate-modal-pop border border-slate-100 pointer-events-auto`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

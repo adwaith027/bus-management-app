@@ -2,17 +2,31 @@ from rest_framework import status
 from rest_framework.response import Response
 from django.core.cache import cache
 
+# ── Role constants ────────────────────────────────────────────────────────────
+ROLE_SUPERADMIN   = 'superadmin'
+ROLE_EXECUTIVE    = 'executive'
+ROLE_DEALER_ADMIN = 'dealer_admin'
+ROLE_COMPANY_ADMIN = 'company_admin'
 
-def reset_pending_on_startup():
-    from ..models import Company
-    companies = Company.objects.filter(authentication_status=Company.AuthStatus.VALIDATING)
-    for c in companies:
-        c.authentication_status = Company.AuthStatus.PENDING
-        c.save()
-
-
+# ── Role checkers ─────────────────────────────────────────────────────────────
 def _is_superadmin(user):
-    return user and user.role == "superadmin"
+    return user and user.role == ROLE_SUPERADMIN
+
+def _is_executive(user):
+    return user and user.role == ROLE_EXECUTIVE
+
+def _is_dealer_admin(user):
+    return user and user.role == ROLE_DEALER_ADMIN
+
+def _is_company_admin(user):
+    return user and user.role == ROLE_COMPANY_ADMIN
+
+def _is_superadmin_or_executive(user):
+    return user and user.role in (ROLE_SUPERADMIN, ROLE_EXECUTIVE)
+
+def _can_manage_devices(user):
+    """Superadmin and executive can approve/reject ETM devices."""
+    return _is_superadmin_or_executive(user)
 
 
 def _get_company(company_id):

@@ -1,21 +1,23 @@
-from rest_framework import status
-from rest_framework.response import Response
-from rest_framework.decorators import api_view
-from ..models import Company,TransactionData,TripCloseData,Route,VehicleType,MosambeeTransaction
-from ..serializers import CompanySerializer
-from django.contrib.auth import get_user_model
-from .auth_views import get_user_from_cookie
-import requests
+import json
 import time
 import logging
+import requests
 import threading
-from django.conf import settings
 from datetime import datetime
-import json
-from django.forms.models import model_to_dict
+from django.conf import settings
+from rest_framework import status
+from django.db import transaction
 from django.http import JsonResponse
-from django.db.models import Sum, Q, Count
+from ..serializers import CompanySerializer
+from rest_framework.response import Response
+from .auth_views import get_user_from_cookie
+from django.forms.models import model_to_dict
+from django.contrib.auth import get_user_model
+from rest_framework.decorators import api_view
 from django.db.utils import OperationalError, ProgrammingError
+from django.db.models import Sum, Q, Count, Case, When, IntegerField
+from ..models import Company,TransactionData,TripCloseData,Route,VehicleType,MosambeeTransaction,Dealer,DealerCustomerMapping
+from .utils import _is_superadmin, _is_executive, _is_dealer_admin, _is_company_admin
 
 
 # Setup logger  
@@ -48,11 +50,11 @@ def build_license_registration_payload(company):
         "CustomerName": company.company_name,
         "PhoneNumber": company.contact_number,
         "CustomerEmail": company.company_email,
-        "GSTNumber": company.gst_number or '123456',
+        "GSTNumber": company.gst_number or '',
         "CustomerContactPerson": company.contact_person,
         "CustomerContact": company.contact_number,
         "CustomerAddress": company.address,
-        "CustomerAddress2": company.address_2 or "sil",
+        "CustomerAddress2": company.address_2 or '',
         "CustomerState": company.state,
         "CustomerCity": company.city,
         "DeviceModel": "Windows",
@@ -313,13 +315,6 @@ def background_license_polling(company_id):
         logger.error(f"[BACKGROUND] Company not found with ID: {company_id}")
     except Exception as e:
         logger.exception(f"[BACKGROUND] Unexpected error during background polling: {str(e)}")
-        # Try to reset status to Pending if possible
-        try:
-            company = Company.objects.get(id=company_id)
-            company.authentication_status = Company.AuthStatus.PENDING
-            company.save()
-        except:
-            pass
 
     # This ensures status is never stuck in VALIDATING if thread fails
     finally:
@@ -431,41 +426,42 @@ def validate_company_license(request, pk):
             status=status.HTTP_401_UNAUTHORIZED
         )
     
-    try:
-        company = Company.objects.get(pk=pk)
-        logger.info(f"Found company: {company.company_name} (ID: {pk})")
-    except Company.DoesNotExist:
-        logger.error(f"Company not found with ID: {pk}")
-        return Response(
-            {"message": "Company not found"}, 
-            status=status.HTTP_404_NOT_FOUND
-        )
-    
-    # Check if company is registered
-    if not company.company_id:
-        logger.error(f"Company not registered yet. Cannot validate.")
-        return Response(
-            {
-                "message": "Company not registered with license server yet",
-                "error": "Please register the company first before validating"
-            },
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    
-    # Check if already validating
-    if company.authentication_status == Company.AuthStatus.VALIDATING:
-        logger.info(f"Company already validating: {company.company_name}")
-        return Response(
-            {
-                "message": "License validation already in progress",
-                "status": "Validating"
-            },
-            status=status.HTTP_200_OK
-        )
-    
-    # Set status to Validating
-    company.authentication_status = Company.AuthStatus.VALIDATING
-    company.save()
+    with transaction.atomic():
+        try:
+            company = Company.objects.select_for_update().get(pk=pk)
+            logger.info(f"Found company: {company.company_name} (ID: {pk})")
+        except Company.DoesNotExist:
+            logger.error(f"Company not found with ID: {pk}")
+            return Response(
+                {"message": "Company not found"}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Check if company is registered
+        if not company.company_id:
+            logger.error(f"Company not registered yet. Cannot validate.")
+            return Response(
+                {
+                    "message": "Company not registered with license server yet",
+                    "error": "Please register the company first before validating"
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if already validating
+        if company.authentication_status == Company.AuthStatus.VALIDATING:
+            logger.info(f"Company already validating: {company.company_name}")
+            return Response(
+                {
+                    "message": "License validation already in progress",
+                    "status": "Validating"
+                },
+                status=status.HTTP_200_OK
+            )
+        
+        # Set status to Validating
+        company.authentication_status = Company.AuthStatus.VALIDATING
+        company.save()
     logger.info(f"Set status to 'Validating' for company: {company.company_name}")
     
     # Start background thread
@@ -489,73 +485,371 @@ def validate_company_license(request, pk):
     )
 
 
-@api_view(['GET'])
-def all_company_data(request):
+def fetch_company_from_license_server(customer_id):
     """
-    Retrieve all companies.
-    Returns companies ordered by most recent first.
+    Single (non-polling) call to the license server to get current status
+    and license details for a given customer_id.
+    Used for the import-existing-company preview and atomic import.
+    Returns a dict with success, status, and data keys.
+    """
+    payload = {"CustomerId": customer_id}
+    try:
+        response = requests.post(
+            settings.PRODUCT_AUTH_URL,
+            json=payload,
+            timeout=30
+        )
+        response.raise_for_status()
+        data = response.json()
+        auth_status = data.get('Authenticationstatus', '')
+
+        if not auth_status:
+            return {'success': False, 'error': 'No response from license server.'}
+
+        return {'success': True, 'status': auth_status, 'data': data}
+
+    except requests.exceptions.Timeout:
+        return {'success': False, 'error': 'License server timed out. Try again.'}
+    except requests.exceptions.ConnectionError:
+        return {'success': False, 'error': 'Cannot connect to license server.'}
+    except requests.exceptions.HTTPError as e:
+        return {'success': False, 'error': f'License server error: {e.response.status_code}'}
+    except Exception as e:
+        logger.exception(f"Unexpected error fetching from license server: {e}")
+        return {'success': False, 'error': f'Unexpected error: {str(e)}'}
+
+
+@api_view(['GET'])
+def get_company_by_company_id(request, company_id):
+    """
+    Preview endpoint for the 'Add Existing Company' flow.
+
+    1. Blocks if company_id already exists in our DB (returns 409).
+    2. Fetches current license status from the license server (single call).
+    3. Returns license data so the frontend can show a confirm banner.
+
+    Note: This is read-only — no writes happen here.
+    The actual atomic create is handled by POST /import-company.
     """
     user = get_user_from_cookie(request)
     if not user:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # ── Duplicate check ──────────────────────────────────────────────────────
+    existing = Company.objects.filter(company_id=company_id).first()
+    if existing:
+        logger.warning(f"Import blocked: company_id '{company_id}' already exists as '{existing.company_name}'")
         return Response(
-            {'error': 'Authentication required'}, 
-            status=status.HTTP_401_UNAUTHORIZED
+            {'message': f'"{existing.company_name}" is already registered in this system.'},
+            status=status.HTTP_409_CONFLICT
         )
-    
-    companies = Company.objects.all().order_by('-id')
-    serializer = CompanySerializer(companies, many=True)
-    
-    logger.info(f"Retrieved {len(companies)} companies")
-    
+
+    # ── Single license server fetch (no polling loop) ────────────────────────
+    result = fetch_company_from_license_server(customer_id=company_id)
+    if not result['success']:
+        return Response({'message': result['error']}, status=status.HTTP_502_BAD_GATEWAY)
+
+    auth_data   = result['data']
+    auth_status = result['status']
+
+    # Map license server response fields for the frontend confirm step
+    product_to_date   = auth_data.get('ProductToDate')
+    product_from_date = auth_data.get('ProductFromDate')
+
+    expired = False
+    if product_to_date:
+        try:
+            expiry = check_datetime(product_to_date)
+            expired = expiry is not None and datetime.now() > expiry
+        except Exception:
+            pass
+
+    # License server does not return company details (name, address, etc.)
+    # Only license/config fields are available — returned for the confirm banner.
+    # The user fills in company details manually in the confirm step form.
     return Response(
         {
-            "message": "Success",
-            "data": serializer.data
+            'message': 'Success',
+            'data': {
+                'company_id':            company_id,
+                'authentication_status': auth_status,
+                'product_from_date':     product_from_date,
+                'product_to_date':       product_to_date,
+                'number_of_licence':     auth_data.get('NumberOfLicence', 1),
+                'is_expired':            expired,
+            }
         },
         status=status.HTTP_200_OK
     )
 
 
 @api_view(['POST'])
-def create_company(request):
+@transaction.atomic
+def import_company(request):
     """
-    Create a new company.
-    Initial authentication_status will be 'Pending'.
+    Atomic 'Add Existing Company' endpoint.
+
+    Takes only { company_id } from the frontend.
+    Re-fetches all data from the license server server-side and creates
+    the Company record in a single DB transaction — no race window.
+
+    Race condition handling:
+      select_for_update() ensures that if two requests arrive simultaneously
+      for the same company_id, only one proceeds; the other sees the duplicate
+      and gets a 409.
+    """
+    user = get_user_from_cookie(request)
+    if not user:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    company_id = request.data.get('company_id', '').strip()
+    if not company_id:
+        return Response({'message': 'company_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # ── User account validation ───────────────────────────────────────────────
+    imp_user_username = request.data.get('user_username', '').strip()
+    imp_user_email = request.data.get('user_email', '').strip()
+    imp_user_password = request.data.get('user_password', '').strip()
+    if not imp_user_username or not imp_user_email or not imp_user_password:
+        return Response({'error': 'User account details (username, email, password) are required.'}, status=status.HTTP_400_BAD_REQUEST)
+    if User.objects.filter(username=imp_user_username).exists():
+        return Response({'message': 'Username already exists'}, status=status.HTTP_400_BAD_REQUEST)
+    if User.objects.filter(email=imp_user_email).exists():
+        return Response({'message': 'User email already exists'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # ── Atomic duplicate check with row-level lock ───────────────────────────
+    # select_for_update acquires a DB lock so concurrent requests serialise here.
+    existing = Company.objects.select_for_update().filter(company_id=company_id).first()
+    if existing:
+        logger.warning(f"Import duplicate blocked (atomic): company_id '{company_id}' → '{existing.company_name}'")
+        return Response(
+            {'message': f'"{existing.company_name}" is already registered in this system.'},
+            status=status.HTTP_409_CONFLICT
+        )
+
+    # ── Re-fetch from license server (single call) ───────────────────────────
+    result = fetch_company_from_license_server(customer_id=company_id)
+    if not result['success']:
+        return Response({'message': result['error']}, status=status.HTTP_502_BAD_GATEWAY)
+
+    auth_data   = result['data']
+    auth_status = result['status']
+
+    # Map auth_status string → Company.AuthStatus choice
+    status_map = {
+        'Approve':  Company.AuthStatus.APPROVED,
+        'Expired':  Company.AuthStatus.EXPIRED,
+        'Block':    Company.AuthStatus.BLOCKED,
+        'Pending':  Company.AuthStatus.PENDING,
+    }
+    # Anything not in the map (e.g. 'Waiting') falls back to PENDING
+    mapped_status = status_map.get(auth_status, Company.AuthStatus.PENDING)
+
+    # Parse dates
+    product_from_date = None
+    product_to_date   = None
+    try:
+        raw_from = auth_data.get('ProductFromDate')
+        raw_to   = auth_data.get('ProductToDate')
+        if raw_from:
+            dt = check_datetime(raw_from)
+            product_from_date = dt.date() if dt else None
+        if raw_to:
+            dt = check_datetime(raw_to)
+            product_to_date = dt.date() if dt else None
+    except Exception:
+        pass
+
+    def safe_int(val, default=0):
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return default
+
+    # ── Validate company detail fields from request ──────────────────────────
+    # License server does not return name/address/email, so the frontend
+    # supplies these from the form the user filled in on the confirm step.
+    form_data = {
+        'company_id':      company_id,
+        'company_name':    request.data.get('company_name', '').strip(),
+        'company_email':   request.data.get('company_email', '').strip(),
+        'contact_person':  request.data.get('contact_person', '').strip(),
+        'contact_number':  request.data.get('contact_number', '').strip(),
+        'gst_number':      request.data.get('gst_number', '').strip(),
+        'address':         request.data.get('address', '').strip(),
+        'address_2':       request.data.get('address_2', '').strip(),
+        'city':            request.data.get('city', '').strip(),
+        'state':           request.data.get('state', '').strip(),
+        'zip_code':        request.data.get('zip_code', '').strip(),
+        # number_of_licence comes from the license server (authoritative)
+        'number_of_licence': safe_int(auth_data.get('NumberOfLicence'), safe_int(request.data.get('number_of_licence'), 1)),
+    }
+
+    if not form_data['company_name']:
+        return Response({'message': 'Company name is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # ── Create Company record ────────────────────────────────────────────────
+    company = Company.objects.create(
+        **form_data,
+        authentication_status   = mapped_status,
+        product_registration_id = safe_int(auth_data.get('ProductRegistrationId')),
+        unique_identifier       = auth_data.get('UniqueIDentifier', ''),
+        product_from_date       = product_from_date,
+        product_to_date         = product_to_date,
+        device_count            = safe_int(auth_data.get('NoOfUPIDevice'), 0),
+        depot_count             = safe_int(auth_data.get('NoOfBranch'), 0),
+        mobile_device_count     = safe_int(auth_data.get('NoOfMobileDevice'), 2),
+        client_type             = 'company',
+        created_by              = user,
+    )
+
+    # ── Create company_admin user ─────────────────────────────────────────────
+    User.objects.create_user(
+        username=imp_user_username,
+        email=imp_user_email,
+        password=imp_user_password,
+        role='company_admin',
+        company=company,
+        is_verified=True,
+    )
+    logger.info(f"Imported existing company '{company.company_name}' (company_id={company_id}) by user {user}")
+
+    serializer = CompanySerializer(company)
+    return Response(
+        {
+            'message': f'"{company.company_name}" imported successfully.',
+            'data': serializer.data,
+        },
+        status=status.HTTP_201_CREATED
+    )
+
+
+@api_view(['GET'])
+def all_company_data(request):
+    """
+    Retrieve companies based on the requesting user's role.
+
+    Visibility rules:
+      - superadmin   → all companies
+      - executive    → only companies in their ExecutiveCompanyMapping
+      - dealer_admin → only companies in their DealerCustomerMapping
+      - company_admin→ only their own company
     """
     user = get_user_from_cookie(request)
     if not user:
         return Response(
-            {'error': 'Authentication required'}, 
+            {'error': 'Authentication required'},
             status=status.HTTP_401_UNAUTHORIZED
         )
-    
+
+    if _is_superadmin(user):
+        # Superadmin sees only direct companies they created (not dealer sub-companies).
+        companies = Company.objects.filter(created_by=user, client_type='company').order_by('-id')
+
+    elif _is_executive(user):
+        # Executive sees only companies they are explicitly mapped to.
+        from ..models import ExecutiveCompanyMapping  # avoid circular at module level
+        company_ids = ExecutiveCompanyMapping.objects.filter(
+            executive_user_id=user.id, is_active=True
+        ).values_list('company_id', flat=True)
+        companies = Company.objects.filter(id__in=company_ids).order_by('-id')
+
+    elif _is_dealer_admin(user):
+        if not user.dealer_id:
+            return Response({'message': 'No dealer linked to this user'}, status=status.HTTP_400_BAD_REQUEST)
+        company_ids = DealerCustomerMapping.objects.filter(
+            dealer_id=user.dealer_id, is_active=True
+        ).values_list('company_id', flat=True)
+        companies = Company.objects.filter(id__in=company_ids).order_by('-id')
+
+    elif _is_company_admin(user):
+        if not user.company:
+            return Response({'message': 'No company linked to this user'}, status=status.HTTP_400_BAD_REQUEST)
+        companies = Company.objects.filter(pk=user.company.pk)
+
+    else:
+        return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
+
+    serializer = CompanySerializer(companies, many=True)
+    logger.info(f"Retrieved {len(companies)} companies for role={user.role}")
+    return Response({"message": "Success", "data": serializer.data}, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@transaction.atomic
+def create_company(request):
+    """
+    Create a new company.
+
+    Allowed roles:
+      - superadmin   : creates company for themselves; no dealer involvement.
+      - dealer_admin : creates company under their dealer; auto-creates
+                       DealerCustomerMapping and validates against dealer's
+                       licence pool.
+    """
+    user = get_user_from_cookie(request)
+    if not user:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if not _is_superadmin(user) and not _is_dealer_admin(user):
+        return Response({'error': 'Only superadmin or dealer_admin can create companies.'}, status=status.HTTP_403_FORBIDDEN)
+
     if not request.data:
-        return Response(
-            {"message": "No input received"},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    
+        return Response({"message": "No input received"}, status=status.HTTP_400_BAD_REQUEST)
+
+    # ── User account validation (required for both superadmin and dealer_admin) ─
+    user_username = request.data.get('user_username', '').strip()
+    user_email_field = request.data.get('user_email', '').strip()
+    user_password = request.data.get('user_password', '').strip()
+
+    if not user_username or not user_email_field or not user_password:
+        return Response({'error': 'User account details (username, email, password) are required.'}, status=status.HTTP_400_BAD_REQUEST)
+    if User.objects.filter(username=user_username).exists():
+        return Response({'message': 'Username already exists'}, status=status.HTTP_400_BAD_REQUEST)
+    if User.objects.filter(email=user_email_field).exists():
+        return Response({'message': 'User email already exists'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # ── Fetch dealer for mapping (dealer_admin only) ──────────────────────────
+    dealer = None
+    if _is_dealer_admin(user):
+        if not user.dealer_id:
+            return Response({'error': 'No dealer linked to this account.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            dealer = Dealer.objects.get(pk=user.dealer_id)
+        except Dealer.DoesNotExist:
+            return Response({'error': 'Dealer not found.'}, status=status.HTTP_400_BAD_REQUEST)
+
     serializer = CompanySerializer(data=request.data)
-    
-    if serializer.is_valid():
-        company = serializer.save(created_by=user)
-        logger.info(f"Created new company: {company.company_name} (ID: {company.id})")
-        return Response(
-            {
-                "message": "Company created successfully",
-                "data": serializer.data
-            },
-            status=status.HTTP_201_CREATED
-        )
-    
-    logger.warning(f"Company creation failed: {serializer.errors}")
-    return Response(
-        {
-            "message": "Validation failed",
-            "errors": serializer.errors
-        },
-        status=status.HTTP_400_BAD_REQUEST
+    if not serializer.is_valid():
+        logger.warning(f"Company creation failed: {serializer.errors}")
+        return Response({"message": "Validation failed", "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+    client_type_val = 'dealer_company' if _is_dealer_admin(user) else 'company'
+    company = serializer.save(created_by=user, client_type=client_type_val)
+    logger.info(f"Created new company: {company.company_name} (ID: {company.id}) by {user.role} {user.username}")
+
+    # ── Create company_admin user ─────────────────────────────────────────────
+    User.objects.create_user(
+        username=user_username,
+        email=user_email_field,
+        password=user_password,
+        role='company_admin',
+        company=company,
+        is_verified=True,
     )
+    logger.info(f"Created company_admin user '{user_username}' for company: {company.company_name}")
+
+    # ── Auto-create DealerCustomerMapping for dealer_admin ────────────────────
+    if dealer:
+        DealerCustomerMapping.objects.create(
+            dealer=dealer,
+            company=company,
+            created_by=user,
+            is_active=True,
+        )
+        logger.info(f"Auto-created DealerCustomerMapping: dealer={dealer.id} → company={company.id}")
+
+    return Response({"message": "Company created successfully", "data": serializer.data}, status=status.HTTP_201_CREATED)
 
 
 @api_view(['PUT'])
@@ -844,25 +1138,19 @@ def get_admin_dashboard_data(request):
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
 
     try:
-        all_companies = Company.objects.all()
-        total_companies = Company.objects.count()
-        validated_companies = 0
-        unvalidated_companies = 0
-        expired_companies = 0
+        company_counts = Company.objects.aggregate(
+            total=Count('id'),
+            validated=Count(Case(When(authentication_status=Company.AuthStatus.APPROVED, then=1), output_field=IntegerField())),
+            unvalidated=Count(Case(When(authentication_status=Company.AuthStatus.PENDING, then=1), output_field=IntegerField())),
+            expired=Count(Case(When(authentication_status=Company.AuthStatus.EXPIRED, then=1), output_field=IntegerField())),
+        )
         dashboard_data = {"company_summary": {}, "user_summary": {}}
-        for company in all_companies:
-            if company.authentication_status == "Pending":
-                unvalidated_companies += 1
-            elif company.authentication_status == "Approve":
-                validated_companies += 1
-            elif company.authentication_status == "Expired":
-                expired_companies += 1
 
         dashboard_data['company_summary'].update({
-            "total_companies": total_companies,
-            "validated_companies": validated_companies,
-            "unvalidated_companies": unvalidated_companies,
-            "expired_companies": expired_companies,
+            "total_companies": company_counts['total'],
+            "validated_companies": company_counts['validated'],
+            "unvalidated_companies": company_counts['unvalidated'],
+            "expired_companies": company_counts['expired'],
         })
 
         all_non_admin_users = User.objects.filter(is_superuser=False).count()

@@ -1,7 +1,11 @@
 from django.urls import path
-from .views import transport_views, crew_views, settings_views
-from .views import auth_views, company_views, user_views, data_views, mdb_views
+from .views import ticket_data_views, transport_views, crew_views, settings_views
+from .views import auth_views, company_views, user_views, mdb_views
+from .views import palmtec_data_views
 from .views import depot_views, mosambee_views, dealer_views, executive_views, device_approval_views
+from .views import device_registry_views
+from .views import route_import_views
+from .views import apk_views
 
 urlpatterns = [
     # authentication
@@ -27,6 +31,8 @@ urlpatterns = [
     path('update-company-details/<int:pk>', company_views.update_company_details, name='update_company'),
     path('register-company-license/<int:pk>', company_views.register_company_with_license_server, name='register_company_license'),
     path('validate-company-license/<int:pk>', company_views.validate_company_license, name='validate_company_license'),
+    path('get-company-by-company-id/<str:company_id>', company_views.get_company_by_company_id, name='get_company_by_company_id'),
+    path('import-company', company_views.import_company, name='import_company'),
     path('get_company_dashboard_metrics', company_views.get_company_dashboard_metrics, name='company_dashboard_data'),
     path('get_admin_data', company_views.get_admin_dashboard_data, name='get_admin_dashboard_data'),
 
@@ -36,14 +42,16 @@ urlpatterns = [
     path('update-depot-details/<int:pk>', depot_views.update_depot_details, name='update_depot_details'),
 
     # ticket data
-    path('getTicket', data_views.getTransactionDataFromDevice, name='get_transaction_data'),
-    path('get_all_transaction_data', data_views.get_all_transaction_data, name='get_all_transaction_data'),
-    path('getTripClose', data_views.getTripCloseDataFromDevice, name='get_trip_close_data'),
-    path('get_all_trip_close_data', data_views.get_all_trip_close_data, name='get_all_trip_close_data'),
+    path('getTicket', ticket_data_views.getTransactionDataFromDevice, name='get_transaction_data'),
+    path('get_all_transaction_data', ticket_data_views.get_all_transaction_data, name='get_all_transaction_data'),
+    path('getTripClose', ticket_data_views.getTripCloseDataFromDevice, name='get_trip_close_data'),
+    path('get_all_trip_close_data', ticket_data_views.get_all_trip_close_data, name='get_all_trip_close_data'),
 
     # mosambee data
-    path('postSettlementDetails', mosambee_views.mosambee_settlement_data, name='postSettlementDetails'),
+    path('postTransactionDetails', mosambee_views.mosambee_settlement_data, name='postTransactionDetails'),
+    path('postPayoutDetails', mosambee_views.mosambee_payout_callback, name='postPayoutDetails'),
     path('get_settlement_data', mosambee_views.get_settlement_data, name='get_settlement_data'),
+    path('get_payout_data', mosambee_views.get_payout_data, name='get_payout_data'),
     path('verify_settlement', mosambee_views.verify_settlement, name='verify_settlement'),
     path('get_settlement_summary', mosambee_views.get_settlement_summary, name='get_settlement_summary'),
 
@@ -76,11 +84,19 @@ urlpatterns = [
     path('masterdata/vehicles/create', transport_views.create_vehicle),
     path('masterdata/vehicles/update/<int:pk>', transport_views.update_vehicle),
     path('masterdata/routes', transport_views.get_routes),
+    path('masterdata/routes/<int:pk>', transport_views.get_route_detail),
     path('masterdata/routes/create', transport_views.create_route),
     path('masterdata/routes/update/<int:pk>', transport_views.update_route),
+    path('masterdata/routes/create-wizard', transport_views.create_route_wizard),
+    path('masterdata/routes/import-excel', transport_views.RouteExcelImportView.as_view()),
+    path('masterdata/routes/import/validate', route_import_views.RouteImportValidateView.as_view()),
+    path('masterdata/routes/import/confirm', route_import_views.RouteImportConfirmView.as_view()),
+    path('masterdata/routes/import/template/<str:fare_type>', route_import_views.RouteImportTemplateView.as_view()),
+    path('masterdata/routestages/update/<int:pk>', transport_views.update_route_stage),
     path('masterdata/dropdowns/bus-types', transport_views.get_bus_types_dropdown),
     path('masterdata/dropdowns/stages', transport_views.get_stages_dropdown, name='get_stages_dropdown'),
     path('masterdata/dropdowns/vehicles', transport_views.get_vehicles_dropdown),
+    path('masterdata/dropdowns/depots',   transport_views.get_depots_dropdown),
     path('masterdata/fares/editor/<int:route_id>', transport_views.get_fare_editor, name='get_fare_editor'),
     path('masterdata/fares/update/<int:route_id>', transport_views.update_fare_table, name='update_fare_table'),
 
@@ -103,4 +119,41 @@ urlpatterns = [
     path('masterdata/currencies/create', settings_views.create_currency),
     path('masterdata/currencies/update/<int:pk>', settings_views.update_currency),
     path('masterdata/settings', settings_views.get_settings),
+    path('masterdata/device-settings/devices', settings_views.list_company_devices),
+    path('masterdata/settings-profiles', settings_views.list_profiles),
+    path('masterdata/settings-profiles/create', settings_views.create_profile),
+    path('masterdata/settings-profiles/<int:profile_id>', settings_views.profile_detail),
+
+
+    # ETM Device Registry
+    path('etm-devices/upload',                         device_registry_views.DeviceUploadView.as_view(), name='etm_upload'),
+    path('etm-devices',                                device_registry_views.list_devices,               name='etm_list'),
+    path('etm-devices/summary',                        device_registry_views.device_summary,             name='etm_summary'),
+    path('etm-devices/bulk-assign-dealer',             device_registry_views.bulk_assign_dealer,         name='etm_bulk_dealer'),
+    path('etm-devices/bulk-assign-company',            device_registry_views.bulk_assign_company,        name='etm_bulk_company'),
+    path('etm-devices/<int:device_id>/allocate',       device_registry_views.allocate_to_company,        name='etm_allocate'),
+    path('etm-devices/<int:device_id>/deactivate',     device_registry_views.deactivate_device,          name='etm_deactivate'),
+
+    # Palmtec device data APIs (server → APK → USB → device)
+    path('device/routes',      palmtec_data_views.get_routes_list),
+    path('device/settings',    palmtec_data_views.get_settings_file),
+    path('device/crew',        palmtec_data_views.get_crew_file),
+    path('device/vehicles',    palmtec_data_views.get_vehicles_file),
+    path('device/expenses',    palmtec_data_views.get_expenses_file),
+    # Route group
+    path('device/routelst',    palmtec_data_views.get_routelst_file),
+    path('device/stagelst',    palmtec_data_views.get_stagelst_file),
+    path('device/languagedat', palmtec_data_views.get_languagedat_file),
+    path('device/rtedat',      palmtec_data_views.get_rtedat_file),
+    # Settings group
+    path('device/currency',    palmtec_data_views.get_currency_file),
+
+    # android apk data apis
+    path('reports/duty', apk_views.duty_report, name='duty_report'),
+    path('reports/bus-summary', apk_views.bus_summary_report, name='bus_summary_report'),
+    path('reports/payment-type', apk_views.payment_type_report, name='payment_type_report'),
+    path('reports/farewise', apk_views.farewise_report, name='farewise_report'),
+    path('reports/passenger-info', apk_views.passenger_info, name='passenger_info'),
+    path('reports/trip-details', apk_views.trip_details, name='trip_details'),
+    path('reports/ticket-details', apk_views.ticket_details, name='ticket_details'),
 ]

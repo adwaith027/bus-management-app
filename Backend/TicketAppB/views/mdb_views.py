@@ -2,15 +2,23 @@
 mdb_views.py — MDB import service
 
 Import uses non-DUP MDB tables only.
+
+Response is streamed as Server-Sent Events (SSE) so the UI gets live per-table
+progress via axios onDownloadProgress:
+  data: {"type": "table_done", "table": "BusType", "imported": 5, "existing": 3, "skipped": 0, "errors": []}
+  data: {"type": "done", "total_imported": 50, "total_existing": 20, "total_skipped": 2, "errors": [...], "read_errors": {}}
+  data: {"type": "error", "message": "..."}   ← fatal errors only
 """
 
 import os
+import json
 import tempfile
 import subprocess
 import csv
 import io
 
 from django.db import transaction
+from django.http import StreamingHttpResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -48,6 +56,12 @@ class MdbImportView(APIView):
         mdb_file    — .mdb file
         company_id  — which company to link all records to
         password    — (optional) mdb file password
+
+    Returns text/event-stream (SSE). Each completed table yields one event.
+    Final event has type "done". Fatal errors yield type "error".
+
+    Pre-stream validation failures (missing file, bad company) still return
+    normal JSON 4xx so the frontend can check response status before reading.
     """
     parser_classes = [MultiPartParser, FormParser]
 
@@ -72,28 +86,35 @@ class MdbImportView(APIView):
         except Company.DoesNotExist:
             return Response({'message': 'Company not found.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Write upload to disk before streaming starts —
+        # chunked file reads can't happen inside a generator
         tmp_path = None
         try:
             with tempfile.NamedTemporaryFile(suffix='.mdb', delete=False) as tmp:
                 for chunk in mdb_file.chunks():
                     tmp.write(chunk)
                 tmp_path = tmp.name
-
-            result = MdbImportService.run(tmp_path, company, user, password)
-            return Response(result, status=status.HTTP_200_OK)
-
-        except MdbPasswordError:
-            return Response(
-                {'message': 'Could not open file. Password incorrect or unsupported encryption.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        except MdbReadError as e:
-            return Response({'message': f'Failed to read MDB: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
-            return Response({'message': f'Unexpected error: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        finally:
-            if tmp_path and os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+            return Response({'message': f'Failed to save upload: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        def sse_stream():
+            try:
+                for event in MdbImportService.run_stream(tmp_path, company, user, password):
+                    yield f"data: {json.dumps(event)}\n\n"
+            except MdbPasswordError:
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Could not open file. Password incorrect or unsupported encryption.'})}\n\n"
+            except MdbReadError as e:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'Failed to read MDB: {str(e)}'})}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'Unexpected error: {str(e)}'})}\n\n"
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+
+        response = StreamingHttpResponse(sse_stream(), content_type='text/event-stream')
+        response['Cache-Control'] = 'no-cache'
+        response['X-Accel-Buffering'] = 'no'  # prevent nginx from buffering the stream
+        return response
 
 
 # ================================================================
@@ -103,51 +124,60 @@ class MdbImportView(APIView):
 class MdbImportService:
 
     @staticmethod
-    def run(mdb_path, company, user, password=None):
+    def run_stream(mdb_path, company, user, password=None):
         """
-        Reads all MDB tables then processes them in dependency order.
-        Each table runs in its OWN atomic block — if Fare fails, only
-        Fare rolls back. Everything else stays saved.
-        Re-importing the same file is safe — get_or_create prevents duplicates.
+        Generator — yields one SSE event dict per completed table, then a final
+        'done' event. The view wraps each dict in "data: <json>\\n\\n".
+
+        Processor return signature: (imported, existing, skipped, errors)
+          imported — rows newly written to the DB
+          existing — rows already present (get_or_create found a match, no write)
+          skipped  — rows that failed validation or FK lookup
+          errors   — human-readable skip reasons
+
+        Each table runs in its own atomic block. If a table crashes, only that
+        table rolls back — all previously committed tables stay saved.
+        Re-importing the same file is safe: get_or_create prevents duplicates
+        and the existing counter shows what was already there.
         """
         raw_tables, read_errors = MdbReader.read_all_tables(mdb_path, password)
         bus_type_source_map = MdbImportService._build_bus_type_source_map(raw_tables.get('bustype', []))
 
-        all_errors     = []
-        table_results  = []
         total_imported = 0
+        total_existing = 0
         total_skipped  = 0
+        all_errors     = []
 
         # Each tuple: (display_name, raw_table_key, processor_function)
         # ORDER MATTERS — each table may depend on previously imported ones
         processors = [
             # ---- PASS 1: No dependencies ----
-            ('BusType',         'bustype',       MdbImportService._process_bus_types),
-            ('EmployeeType',    'EMPLOYEETYPE',  MdbImportService._process_employee_types),
-            ('Currency',        'CURRENCY',      MdbImportService._process_currency),
-            ('Stage',           'STAGE',         MdbImportService._process_stages),
+            ('BusType',          'bustype',       MdbImportService._process_bus_types),
+            ('EmployeeType',     'EMPLOYEETYPE',  MdbImportService._process_employee_types),
+            ('Currency',         'CURRENCY',      MdbImportService._process_currency),
+            ('Stage',            'STAGE',         MdbImportService._process_stages),
 
             # ---- PASS 2: Depend on Pass 1 ----
-            ('Employee',        'CREW',          MdbImportService._process_employees),
-            ('Route',           'ROUTE',         MdbImportService._process_routes),
+            ('Employee',         'CREW',          MdbImportService._process_employees),
+            ('Route',            'ROUTE',         MdbImportService._process_routes),
 
             # ---- PASS 3: Depend on Pass 2 ----
             # RouteStage re-reads STAGE rows to build route-stage links
-            ('RouteStage',      'STAGE',         MdbImportService._process_route_stages),
+            ('RouteStage',       'STAGE',         MdbImportService._process_route_stages),
             # RouteBusType derived from ROUTE table + bustype id map
-            ('RouteBusType',    'ROUTE',         MdbImportService._process_route_bus_types),
+            ('RouteBusType',     'ROUTE',         MdbImportService._process_route_bus_types),
             # Fare matrix — needs Route + Stage both existing
-            ('Fare',            'FARE',          MdbImportService._process_fares),
+            ('Fare',             'FARE',          MdbImportService._process_fares),
             # VehicleType needs BusType
-            ('VehicleType',     'VEHICLETYPE',   MdbImportService._process_vehicles),
+            ('VehicleType',      'VEHICLETYPE',   MdbImportService._process_vehicles),
             # Settings — one row per company from SETTINGS table
-            ('Settings',        'SETTINGS',      MdbImportService._process_settings),
+            ('Settings',         'SETTINGS',      MdbImportService._process_settings),
 
             # ---- PASS 4: Depend on Pass 2/3 ----
-            ('ExpenseMaster',   'EXPMASTER',     MdbImportService._process_expense_masters),
-            ('Expense',         'EXPENSE',       MdbImportService._process_expenses),
-            ('CrewAssignment',  'CREWDET',       MdbImportService._process_crew_assignments),
-            ('InspectorDetails','INSPECTORDET',  MdbImportService._process_inspector_details),
+            ('ExpenseMaster',    'EXPMASTER',     MdbImportService._process_expense_masters),
+            ('Expense',          'EXPENSE',       MdbImportService._process_expenses),
+            ('CrewAssignment',   'CREWDET',       MdbImportService._process_crew_assignments),
+            ('InspectorDetails', 'INSPECTORDET',  MdbImportService._process_inspector_details),
         ]
 
         for table_name, raw_key, processor_fn in processors:
@@ -161,29 +191,37 @@ class MdbImportService:
                 # Each table gets its OWN atomic block (savepoint).
                 # If THIS table fails, only THIS table rolls back.
                 with transaction.atomic():
-                    imported, skipped, errors = processor_fn(rows, company, user, lookups)
+                    imported, existing, skipped, errors = processor_fn(rows, company, user, lookups)
             except Exception as e:
-                # Entire table processor crashed (not a row-level skip — a real crash)
-                # Mark all rows in this table as skipped and continue to next table
+                # Entire table processor crashed — mark all rows skipped and continue
                 imported = 0
+                existing = 0
                 skipped  = len(rows)
                 errors   = [f"Table {table_name} failed entirely: {str(e)}"]
 
             all_errors.extend(errors)
             total_imported += imported
+            total_existing += existing
             total_skipped  += skipped
-            table_results.append({
+
+            # Yield one event per table as it completes — frontend gets live updates
+            yield {
+                'type':     'table_done',
                 'table':    table_name,
                 'imported': imported,
+                'existing': existing,
                 'skipped':  skipped,
-            })
+                'errors':   errors,
+            }
 
-        return {
-            'imported':      total_imported,
-            'skipped':       total_skipped,
-            'table_results': table_results,
-            'errors':        all_errors,
-            'read_errors':   read_errors,
+        # Final summary event — frontend transitions to results view on this
+        yield {
+            'type':           'done',
+            'total_imported': total_imported,
+            'total_existing': total_existing,
+            'total_skipped':  total_skipped,
+            'errors':         all_errors,
+            'read_errors':    read_errors,
         }
 
 
@@ -258,6 +296,7 @@ class MdbImportService:
                 str(em.expense_code).strip(): em
                 for em in ExpenseMaster.objects.filter(company=company)
             },
+
             # MDB bustype source ID ("1") -> bustype name lowercase ("ordinary")
             'bus_type_source_map': bus_type_source_map or {},
         }
@@ -366,23 +405,26 @@ class MdbImportService:
         Django BusType: bustype_code, name, company
         Uses name as code since MDB has no separate code field.
         """
-        imported, skipped, errors = 0, 0, []
+        imported, existing, skipped, errors = 0, 0, 0, []
         for i, row in enumerate(rows):
             try:
                 name = str(row.get('name', '') or '').strip()
                 if not name:
                     raise ValueError("Missing name")
 
-                BusType.objects.get_or_create(
+                _, created = BusType.objects.get_or_create(
                     company=company,
                     bustype_code=name[:50],
                     defaults={'name': name, 'created_by': user}
                 )
-                imported += 1
+                if created:
+                    imported += 1
+                else:
+                    existing += 1
             except Exception as e:
                 skipped += 1
                 errors.append(f"Row {i+1} bustype: {str(e)}")
-        return imported, skipped, errors
+        return imported, existing, skipped, errors
 
 
     @staticmethod
@@ -393,7 +435,7 @@ class MdbImportService:
 
         EmployeeTypeId may export as "1.0" from mdbtools — normalize to "1".
         """
-        imported, skipped, errors = 0, 0, []
+        imported, existing, skipped, errors = 0, 0, 0, []
         for i, row in enumerate(rows):
             try:
                 raw_id    = str(row.get('EmployeeTypeId', '') or '').strip()
@@ -404,16 +446,19 @@ class MdbImportService:
 
                 type_code = MdbImportService._normalize_id(raw_id)
 
-                EmployeeType.objects.get_or_create(
+                _, created = EmployeeType.objects.get_or_create(
                     company=company,
                     emp_type_code=type_code,
                     defaults={'emp_type_name': type_name, 'created_by': user}
                 )
-                imported += 1
+                if created:
+                    imported += 1
+                else:
+                    existing += 1
             except Exception as e:
                 skipped += 1
                 errors.append(f"Row {i+1} EMPLOYEETYPE: {str(e)}")
-        return imported, skipped, errors
+        return imported, existing, skipped, errors
 
 
     @staticmethod
@@ -422,7 +467,7 @@ class MdbImportService:
         MDB CURRENCY: CURRENCY, COUNTRY, RECORDID
         Django Currency: currency, country, company
         """
-        imported, skipped, errors = 0, 0, []
+        imported, existing, skipped, errors = 0, 0, 0, []
         for i, row in enumerate(rows):
             try:
                 currency_code = str(row.get('CURRENCY', '') or '').strip()
@@ -431,16 +476,19 @@ class MdbImportService:
                 if not currency_code:
                     raise ValueError("Missing CURRENCY code")
 
-                Currency.objects.get_or_create(
+                _, created = Currency.objects.get_or_create(
                     company=company,
                     currency=currency_code[:3],
                     defaults={'country': country or '', 'created_by': user}
                 )
-                imported += 1
+                if created:
+                    imported += 1
+                else:
+                    existing += 1
             except Exception as e:
                 skipped += 1
                 errors.append(f"Row {i+1} CURRENCY: {str(e)}")
-        return imported, skipped, errors
+        return imported, existing, skipped, errors
 
 
     @staticmethod
@@ -452,7 +500,7 @@ class MdbImportService:
         Number is used as stage_code.
         Distance and route are stored in RouteStage (processed later).
         """
-        imported, skipped, errors = 0, 0, []
+        imported, existing, skipped, errors = 0, 0, 0, []
         for i, row in enumerate(rows):
             try:
                 raw_num    = str(row.get('Number', '') or '').strip()
@@ -465,16 +513,19 @@ class MdbImportService:
 
                 stage_code = MdbImportService._normalize_id(raw_num)
 
-                Stage.objects.get_or_create(
+                _, created = Stage.objects.get_or_create(
                     company=company,
                     stage_code=stage_code,
                     defaults={'stage_name': stage_name, 'created_by': user}
                 )
-                imported += 1
+                if created:
+                    imported += 1
+                else:
+                    existing += 1
             except Exception as e:
                 skipped += 1
                 errors.append(f"Row {i+1} STAGE: {str(e)}")
-        return imported, skipped, errors
+        return imported, existing, skipped, errors
 
 
     # ================================================================
@@ -489,7 +540,7 @@ class MdbImportService:
 
         EMPLOYEETYPEID → looked up in emp_types_by_code
         """
-        imported, skipped, errors = 0, 0, []
+        imported, existing, skipped, errors = 0, 0, 0, []
         for i, row in enumerate(rows):
             try:
                 raw_emp_id  = str(row.get('EMPLOYEEID',    '') or '').strip()
@@ -512,7 +563,7 @@ class MdbImportService:
                         f"Available codes: {list(lookups['emp_types_by_code'].keys())}"
                     )
 
-                Employee.objects.get_or_create(
+                _, created = Employee.objects.get_or_create(
                     company=company,
                     employee_code=emp_code,
                     defaults={
@@ -522,11 +573,14 @@ class MdbImportService:
                         'created_by':    user,
                     }
                 )
-                imported += 1
+                if created:
+                    imported += 1
+                else:
+                    existing += 1
             except Exception as e:
                 skipped += 1
                 errors.append(f"Row {i+1} CREW: {str(e)}")
-        return imported, skipped, errors
+        return imported, existing, skipped, errors
 
 
     @staticmethod
@@ -541,11 +595,11 @@ class MdbImportService:
         Bus type is resolved through:
           ROUTE.bustype (source id) -> bustype.id/name map -> DB BusType.
         """
-        imported, skipped, errors = 0, 0, []
+        imported, existing, skipped, errors = 0, 0, 0, []
         for i, row in enumerate(rows):
             try:
-                route_code   = str(row.get('rutcode', '') or '').strip()
-                route_name   = str(row.get('rutname', '') or '').strip()
+                route_code     = str(row.get('rutcode', '') or '').strip()
+                route_name     = str(row.get('rutname', '') or '').strip()
                 raw_bustype_id = row.get('bustype')
 
                 if not route_code:
@@ -565,7 +619,7 @@ class MdbImportService:
                         f"Available: {list(lookups['bus_types'].keys())}"
                     )
 
-                Route.objects.get_or_create(
+                _, created = Route.objects.get_or_create(
                     company=company,
                     route_code=route_code,
                     defaults={
@@ -583,11 +637,14 @@ class MdbImportService:
                         'created_by': user,
                     }
                 )
-                imported += 1
+                if created:
+                    imported += 1
+                else:
+                    existing += 1
             except Exception as e:
                 skipped += 1
                 errors.append(f"Row {i+1} ROUTE: {str(e)}")
-        return imported, skipped, errors
+        return imported, existing, skipped, errors
 
 
     # ================================================================
@@ -608,8 +665,22 @@ class MdbImportService:
         STAGE.id     → sequence_no
         STAGE.Distance → distance
         STG_LOCAL_LANGUAGE → stage_local_lang
+
+        Bulk approach — 1 SELECT to load existing keys, 1 INSERT for new rows.
         """
-        imported, skipped, errors = 0, 0, []
+        if not rows:
+            return 0, 0, 0, []
+
+        imported, existing, skipped, errors = 0, 0, 0, []
+
+        # Load existing (route_id, stage_id) pairs once
+        existing_keys = set(
+            RouteStage.objects.filter(company=company)
+            .values_list('route_id', 'stage_id')
+        )
+
+        to_create = []
+
         for i, row in enumerate(rows):
             try:
                 raw_num      = str(row.get('Number',   '') or '').strip()
@@ -633,22 +704,29 @@ class MdbImportService:
                 if not route:
                     raise ValueError(f"Route '{route_code}' not found")
 
-                RouteStage.objects.get_or_create(
-                    company=company,
-                    route=route,
-                    stage=stage,
-                    defaults={
-                        'sequence_no':      seq_no,
-                        'distance':         distance,
-                        'stage_local_lang': local_lang or None,
-                        'created_by':       user,
-                    }
-                )
-                imported += 1
+                key = (route.id, stage.id)
+                if key in existing_keys:
+                    existing += 1
+                else:
+                    to_create.append(RouteStage(
+                        company=company,
+                        route=route,
+                        stage=stage,
+                        sequence_no=seq_no,
+                        distance=distance,
+                        stage_local_lang=local_lang or None,
+                        created_by=user,
+                    ))
+
             except Exception as e:
                 skipped += 1
                 errors.append(f"Row {i+1} RouteStage: {str(e)}")
-        return imported, skipped, errors
+
+        if to_create:
+            RouteStage.objects.bulk_create(to_create, ignore_conflicts=True)
+            imported = len(to_create)
+
+        return imported, existing, skipped, errors
 
 
     @staticmethod
@@ -660,13 +738,13 @@ class MdbImportService:
         One RouteBusType entry per route using ROUTE.bustype source id.
         This records which bus types are allowed on each route.
         """
-        imported, skipped, errors = 0, 0, []
+        imported, existing, skipped, errors = 0, 0, 0, []
         for i, row in enumerate(rows):
             try:
-                route_code = str(row.get('rutcode', '') or '').strip()
-                raw_bustype_id = row.get('bustype')
+                route_code        = str(row.get('rutcode', '') or '').strip()
+                raw_bustype_id    = row.get('bustype')
                 source_bustype_id = MdbImportService._normalize_id(raw_bustype_id)
-                bustype_name = lookups['bus_type_source_map'].get(source_bustype_id)
+                bustype_name      = lookups['bus_type_source_map'].get(source_bustype_id)
 
                 if not route_code or not bustype_name:
                     raise ValueError("Missing rutcode or unresolved bustype source id")
@@ -679,22 +757,43 @@ class MdbImportService:
                 if not bus_type:
                     raise ValueError(f"BusType '{bustype_name}' not found")
 
-                RouteBusType.objects.get_or_create(
+                _, created = RouteBusType.objects.get_or_create(
                     company=company,
                     route=route,
                     bus_type=bus_type,
                     defaults={'created_by': user}
                 )
-                imported += 1
+                if created:
+                    imported += 1
+                else:
+                    existing += 1
             except Exception as e:
                 skipped += 1
                 errors.append(f"Row {i+1} RouteBusType: {str(e)}")
-        return imported, skipped, errors
+        return imported, existing, skipped, errors
 
 
     @staticmethod
     def _process_fares(rows, company, user, lookups):
-        imported, skipped, errors = 0, 0, []
+        """
+        Full-refresh approach per route — avoids stale fare data on re-import.
+
+        Steps:
+          1. First pass: collect all valid fare objects and track which routes
+             appear in this import batch.
+          2. Delete ALL existing fares for those routes (clean slate).
+          3. bulk_create the fresh fare records — 1 INSERT query total.
+
+        This ensures re-importing an updated MDB always reflects the latest
+        fare amounts rather than silently keeping stale values.
+        """
+        if not rows:
+            return 0, 0, 0, []
+
+        imported, existing, skipped, errors = 0, 0, 0, []
+        to_create = []
+        routes_in_batch = set()   # route PKs whose fares we will fully replace
+
         for i, row in enumerate(rows):
             try:
                 route_code = str(row.get('route', '') or '').strip()
@@ -714,23 +813,39 @@ class MdbImportService:
                 col_val    = MdbImportService._to_int(raw_col)
                 number_val = MdbImportService._to_int(raw_number)
 
-                Fare.objects.get_or_create(
+                routes_in_batch.add(route.id)
+                to_create.append(Fare(
                     company=company,
                     route=route,
                     row=row_val,
                     col=col_val,
-                    defaults={
-                        'number':     number_val,
-                        'fare_amount': fare_amt,
-                        'route_name': route.route_name,
-                        'created_by': user,
-                    }
-                )
-                imported += 1
+                    number=number_val,
+                    fare_amount=fare_amt,
+                    route_name=route.route_name,
+                    created_by=user,
+                ))
+
             except Exception as e:
                 skipped += 1
                 errors.append(f"Row {i+1} FARE: {str(e)}")
-        return imported, skipped, errors
+
+        if to_create:
+            # Delete existing fares only for routes present in this batch so
+            # that routes not covered by the MDB are left untouched.
+            existing_count = Fare.objects.filter(
+                company=company, route_id__in=routes_in_batch
+            ).count()
+            Fare.objects.filter(
+                company=company, route_id__in=routes_in_batch
+            ).delete()
+            existing = existing_count  # report how many were replaced
+
+            # ignore_conflicts=True guards against duplicate Number values
+            # within the same batch (MDB quirk) without aborting the whole insert.
+            Fare.objects.bulk_create(to_create, ignore_conflicts=True)
+            imported = len(to_create)
+
+        return imported, existing, skipped, errors
 
 
     @staticmethod
@@ -739,7 +854,7 @@ class MdbImportService:
         MDB VEHICLETYPE: BUSID, BUSNO, BUSTYPE(name string)
         Django VehicleType: bus_reg_num, bus_type(FK), company
         """
-        imported, skipped, errors = 0, 0, []
+        imported, existing, skipped, errors = 0, 0, 0, []
         for i, row in enumerate(rows):
             try:
                 bus_no       = str(row.get('BUSNO',   '') or '').strip()
@@ -755,16 +870,19 @@ class MdbImportService:
                         f"Available: {list(lookups['bus_types'].keys())}"
                     )
 
-                VehicleType.objects.get_or_create(
+                _, created = VehicleType.objects.get_or_create(
                     company=company,
                     bus_reg_num=bus_no,
                     defaults={'bus_type': bus_type_obj, 'created_by': user}
                 )
-                imported += 1
+                if created:
+                    imported += 1
+                else:
+                    existing += 1
             except Exception as e:
                 skipped += 1
                 errors.append(f"Row {i+1} VEHICLETYPE: {str(e)}")
-        return imported, skipped, errors
+        return imported, existing, skipped, errors
 
 
     @staticmethod
@@ -778,11 +896,11 @@ class MdbImportService:
 
         MDB column → Django field mapping documented inline.
         """
-        imported, skipped, errors = 0, 0, []
+        imported, existing, skipped, errors = 0, 0, 0, []
 
         # SETTINGS table typically has only one row
         if not rows:
-            return 0, 0, []
+            return 0, 0, 0, []
 
         # Take first row (should only be one)
         row = rows[0]
@@ -844,15 +962,15 @@ class MdbImportService:
                 'st_roundoff_amt':      MdbImportService._to_int(row.get('StRoundoffAmt')),
 
                 # Communication
-                'ph_no2':        str(row.get('PhNo2',      '') or '').strip() or None,
-                'ph_no3':        str(row.get('PhNo3',      '') or '').strip() or None,
-                'access_point':  str(row.get('AccessPoint','') or '').strip() or None,
-                'dest_adds':     str(row.get('DestAdds',   '') or '').strip() or None,
-                'username':      str(row.get('Username',   '') or '').strip() or None,
-                'password':      str(row.get('Password',   '') or '').strip() or None,
-                'uploadpath':    str(row.get('Uploadpath', '') or '').strip() or None,
+                'ph_no2':        str(row.get('PhNo2',       '') or '').strip() or None,
+                'ph_no3':        str(row.get('PhNo3',       '') or '').strip() or None,
+                'access_point':  str(row.get('AccessPoint', '') or '').strip() or None,
+                'dest_adds':     str(row.get('DestAdds',    '') or '').strip() or None,
+                'username':      str(row.get('Username',    '') or '').strip() or None,
+                'password':      str(row.get('Password',    '') or '').strip() or None,
+                'uploadpath':    str(row.get('Uploadpath',  '') or '').strip() or None,
                 'downloadpath':  str(row.get('Downloadpath','') or '').strip() or None,
-                'http_url':      str(row.get('HttpUrl',    '') or '').strip() or None,
+                'http_url':      str(row.get('HttpUrl',     '') or '').strip() or None,
 
                 # Feature flags (stored as varchar in Django)
                 'smart_card':           str(row.get('SmartCard',         '0') or '0'),
@@ -861,22 +979,25 @@ class MdbImportService:
                 'gprs_enable_message':  str(row.get('GprsEnableMessage', '0') or '0'),
                 'sendbill_enable':      str(row.get('sendbillEnable',    '0') or '0'),
 
-                'currency':    str(row.get('Currency', '') or '').strip() or None,
-                'created_by':  user,
+                'currency':   str(row.get('Currency', '') or '').strip() or None,
+                'created_by': user,
             }
 
             # update_or_create — Settings is OneToOne with Company
             # If already exists, update all fields. If not, create.
-            obj, created = Settings.objects.update_or_create(
+            _, created = Settings.objects.update_or_create(
                 company=company,
                 defaults=defaults
             )
-            imported = 1
+            if created:
+                imported = 1
+            else:
+                existing = 1
         except Exception as e:
             skipped = 1
             errors.append(f"Row 1 SETTINGS: {str(e)}")
 
-        return imported, skipped, errors
+        return imported, existing, skipped, errors
 
 
     # ================================================================
@@ -889,7 +1010,7 @@ class MdbImportService:
         MDB EXPMASTER: EXP_CODE, EXP_NAME, PalmID, ID
         Django ExpenseMaster: expense_code, expense_name, palmtec_id, company
         """
-        imported, skipped, errors = 0, 0, []
+        imported, existing, skipped, errors = 0, 0, 0, []
         for i, row in enumerate(rows):
             try:
                 raw_code = str(row.get('EXP_CODE', '') or '').strip()
@@ -901,7 +1022,7 @@ class MdbImportService:
 
                 exp_code = MdbImportService._normalize_id(raw_code)
 
-                ExpenseMaster.objects.get_or_create(
+                _, created = ExpenseMaster.objects.get_or_create(
                     company=company,
                     expense_code=exp_code,
                     defaults={
@@ -910,11 +1031,14 @@ class MdbImportService:
                         'created_by':   user,
                     }
                 )
-                imported += 1
+                if created:
+                    imported += 1
+                else:
+                    existing += 1
             except Exception as e:
                 skipped += 1
                 errors.append(f"Row {i+1} EXPMASTER: {str(e)}")
-        return imported, skipped, errors
+        return imported, existing, skipped, errors
 
 
     @staticmethod
@@ -926,9 +1050,25 @@ class MdbImportService:
                         schedule_no, bus_number, driver(FK), tripmaster_ref_id,
                         receipt_no, expense_amount, company
 
+        Unique key: (company, palmtec_id, expense_code, date, schedule_no)
+        — same device + expense type + date + schedule won't duplicate on re-import.
         DriverName matched against Employee.employee_name lowercase.
+
+        Bulk approach — 1 SELECT to load existing keys, 1 INSERT for new rows.
         """
-        imported, skipped, errors = 0, 0, []
+        if not rows:
+            return 0, 0, 0, []
+
+        imported, existing, skipped, errors = 0, 0, 0, []
+
+        # Load existing (palmtec_id, expense_code, date, schedule_no) tuples once
+        existing_keys = set(
+            Expense.objects.filter(company=company)
+            .values_list('palmtec_id', 'expense_code', 'date', 'schedule_no')
+        )
+
+        to_create = []
+
         for i, row in enumerate(rows):
             try:
                 driver_name = str(row.get('DriverName', '') or '').strip().lower()
@@ -942,26 +1082,40 @@ class MdbImportService:
                         f"Ensure CREW was imported first."
                     )
 
-                Expense.objects.create(
-                    company=company,
-                    expense_code=str(row.get('ExpCode', '') or '').strip(),
-                    expense_name=str(row.get('ExpName', '') or '').strip(),
-                    date=MdbImportService._parse_date(row.get('Date')),
-                    time=MdbImportService._parse_time(row.get('Time')),
-                    palmtec_id=str(row.get('PalmID', '') or '').strip(),
-                    schedule_no=MdbImportService._to_int(row.get('ScheduleNo')),
-                    bus_number=str(row.get('BusNo', '') or '').strip(),
-                    driver=driver,
-                    tripmaster_ref_id=str(row.get('TripMasterReferenceId', '') or '').strip(),
-                    receipt_no=str(row.get('rcpt_No', '') or '').strip() or None,
-                    expense_amount=MdbImportService._to_float(row.get('ExpAmt')),
-                    created_by=user,
-                )
-                imported += 1
+                palm_id      = str(row.get('PalmID',    '') or '').strip()
+                expense_code = str(row.get('ExpCode',   '') or '').strip()
+                date         = MdbImportService._parse_date(row.get('Date'))
+                schedule_no  = MdbImportService._to_int(row.get('ScheduleNo'))
+
+                key = (palm_id, expense_code, date, schedule_no)
+                if key in existing_keys:
+                    existing += 1
+                else:
+                    to_create.append(Expense(
+                        company=company,
+                        palmtec_id=palm_id,
+                        expense_code=expense_code,
+                        date=date,
+                        schedule_no=schedule_no,
+                        expense_name=str(row.get('ExpName', '') or '').strip(),
+                        time=MdbImportService._parse_time(row.get('Time')),
+                        bus_number=str(row.get('BusNo', '') or '').strip(),
+                        driver=driver,
+                        tripmaster_ref_id=str(row.get('TripMasterReferenceId', '') or '').strip(),
+                        receipt_no=str(row.get('rcpt_No', '') or '').strip() or None,
+                        expense_amount=MdbImportService._to_float(row.get('ExpAmt')),
+                        created_by=user,
+                    ))
+
             except Exception as e:
                 skipped += 1
                 errors.append(f"Row {i+1} EXPENSE: {str(e)}")
-        return imported, skipped, errors
+
+        if to_create:
+            Expense.objects.bulk_create(to_create, ignore_conflicts=True)
+            imported = len(to_create)
+
+        return imported, existing, skipped, errors
 
 
     @staticmethod
@@ -972,11 +1126,25 @@ class MdbImportService:
         Django CrewAssignment: driver(FK), conductor(FK nullable),
                                cleaner(FK nullable), vehicle(FK), company
 
-        All employee lookups by name lowercase.
-        Vehicle lookup by bus_reg_num lowercase.
+        Unique key: (company, driver, vehicle)
+        — a driver+vehicle pair represents one assignment snapshot.
         Conductor and cleaner are optional.
+
+        Bulk approach — 1 SELECT to load existing keys, 1 INSERT for new rows.
         """
-        imported, skipped, errors = 0, 0, []
+        if not rows:
+            return 0, 0, 0, []
+
+        imported, existing, skipped, errors = 0, 0, 0, []
+
+        # Load existing (driver_id, vehicle_id) pairs once
+        existing_keys = set(
+            CrewAssignment.objects.filter(company=company)
+            .values_list('driver_id', 'vehicle_id')
+        )
+
+        to_create = []
+
         for i, row in enumerate(rows):
             try:
                 driver_name    = str(row.get('DR_NAME',   '') or '').strip().lower()
@@ -997,22 +1165,30 @@ class MdbImportService:
                 if not vehicle:
                     raise ValueError(f"Vehicle '{bus_no}' not found")
 
-                conductor = lookups['employees_by_name'].get(conductor_name) if conductor_name else None
-                cleaner   = lookups['employees_by_name'].get(cleaner_name)   if cleaner_name   else None
+                key = (driver.id, vehicle.id)
+                if key in existing_keys:
+                    existing += 1
+                else:
+                    conductor = lookups['employees_by_name'].get(conductor_name) if conductor_name else None
+                    cleaner   = lookups['employees_by_name'].get(cleaner_name)   if cleaner_name   else None
+                    to_create.append(CrewAssignment(
+                        company=company,
+                        driver=driver,
+                        vehicle=vehicle,
+                        conductor=conductor,
+                        cleaner=cleaner,
+                        created_by=user,
+                    ))
 
-                CrewAssignment.objects.create(
-                    company=company,
-                    driver=driver,
-                    conductor=conductor,
-                    cleaner=cleaner,
-                    vehicle=vehicle,
-                    created_by=user,
-                )
-                imported += 1
             except Exception as e:
                 skipped += 1
                 errors.append(f"Row {i+1} CREWDET: {str(e)}")
-        return imported, skipped, errors
+
+        if to_create:
+            CrewAssignment.objects.bulk_create(to_create, ignore_conflicts=True)
+            imported = len(to_create)
+
+        return imported, existing, skipped, errors
 
 
     @staticmethod
@@ -1023,10 +1199,26 @@ class MdbImportService:
         Django InspectorDetails: tripmaster_ref_id, inspector(FK), station_no,
                                  date, time, palmtec_id, schedule_no, trip_no, company
 
+        Unique key: (company, tripmaster_ref_id, inspector, date)
+        — an inspector records one check per trip per date.
         InspectorID matched against Employee.employee_code first,
         then falls back to employee_name if code not found.
+
+        Bulk approach — 1 SELECT to load existing keys, 1 INSERT for new rows.
         """
-        imported, skipped, errors = 0, 0, []
+        if not rows:
+            return 0, 0, 0, []
+
+        imported, existing, skipped, errors = 0, 0, 0, []
+
+        # Load existing (tripmaster_ref_id, inspector_id, date) tuples once
+        existing_keys = set(
+            InspectorDetails.objects.filter(company=company)
+            .values_list('tripmaster_ref_id', 'inspector_id', 'date')
+        )
+
+        to_create = []
+
         for i, row in enumerate(rows):
             try:
                 inspector_id = str(row.get('InspectorID', '') or '').strip()
@@ -1045,23 +1237,35 @@ class MdbImportService:
                         f"Ensure CREW was imported first."
                     )
 
-                InspectorDetails.objects.create(
-                    company=company,
-                    tripmaster_ref_id=str(row.get('TripMasterReferenceId', '') or '').strip(),
-                    inspector=inspector,
-                    station_no=str(row.get('StationNo', '') or '').strip(),
-                    date=MdbImportService._parse_date(row.get('Date')),
-                    time=MdbImportService._parse_time(row.get('Time')),
-                    palmtec_id=str(row.get('PalmID', '') or '').strip(),
-                    schedule_no=MdbImportService._to_int(row.get('ScheduleNo')),
-                    trip_no=MdbImportService._to_int(row.get('TripNo')),
-                    created_by=user,
-                )
-                imported += 1
+                tripmaster_ref_id = str(row.get('TripMasterReferenceId', '') or '').strip()
+                date              = MdbImportService._parse_date(row.get('Date'))
+
+                key = (tripmaster_ref_id, inspector.id, date)
+                if key in existing_keys:
+                    existing += 1
+                else:
+                    to_create.append(InspectorDetails(
+                        company=company,
+                        tripmaster_ref_id=tripmaster_ref_id,
+                        inspector=inspector,
+                        date=date,
+                        station_no=str(row.get('StationNo', '') or '').strip(),
+                        time=MdbImportService._parse_time(row.get('Time')),
+                        palmtec_id=str(row.get('PalmID', '') or '').strip(),
+                        schedule_no=MdbImportService._to_int(row.get('ScheduleNo')),
+                        trip_no=MdbImportService._to_int(row.get('TripNo')),
+                        created_by=user,
+                    ))
+
             except Exception as e:
                 skipped += 1
                 errors.append(f"Row {i+1} INSPECTORDET: {str(e)}")
-        return imported, skipped, errors
+
+        if to_create:
+            InspectorDetails.objects.bulk_create(to_create, ignore_conflicts=True)
+            imported = len(to_create)
+
+        return imported, existing, skipped, errors
 
 
 # ================================================================

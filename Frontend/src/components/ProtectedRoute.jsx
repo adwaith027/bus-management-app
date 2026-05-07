@@ -1,7 +1,7 @@
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import api, { BASE_URL, refreshApi } from '../assets/js/axiosConfig';  // imported refreshApi
-import {BarLoader,BeatLoader,BounceLoader,CircleLoader,ClimbingBoxLoader,ClipLoader,ClockLoader,DotLoader,FadeLoader,GridLoader,HashLoader,MoonLoader,PacmanLoader,PropagateLoader,PulseLoader,PuffLoader,RingLoader,RiseLoader,RotateLoader,ScaleLoader,SkewLoader,SquareLoader,SyncLoader} from "react-spinners";
+import { PropagateLoader } from "react-spinners";
 
 export default function ProtectedRoute() {
   const [isAuthenticated, setIsAuthenticated] = useState(null);
@@ -14,6 +14,17 @@ export default function ProtectedRoute() {
   useEffect(() => {
     verifyAuthFromBackend();
   }, []);
+
+  // Redirect immediately if another tab logs out (clears localStorage)
+  useEffect(() => {
+    const handleStorageChange = (e) => {
+      if (e.key === 'user' && e.newValue === null) {
+        navigate('/login', { replace: true });
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [navigate]);
 
   const verifyAuthFromBackend = async () => {
     try {
@@ -60,7 +71,8 @@ export default function ProtectedRoute() {
       
       // Company admin restrictions: cannot access superadmin pages
       if (userRole === 'company_admin') {
-        if (path.includes('/companies') || 
+        if (path.includes('/companies') ||
+            path.includes('/clients') ||
             path.includes('/users') ||
             path.includes('/device-approvals') ||
             path.includes('/dealers') ||
@@ -72,11 +84,12 @@ export default function ProtectedRoute() {
       }
       
       if (userRole === 'user') {
-        if (path.includes('/companies') || 
+        if (path.includes('/companies') ||
+            path.includes('/clients') ||
             path.includes('/users') ||
             path.includes('/device-approvals') ||
-            path.includes('/depots') || 
-            path.includes('/ticket-report') || 
+            path.includes('/depots') ||
+            path.includes('/ticket-report') ||
             path.includes('/trip-close-report') ||
             isMasterDataPath ||
             path.includes('/dealers') ||
@@ -87,12 +100,13 @@ export default function ProtectedRoute() {
         }
       }
 
-      if (userRole === 'executive_user') {
-        if (path.includes('/companies') || 
+      if (userRole === 'executive') {
+        if (path.includes('/companies') ||
+            path.includes('/clients') ||
             path.includes('/users') ||
             path.includes('/device-approvals') ||
-            path.includes('/depots') || 
-            path.includes('/ticket-report') || 
+            path.includes('/depots') ||
+            path.includes('/ticket-report') ||
             path.includes('/trip-close-report') ||
             isMasterDataPath ||
             path.includes('/dealers') ||
@@ -102,44 +116,63 @@ export default function ProtectedRoute() {
         }
       }
 
-      if (userRole === 'dealer_user') {
-        if (path.includes('/companies') || 
-            path.includes('/users') ||
+      if (userRole === 'dealer_admin') {
+        // dealer_admin CAN access /companies (their mapped companies) and /users
+        if (path.includes('/clients') ||
             path.includes('/device-approvals') ||
-            path.includes('/depots') || 
-            path.includes('/ticket-report') || 
+            path.includes('/depots') ||
+            path.includes('/ticket-report') ||
             path.includes('/trip-close-report') ||
             isMasterDataPath ||
             path.includes('/settlements') ||
             path.includes('/dealers') ||
             path.includes('/executive-dashboard')) {
-          window.alert('Access Denied: This page is only for Dealers');
+          window.alert('Access Denied: This page is not available for Dealer Admins');
           navigate('/dashboard', { replace: true });
+        }
+      }
+
+      if (userRole === 'production') {
+        // Production users can only access device-registry
+        if (!path.includes('/device-registry')) {
+          navigate('/dashboard/device-registry', { replace: true });
         }
       }
     }
   }, [loading, isAuthenticated, userRole, location.pathname, navigate]);
 
-  // Show loading state
-  if (loading) {
+  // Redirect to login if not authenticated
+  if (!loading && !isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  // If loading but no cached session → show full screen spinner (first login)
+  const hasCachedSession = !!localStorage.getItem('user');
+  if (loading && !hasCachedSession) {
     return (
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
         height: '100vh',
-        fontSize: '18px'
       }}>
-        <PropagateLoader /> 
+        <PropagateLoader />
       </div>
     );
   }
 
-  // Redirect to login if not authenticated
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
-  // Render protected content
-  return <Outlet />;
+  // If loading but cached session exists → show page with non-blocking overlay
+  return (
+    <>
+      <Outlet />
+      {loading && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 9999,
+          pointerEvents: 'all',
+        }} />
+      )}
+    </>
+  );
 }

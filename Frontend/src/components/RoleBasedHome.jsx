@@ -1,8 +1,9 @@
-import AdminHome from '../pages/AdminHome';
-import CompanyDashboard from '../pages/CompanyDashboard';
-import UserHome from '../pages/UserHome';
-import DealerDashboard from '../pages/DealerDashboard';
-import ExecutiveDashboard from '../pages/ExecutiveDashboard';
+import { Navigate } from 'react-router-dom';
+import AdminHome from '../pages/dashboards/AdminHome';
+import CompanyDashboard from '../pages/dashboards/CompanyDashboard';
+import UserHome from '../pages/dashboards/UserHome';
+import DealerDashboard from '../pages/dashboards/DealerDashboard';
+import ExecutiveDashboard from '../pages/dashboards/ExecutiveDashboard';
 
 export default function RoleBasedHome() {
   const storedUser = localStorage.getItem('user');
@@ -12,8 +13,9 @@ export default function RoleBasedHome() {
   if (role === 'superadmin') return <AdminHome />;
   if (role === 'company_admin') return <CompanyDashboard />;
   if (role === 'user') return <UserHome />;
-  if (role === 'dealer_user') return <DealerDashboard />;
-  if (role === 'executive_user') return <ExecutiveDashboard />;
+  if (role === 'dealer_admin') return <DealerDashboard />;
+  if (role === 'executive') return <ExecutiveDashboard />;
+  if (role === 'production') return <Navigate to="/dashboard/device-registry" replace />;
 
   return (
     <div className="p-6">

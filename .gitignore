@@ -72,6 +72,42 @@ htmlcov/
 *.tmp
 *.zip
 
-# Project-specific files (already pushed - preventing re-commits)
-backend changes.txt
-frontend changes.txt
+##################################
+# Legacy VB6 system reference
+##################################
+PVT BUS NORMAL-GPRS_2.17 - 14112019/
+
+##################################
+# Device file analysis (local only)
+##################################
+device_file_check/
+
+
+
+
+_backups/
+
+
+pending-implementations.txt
+
+CallQ/
+
+faster-loading-suggestions.txt
+
+NTC-ETM-API-AND-STRUCTURE-DETAILS.txt
+
+commands.txt
+
+masterdata-apis.txt
+
+
+download_flow_analysis.pdf
+transfer-code-analysis.txt
+APK_MasterData_Download_API.md
+
+upload-from-etm.txt
+
+.claude/
+
+
+Backup.zip
