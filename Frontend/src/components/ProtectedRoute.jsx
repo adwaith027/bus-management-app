@@ -75,9 +75,10 @@ export default function ProtectedRoute() {
       
       // Superadmin restrictions: cannot access company admin pages
       if (userRole === 'superadmin') {
-        if (path.includes('/depots') || 
-            path.includes('/ticket-report') || 
-            path.includes('/trip-close-report') ||
+        if (path.includes('/depots') ||
+            path.includes('/ticket-data') ||
+            path.includes('/trip-data') ||
+            path.includes('/schedule-data') ||
             isMasterDataPath) {
           window.alert('Access Denied: This page is only for Company Admins');
           navigate('/dashboard', { replace: true });
@@ -87,7 +88,6 @@ export default function ProtectedRoute() {
       // Company admin restrictions: cannot access superadmin pages
       if (userRole === 'company_admin') {
         if (path.includes('/companies') ||
-            path.includes('/clients') ||
             path.includes('/users') ||
             path.includes('/device-approvals') ||
             path.includes('/dealers') ||
@@ -100,12 +100,12 @@ export default function ProtectedRoute() {
       
       if (userRole === 'user') {
         if (path.includes('/companies') ||
-            path.includes('/clients') ||
             path.includes('/users') ||
             path.includes('/device-approvals') ||
             path.includes('/depots') ||
-            path.includes('/ticket-report') ||
-            path.includes('/trip-close-report') ||
+            path.includes('/ticket-data') ||
+            path.includes('/trip-data') ||
+            path.includes('/schedule-data') ||
             isMasterDataPath ||
             path.includes('/dealers') ||
             path.includes('/dealer-dashboard') ||
@@ -117,12 +117,12 @@ export default function ProtectedRoute() {
 
       if (userRole === 'executive') {
         if (path.includes('/companies') ||
-            path.includes('/clients') ||
             path.includes('/users') ||
             path.includes('/device-approvals') ||
             path.includes('/depots') ||
-            path.includes('/ticket-report') ||
-            path.includes('/trip-close-report') ||
+            path.includes('/ticket-data') ||
+            path.includes('/trip-data') ||
+            path.includes('/schedule-data') ||
             isMasterDataPath ||
             path.includes('/dealers') ||
             path.includes('/dealer-dashboard')) {
@@ -133,16 +133,25 @@ export default function ProtectedRoute() {
 
       if (userRole === 'dealer_admin') {
         // dealer_admin CAN access /companies (their mapped companies) and /users
-        if (path.includes('/clients') ||
-            path.includes('/device-approvals') ||
+        if (path.includes('/device-approvals') ||
             path.includes('/depots') ||
-            path.includes('/ticket-report') ||
-            path.includes('/trip-close-report') ||
+            path.includes('/ticket-data') ||
+            path.includes('/trip-data') ||
+            path.includes('/schedule-data') ||
             isMasterDataPath ||
             path.includes('/settlements') ||
             path.includes('/dealers') ||
             path.includes('/executive-dashboard')) {
           window.alert('Access Denied: This page is not available for Dealer Admins');
+          navigate('/dashboard', { replace: true });
+        }
+      }
+
+      if (userRole === 'company_user') {
+        const allowed = ['/dashboard/ticket-data', '/dashboard/trip-data', '/dashboard/schedule-data'];
+        const isAllowed = path === '/dashboard' || allowed.some(p => path.startsWith(p));
+        if (!isAllowed) {
+          window.alert('Access Denied: This page is not available for your role');
           navigate('/dashboard', { replace: true });
         }
       }
