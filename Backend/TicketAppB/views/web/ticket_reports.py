@@ -11,11 +11,7 @@ import pytz
 
 from ...models import TransactionData, TripData, ScheduleData
 from .auth import get_user_from_cookie
-from ...serializers.transactions import (
-    TicketDataSerializer,
-    TripDataSerializer,
-    ScheduleDataSerializer,
-)
+from ...serializers.transactions import TicketDataSerializer,TripDataSerializer,ScheduleDataSerializer
 
 logger = logging.getLogger('ticket.transactions')
 
@@ -63,7 +59,7 @@ def get_all_transaction_data(request):
                 company_code=user.company,
                 ticket_date__gte=from_date,
                 ticket_date__lte=to_date,
-            ).select_related('route_id')
+            ).select_related('route_id').prefetch_related('route_id__route_depots__depot')
         else:
             qs = TransactionData.objects.none()
 
