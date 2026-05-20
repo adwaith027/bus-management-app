@@ -12,7 +12,7 @@ import RoleBasedHome from './components/RoleBasedHome'
 import ProtectedRoute from './components/ProtectedRoute'
 
 import CompanyListing from './pages/listings/CompanyListing'
-import Clients from './pages/listings/Clients'
+import DealerListing from './pages/listings/DealerListing'
 import UserListing from './pages/listings/UserListing'
 import DepotListing from './pages/listings/DepotListing'
 import VehicleCombined from './pages/listings/VehicleCombined'
@@ -21,15 +21,15 @@ import RouteListing from './pages/listings/RouteListing'
 import EmployeeCombined from './pages/listings/EmployeeCombined'
 
 import CrewAssignmentListing from './pages/operations/CrewAssignmentListing'
-import DealerManagement from './pages/operations/DealerManagement'
 import DeviceApprovals from './pages/operations/DeviceApprovals'
 import DeviceRegistry from './pages/operations/DeviceRegistry'
 import FareEditor from './pages/operations/FareEditor'
 import StageEditor from './pages/operations/StageEditor'
 import ExpenseMasterPage from './pages/operations/ExpenseMasterPage'
 
-import TicketReport from './pages/reports/TicketReport'
-import TripcloseReport from './pages/reports/TripcloseReport'
+import TicketDataPage from './pages/reports/TicketDataPage'
+import TripDataPage from './pages/reports/TripDataPage'
+import ScheduleDataPage from './pages/reports/ScheduleDataPage'
 import SettlementsLayout from './pages/reports/settlements/SettlementsLayout'
 
 import TransactionPosting from './pages/reports/settlements/TransactionPosting'
@@ -38,6 +38,7 @@ import PayoutPosting from './pages/reports/settlements/PayoutPosting'
 import MdbImport from './pages/tools/MdbImport'
 import SettingsPage from './pages/tools/SettingsPage'
 import DeviceDownload from './pages/tools/DeviceDownload'
+import FailedPayloadsPage from './pages/tools/FailedPayloadsPage'
 
 import NotFound from './components/NotFound'
 
@@ -70,10 +71,6 @@ const router = createBrowserRouter([
             element: <RoleBasedHome />
           },
           {
-            path: 'clients',
-            element: <Clients />
-          },
-          {
             path: 'companies',
             element: <CompanyListing />
           },
@@ -86,12 +83,16 @@ const router = createBrowserRouter([
             element: <DepotListing />
           },
           {
-            path: 'ticket-report',
-            element: <TicketReport />
+            path: 'ticket-data',
+            element: <TicketDataPage />
           },
           {
-            path: 'trip-close-report',
-            element: <TripcloseReport />
+            path: 'trip-data',
+            element: <TripDataPage />
+          },
+          {
+            path: 'schedule-data',
+            element: <ScheduleDataPage />
           },
           {
             path: 'settlements',
@@ -104,7 +105,7 @@ const router = createBrowserRouter([
           },
           {
             path: 'dealers',
-            element: <DealerManagement />
+            element: <DealerListing />
           },
           {
             path: 'device-approvals',
@@ -157,6 +158,10 @@ const router = createBrowserRouter([
           {
             path: 'device-download',
             element: <DeviceDownload />
+          },
+          {
+            path: 'failed-payloads',
+            element: <FailedPayloadsPage />
           },
         ]
       }
