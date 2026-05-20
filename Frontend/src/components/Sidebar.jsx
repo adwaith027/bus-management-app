@@ -8,7 +8,7 @@ import {
   ChevronDown, ChevronLeft, ChevronRight,
   Coins, Users2,
   Route, Truck, CalendarCog, Settings,
-  Ticket, TrendingDown, IndianRupee, Cpu, MonitorDown,
+  Ticket, CalendarRange, IndianRupee, Cpu, MonitorDown, BusFront,
 } from "lucide-react";
 import api, { BASE_URL } from "../assets/js/axiosConfig";
 import cacheManager from "../assets/js/reportCache";
@@ -285,11 +285,20 @@ export default function Sidebar() {
             {role === "superadmin" && (
               <>
                 <SectionLabel label="Administration" isCollapsed={isCollapsed} />
-                <NavItem to="/dashboard/clients"          icon={Handshake}     label="Clients"          isCollapsed={isCollapsed} onClose={close} />
+                <NavItem to="/dashboard/companies"        icon={Building2}     label="Companies"        isCollapsed={isCollapsed} onClose={close} />
+                <NavItem to="/dashboard/dealers"          icon={Handshake}     label="Dealers"          isCollapsed={isCollapsed} onClose={close} />
                 <NavItem to="/dashboard/users"            icon={Users}         label="Users"            isCollapsed={isCollapsed} onClose={close} />
                 <NavItem to="/dashboard/device-registry"  icon={Cpu}           label="Device Registry"  isCollapsed={isCollapsed} onClose={close} />
                 <NavItem to="/dashboard/device-approvals" icon={SmartphoneNfc} label="Device Approvals" isCollapsed={isCollapsed} onClose={close} />
                 <NavItem to="/dashboard/data-import"      icon={FileInput}     label="MDB Data Import"  isCollapsed={isCollapsed} onClose={close} />
+                {!isCollapsed && (
+                  <li className="px-3 pt-3 pb-0.5">
+                    <span className="text-[9px] text-slate-300 uppercase tracking-widest font-medium select-none">
+                      Diagnostics
+                    </span>
+                  </li>
+                )}
+                <NavItem to="/dashboard/failed-payloads"   icon={AlertTriangle} label="Failed Payloads"  isCollapsed={isCollapsed} onClose={close} />
               </>
             )}
 
@@ -347,11 +356,27 @@ export default function Sidebar() {
                   isCollapsed={isCollapsed} isOpen={reportsOpen}
                   onToggle={() => setReportsOpen(p => !p)}
                 >
-                  <SubLink to="/dashboard/ticket-report"     icon={Ticket}       label="Ticket Report" onClose={close} />
-                  <SubLink to="/dashboard/trip-close-report" icon={TrendingDown} label="Trip Close"    onClose={close} />
+                  <SubLink to="/dashboard/schedule-data" icon={CalendarRange}  label="Schedule Data" onClose={close} />
+                  <SubLink to="/dashboard/trip-data"     icon={BusFront}       label="Trip Data"     onClose={close} />
+                  <SubLink to="/dashboard/ticket-data"   icon={Ticket}         label="Ticket Data"   onClose={close} />
                 </DropdownSection>
 
                 <NavItem to="/dashboard/settlements" icon={Receipt} label="Settlements" isCollapsed={isCollapsed} onClose={close} />
+              </>
+            )}
+
+            {/* Company User */}
+            {role === "company_user" && (
+              <>
+                <DropdownSection
+                  icon={BarChart2} label="Reports"
+                  isCollapsed={isCollapsed} isOpen={reportsOpen}
+                  onToggle={() => setReportsOpen(p => !p)}
+                >
+                  <SubLink to="/dashboard/schedule-data" icon={CalendarRange}  label="Schedule Data" onClose={close} />
+                  <SubLink to="/dashboard/trip-data"     icon={BusFront}       label="Trip Data"     onClose={close} />
+                  <SubLink to="/dashboard/ticket-data"   icon={Ticket}         label="Ticket Data"   onClose={close} />
+                </DropdownSection>
               </>
             )}
 
