@@ -6,7 +6,7 @@
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![Django](https://img.shields.io/badge/django-5.2-green.svg)
 ![React](https://img.shields.io/badge/react-18.0-blue.svg)
-![Version](https://img.shields.io/badge/version-1.1-orange.svg)
+![Version](https://img.shields.io/badge/version-1.2.0-orange.svg)
 
 Private multi-tenant platform for bus fleet operations with real-time ticketing, payment reconciliation, and comprehensive reporting.
 
@@ -37,7 +37,7 @@ The **Bus Ticketing Management System** streamlines bus operations for transport
 ### 💳 Transaction Processing
 - Real-time ticket data collection from handheld devices
 - Cash and UPI payment tracking
-- Trip close reports with financial summaries
+- Trip and schedule data reports with financial summaries
 - Passenger breakdown (Full, Half, Student, Senior, Physical, Luggage)
 
 ### 💰 Payment Reconciliation
@@ -50,7 +50,7 @@ The **Bus Ticketing Management System** streamlines bus operations for transport
 
 ### 📊 Reporting & Analytics
 - Transaction reports with date/device/depot/payment filters
-- Trip close reports with route and schedule analytics
+- Trip and schedule data reports with route and financial analytics
 - Excel export (ExcelJS)
 - Dashboard metrics for collections, operations, settlements
 - Summary cards with live KPIs
@@ -69,16 +69,19 @@ The **Bus Ticketing Management System** streamlines bus operations for transport
 - **Employee Types** - Driver, Conductor, Inspector roles
 - **Employees** - Staff directory with type classification
 - **Crew Assignments** - Dynamic trip-wise crew scheduling
-- **Inspector Details** - Inspector mapping to routes
 
-### 🏢 Dealer & Executive Management (NEW v1.1)
-- **Dealer Management** - Third-party dealer registration and mappings
-- **Executive Mappings** - Executive territory management
+### 🏢 Dealer & Executive Management (NEW v1.1, Enhanced v1.2)
+- **Dealer Management** - Restructured dealer registration flow with improved data validation
+- **Dealer Mappings** - Enhanced mapping system with better access control
+- **Executive Mappings** - Executive territory management with granular permissions
 - **Specialized Dashboards** - Role-specific views with transaction visibility
+- **User Access Control** - Granular permission system for dealer and executive roles
 
-### 🏪 Operational Management (NEW v1.1)
+### 🏢 Operational Management (NEW v1.1, Enhanced v1.2)
 - **Depot Management** - Transit hub/depot configuration
 - **Settings Management** - System and company-level configurations
+- **License Allocation & Management** - Improved license allocation workflow and company license lifecycle
+- **Company Registration Flow** - Restructured company registration with enhanced validation and approval process
 
 ### 🔐 Security
 - JWT authentication with HTTP-only cookies
@@ -99,6 +102,7 @@ The **Bus Ticketing Management System** streamlines bus operations for transport
 - **Celery + Redis** for async task processing
 - **MDB Parser** for bulk data import from Access files
 - **Flower** for Celery task monitoring
+- **APK Reporting** - Comprehensive reporting system for mobile device data with advanced filtering
 
 **Frontend**
 - React 18 with Vite
@@ -216,7 +220,7 @@ PRODUCT_AUTH_ENDPOINT=/ProductAuthentication
 MOSAMBEE_SALT=your-mosambee-salt-key
 
 # App Info
-APP_VERSION=1.1.0
+APP_VERSION=1.2.0
 PROJECT_NAME=Bus Ticketing System
 ```
 
@@ -224,39 +228,11 @@ PROJECT_NAME=Bus Ticketing System
 
 ## 📖 Usage
 
-### User Roles
-
-**Super Admin**
-- Manage companies and validate licenses
-- Create/edit users across all companies
-- View system-wide metrics
-
-**Company Admin**
-- Manage depots within company
-- Access transaction/trip reports
-- Verify payment settlements
-
-**User**
-- View-only dashboard access
-
 ### License Validation Workflow
 
 1. Register company → Get `company_id`
 2. Click "Validate License" → Backend polls external server (3s intervals, 2min max)
 3. Status: Pending → Validating → Approved/Expired/Blocked
-
-### Settlement Verification Workflow
-
-1. Mosambee POSTs payment data → Backend validates checksum
-2. **Auto-reconciliation** (Django Signal):
-   - Find ticket by invoice number
-   - Check amount match
-   - Detect duplicates
-3. Manager reviews in Settlement Page:
-   - View payment vs ticket comparison
-   - Add verification notes
-   - Verify/Reject/Flag transaction
-4. Status: UNVERIFIED → VERIFIED/REJECTED/FLAGGED
 
 ---
 
@@ -385,15 +361,84 @@ POST /import-mdb/  # MDB file upload & bulk import
 
 ### Device Data Format
 
-**Transaction (Pipe-Delimited)**
+**Ticket Transaction (Pipe-Delimited)**
 ```
-RequestType|DeviceID|TripNo|TicketNo|Date|Time|FromStage|ToStage|FullCount|HalfCount|STCount|PhyCount|LuggCount|TicketAmt|LuggAmt|TicketType|AdjustAmt|PassID|WarrantAmt|RefundStatus|RefundAmt|LadiesCount|SeniorCount|TransactionID|TicketStatus|ReferenceNo|CompanyCode
+Ticket|DeviceSequenceID|DeviceID|RouteCode|TripNo|TicketNumber|ScheduleStartDate|[Reserved]|TicketDate|TicketTime|FromStageNo|ToStageNo|FullCount|HalfCount|StudentCount|PhysicalCount|LuggageCount|[Reserved]|[Reserved]|[Reserved]|[Reserved]|[Reserved]|[Reserved]|[Reserved]|[Reserved]|LadiesCount|SeniorCount|ScheduleNo|[Reserved]|[Reserved]|Direction|TripStartDate|[Reserved]|[Reserved]|[Reserved]|[Reserved]|[Reserved]|[Reserved]|[Reserved]|[Reserved]|[Reserved]|[Reserved]|[Reserved]|PaymentMode|CompanyCode|CheckSum
+```
+
+**Field Descriptions:**
+
+| Index | Field | Description | Example |
+|-------|-------|-------------|--------|
+| 0 | RequestType | Always 'Ticket' | Ticket |
+| 1 | DeviceSequenceID | Unique sequence from device | ABC123XYZ |
+| 2 | DeviceID | Device identifier | DEVICE001 |
+| 3 | RouteCode | Route identifier | R001 |
+| 4 | TripNo | Trip number | 5 |
+| 5 | TicketNumber | Ticket identifier | T12345 |
+| 6 | ScheduleStartDate | Schedule date (DDMMYYYY) | 21052026 |
+| 8 | TicketDate | Ticket issue date (DDMMYYYY) | 21052026 |
+| 9 | TicketTime | Ticket time (HHMM) | 0930 |
+| 10 | FromStageNo | Boarding stage (1-indexed) | 1 |
+| 11 | ToStageNo | Alighting stage (1-indexed) | 5 |
+| 12 | FullCount | Full fare passengers | 10 |
+| 13 | HalfCount | Half fare passengers | 3 |
+| 14 | StudentCount | Student passengers | 2 |
+| 15 | PhysicalCount | Physical disability passengers | 1 |
+| 16 | LuggageCount | Luggage units | 5 |
+| 25 | LadiesCount | Ladies only (if applicable) | 2 |
+| 26 | SeniorCount | Senior citizen passengers | 1 |
+| 28 | ScheduleNo | Schedule identifier | 101 |
+| 31 | Direction | Trip direction (U=Up, D=Down) | U |
+| 32 | TripStartDate | Trip start date (DDMMYYYY) | 21052026 |
+| 44 | PaymentMode | 0=Cash, 1=UPI | 1 |
+| 45 | CompanyCode | Company code | COMP001 |
+| 46+ | CheckSum | SHA512 checksum | (hash) |
+
+**Example Ticket Data:**
+```
+Ticket|ABC123XYZ|DEVICE001|R001|5|T12345|21052026||21052026|0930|1|5|10|3|2|1|5|||||||||1|2|101|||U|21052026||||||||||||1|COMP001|abcdef123456...
+```
+
+**Trip Open (Pipe-Delimited)**
+```
+TrpOp|DeviceSequenceID|DeviceID|CompanyCode|RouteCode|ScheduleNo|BusNumber|DriverID|DriverName|ScheduleStartDate|[Reserved]|[Reserved]|[Reserved]|[Reserved]|CheckSum
+```
+
+**Trip Close (Pipe-Delimited)**
+```
+TrpCls|DeviceSequenceID|DeviceID|CompanyCode|RouteCode|TripNo|[Multiple Financial Fields]|...|CheckSum
+```
+
+**Schedule Open (Pipe-Delimited)**
+```
+ShdOpn|DeviceSequenceID|DeviceID|CompanyCode|RouteCode|[Reserved]|[Reserved]|[Reserved]|[Reserved]|[Reserved]|[Reserved]|BatteryPercentage|CheckSum
+```
+
+**Schedule Close (Pipe-Delimited)**
+```
+ShdCls|DeviceSequenceID|DeviceID|CompanyCode|RouteCode|[Multiple Data Fields]|...|CheckSum
 ```
 
 **Server Response**
+
+Successful processing returns:
 ```
-OK#SUCCESS#fn={first_32_chars}#
+OK#SUCCESS#fn={first_32_chars_of_device_sequence_id}#
 ```
+
+Error responses:
+```
+NO_DATA              # Request parameter 'fn' is missing
+MISSING_DATA         # Payload has fewer fields than required
+INVALID              # Request type doesn't match expected value
+INVALID_CHECKSUM     # SHA512 checksum validation failed
+INVALID_COMPANY      # Company code not found or inactive
+METHOD_NOT_ALLOWED   # Request method is not GET (HTTP 405)
+ERROR                # Server-side processing error (HTTP 500)
+```
+
+**Response Content-Type**: `text/plain`
 
 ---
 
@@ -409,7 +454,7 @@ bus-ticketing-system/
 │   │   │   ├── auth.py              # CustomUser, UserDevice Mapping
 │   │   │   ├── company.py           # Company, Depot, CustomUser
 │   │   │   ├── master_data.py       # Bus Types, Routes, Stages, Fares, Employees, Currency
-│   │   │   ├── operations.py        # Crew Assignments, Expenses, Inspector Details
+│   │   │   ├── operations.py        # Crew Assignments, Expenses
 │   │   │   ├── transactions.py      # TransactionData, TripCloseData
 │   │   │   ├── payments.py          # MosambeeTransaction, Settlement
 │   │   │   └── managers.py          # Custom QuerySet managers
@@ -479,7 +524,7 @@ bus-ticketing-system/
 
 ## 🗺️ Roadmap
 
-### ✅ Completed (v1.0+)
+### ✅ Completed (v1.0-v1.1)
 
 - [x] Depot management
 - [x] Transaction & trip data collection
@@ -499,30 +544,26 @@ bus-ticketing-system/
 - [x] **Settings management**
 - [x] **Multiple specialized dashboards** (Admin, Company, Dealer, Executive)
 
-### 🚧 Upcoming (v1.2)
+### ✅ Completed (v1.2 - Current)
 
-- [ ] Inspector assignment and routing integration
+- [x] **Company & Dealer Registration Flow Restructure** - Enhanced registration workflow with improved validation
+- [x] **License Allocation & Management** - Comprehensive license lifecycle management
+- [x] **User Access Control Enhancements** - Granular permission system for multi-role users
+- [x] **APK Report Completion** - Full reporting suite for mobile device data with advanced filtering
+- [x] **Expense Management** - Expense tracking and categorization (pending full documentation)
+
+### 🚧 Upcoming (v1.3+)
+
 - [ ] Advanced expense tracking and reconciliation
-- [ ] Batch settlement processing
 - [ ] Real-time GPS tracking integration
-- [ ] Route optimization algorithms
-
-### 📅 Future (v2.0+)
-
-- [ ] Mobile conductor app (React Native)
-- [ ] Driver roster and leave management
-- [ ] Automated settlement reminders & notifications
-- [ ] Multi-language support
-- [ ] Predictive maintenance alerts
-- [ ] Advanced analytics & business intelligence dashboards
 
 ---
 
 ## 📊 Project Status
 
-**Current Version**: 1.1  
+**Current Version**: 1.2  
 **Status**: Active Development  
-**Last Updated**: March 2026
+**Last Updated**: May 2026
 
 ---
 
@@ -550,6 +591,30 @@ bus-ticketing-system/
 - Comprehensive API for master data CRUD operations
 - Enhanced device security with approval workflow
 - MDB file parsing and bulk import engine
+
+---
+
+## 🔧 Key Changes in v1.2
+
+### Restructured Flows
+- **Company Registration**: Enhanced validation, streamlined approval process with improved error handling
+- **Dealer Registration**: Restructured registration workflow with better data consistency and validation rules
+- **License Management**: Complete lifecycle management - allocation, validation, renewal tracking, expiration handling
+
+### Enhanced Security & Access Control
+- **Granular User Permissions**: Fine-grained access control for dealer and executive roles
+- **User-Role Mapping**: Improved multi-role user assignment with proper permission inheritance
+- **Access Control Policies**: Better enforcement of company data isolation across user roles
+
+### Reporting Improvements
+- **APK Report Completion**: Comprehensive reporting system for mobile device data
+- **Advanced Filtering**: Multi-criteria filtering for transaction and trip reports
+- **Export Capabilities**: Enhanced Excel export with formatted headers and data validation
+
+### Technical Updates
+- Improved middleware for license validation and user access control
+- Enhanced signal handlers for better data reconciliation
+- Optimized query performance for multi-tenant operations
 
 ---
 
