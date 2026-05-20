@@ -30,6 +30,7 @@ class Company(models.Model):
     address_2 = models.TextField(blank=True, null=True)
     city = models.CharField(max_length=100)
     state = models.CharField(max_length=100)
+    district = models.CharField(max_length=100, blank=True, null=True)
     zip_code = models.CharField(max_length=20)
     
     # Client Type
@@ -156,6 +157,7 @@ class Dealer(models.Model):
     address = models.TextField()
     city = models.CharField(max_length=100)
     state = models.CharField(max_length=100)
+    district = models.CharField(max_length=100, blank=True, null=True)
     zip_code = models.CharField(max_length=20)
     gst_number = models.CharField(max_length=20, null=True, blank=True)
     is_active = models.BooleanField(default=True)
