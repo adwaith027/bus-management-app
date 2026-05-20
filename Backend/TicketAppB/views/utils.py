@@ -41,7 +41,7 @@ def _get_company(company_id):
 
 
 def _get_authenticated_company_admin(request):
-    from .auth_views import get_user_from_cookie
+    from .web.auth import get_user_from_cookie
     user = get_user_from_cookie(request)
     if not user:
         return None, None, Response(
@@ -71,3 +71,79 @@ def _get_object_or_404(model, pk, company):
             {'error': f'{model.__name__} not found.'},
             status=status.HTTP_404_NOT_FOUND
         )
+
+
+
+CACHE_MISS_SENTINEL = "__NOT_FOUND__"
+
+def _get_company_for_palmtec(company_id):
+    key = f"company:{company_id}"
+    cached_pk = cache.get(key)
+
+    if cached_pk == CACHE_MISS_SENTINEL:
+        return None  # already know it doesn't exist
+
+    from ..models import Company
+    if cached_pk is not None:
+        return Company.objects.get(pk=cached_pk)
+
+    company = Company.objects.filter(company_id=company_id).first()
+
+    if company:
+        cache.set(key, company.pk, timeout=3600)
+    else:
+        cache.set(key, CACHE_MISS_SENTINEL, timeout=300)  # cache the "not found" too
+
+    return company
+
+
+
+def _validate_checksum(endpoint: str, raw: str) -> bool:
+    # Device computes: sum of HttpDataBuff[1..len-1] where HttpDataBuff =
+    # "{endpoint}?fn={pipe_string_up_to_pipe_before_checksum}" and len = len of that string.
+    # Wraps: if running_sum > 30000, subtract 30000.
+    # Checksum is parts[-2]; parts[-1] is trailing empty.
+    parts = raw.split("|")
+    if len(parts) < 2:
+        return False
+    try:
+        received = int(parts[-2])
+    except ValueError:
+        return False
+
+    payload = endpoint + "?fn=" + "|".join(parts[:-2]) + "|"
+    total = 0
+    for ch in payload[1:]:
+        total += ord(ch)
+        if total > 30000:
+            total -= 30000
+
+    return total == received
+    
+
+
+def _get_route_for_palmtec(route_code: str, company_instance):
+    from ..models import Route
+    cache_key=f"route:{company_instance.pk}:{route_code}"
+    cached_pk=cache.get(cache_key)
+
+    if cached_pk == CACHE_MISS_SENTINEL:
+        # cache returned "__not_found__"
+        # we stored this before — route doesn't exist
+        return None
+    
+    if cached_pk is not None:
+        # cache returned an actual PK like 7
+        # use it to fetch from DB
+        return Route.objects.filter(pk=cached_pk).first()
+    else:
+        # cache returned None — key was never stored
+        # we have no choice, so ask the database
+        route=Route.objects.filter(route_code=route_code, company=company_instance).first()
+
+        if route:
+            cache.set(key=cache_key,value=route.pk,timeout=3600)
+            return route
+        else:
+            cache.set(key=cache_key, value=CACHE_MISS_SENTINEL, timeout=300) 
+            return None
