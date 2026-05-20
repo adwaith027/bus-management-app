@@ -306,9 +306,8 @@ export default function Sidebar() {
             {role === "executive" && (
               <>
                 <SectionLabel label="Administration" isCollapsed={isCollapsed} />
-                <NavItem to="/dashboard/companies"       icon={Building2}     label="Companies"       isCollapsed={isCollapsed} onClose={close} />
-                <NavItem to="/dashboard/users"           icon={Users}         label="Users"           isCollapsed={isCollapsed} onClose={close} />
-                <NavItem to="/dashboard/device-registry" icon={Cpu}           label="Device Registry" isCollapsed={isCollapsed} onClose={close} />
+                <NavItem to="/dashboard/companies"       icon={Building2} label="Companies"       isCollapsed={isCollapsed} onClose={close} />
+                <NavItem to="/dashboard/device-registry" icon={Cpu}       label="Device Registry" isCollapsed={isCollapsed} onClose={close} />
               </>
             )}
 
@@ -317,7 +316,6 @@ export default function Sidebar() {
               <>
                 <SectionLabel label="My Portfolio" isCollapsed={isCollapsed} />
                 <NavItem to="/dashboard/companies"       icon={Building2} label="My Companies"    isCollapsed={isCollapsed} onClose={close} />
-                <NavItem to="/dashboard/users"           icon={Users}     label="Users"           isCollapsed={isCollapsed} onClose={close} />
                 <NavItem to="/dashboard/device-registry" icon={Cpu}       label="Device Registry" isCollapsed={isCollapsed} onClose={close} />
               </>
             )}
