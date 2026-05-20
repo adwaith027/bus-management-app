@@ -1,19 +1,132 @@
-import { useState, useEffect } from 'react';
-import Modal from '../../components/Modal';
-import ChangePasswordModal from '../../components/ChangePasswordModal';
-import TableSkeleton from '../../components/TableSkeleton';
+import { useState, useEffect, useMemo } from 'react';
+import {
+  Users, CheckCircle2, KeyRound, Activity, Layers, Plus, Search,
+  ArrowUp, ArrowDown, ArrowUpDown, Building2, Eye, Edit, X,
+  ArrowRight, Info, Save,
+} from 'lucide-react';
 import api, { BASE_URL } from '../../assets/js/axiosConfig';
 import { useNavigate } from 'react-router-dom';
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const AVATAR_COLORS = ['#0f172a', '#4f46e5', '#7c3aed', '#0891b2', '#059669', '#d97706', '#dc2626', '#be185d'];
+
+function avatarColor(name) {
+  let hash = 0;
+  for (let i = 0; i < (name || '').length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+function initials(name) {
+  const parts = (name || '').replace(/[._-]/g, ' ').split(' ').filter(Boolean);
+  return parts.length > 1
+    ? (parts[0][0] + parts[1][0]).toUpperCase()
+    : (name || '??').slice(0, 2).toUpperCase();
+}
+
+function timeAgo(iso) {
+  if (!iso) return 'Never';
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+}
+
+// ─── Role config ───────────────────────────────────────────────────────────────
+
+const ROLE_CONFIG = {
+  superadmin:    { label: 'Super Admin',   bg: 'bg-rose-50',    text: 'text-rose-700',    border: 'border-rose-200',    dot: 'bg-rose-500' },
+  dealer_admin:  { label: 'Dealer Admin',  bg: 'bg-amber-50',   text: 'text-amber-700',   border: 'border-amber-200',   dot: 'bg-amber-500' },
+  company_admin: { label: 'Company Admin', bg: 'bg-violet-50',  text: 'text-violet-700',  border: 'border-violet-200',  dot: 'bg-violet-500' },
+  executive:     { label: 'Executive',     bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', dot: 'bg-emerald-500' },
+  user:          { label: 'User',          bg: 'bg-blue-50',    text: 'text-blue-700',    border: 'border-blue-200',    dot: 'bg-blue-500' },
+};
+
+// ─── Sub-components ────────────────────────────────────────────────────────────
+
+function RoleBadge({ role }) {
+  const c = ROLE_CONFIG[role] || ROLE_CONFIG.user;
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${c.bg} ${c.text} ${c.border}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />
+      {c.label}
+    </span>
+  );
+}
+
+function StatusPill({ active }) {
+  return active ? (
+    <span className="inline-flex items-center gap-1.5 rounded-full border font-medium px-2 py-0.5 text-[11px] bg-emerald-50 text-emerald-700 border-emerald-200">
+      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />Active
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1.5 rounded-full border font-medium px-2 py-0.5 text-[11px] bg-slate-50 text-slate-600 border-slate-200">
+      <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />Inactive
+    </span>
+  );
+}
+
+function InlineStat({ icon: Icon, label, value, color }) {
+  return (
+    <div className="flex items-center gap-2">
+      <div className="h-7 w-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: color + '20' }}>
+        <Icon size={13} color={color} />
+      </div>
+      <div>
+        <p className="text-[10px] text-slate-400 uppercase tracking-wider leading-none">{label}</p>
+        <p className="text-sm font-bold text-slate-800 leading-tight tabular-nums">{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function Th({ children, onClick, right }) {
+  return (
+    <th
+      className={`px-4 py-3 text-[10px] font-semibold text-slate-500 uppercase tracking-widest whitespace-nowrap ${onClick ? 'cursor-pointer select-none hover:text-slate-700' : ''} ${right ? 'text-right' : ''}`}
+      onClick={onClick}
+    >
+      {children}
+    </th>
+  );
+}
+
+function ModalWrapper({ open, onClose, title, icon: Icon, width = 'max-w-lg', children }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+      <div
+        className={`bg-white rounded-2xl shadow-2xl w-full ${width} max-h-[85vh] overflow-y-auto`}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
+          <div className="flex items-center gap-2 text-slate-800">
+            {Icon && <Icon size={16} className="text-slate-600" />}
+            <h3 className="font-semibold">{title}</h3>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="px-5 py-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main component ────────────────────────────────────────────────────────────
+
 export default function UserListing() {
-  // ========== CURRENT USER ============
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
   const currentRole = currentUser?.role;
   const isSuperadmin = currentRole === 'superadmin';
   const isDealerAdmin = currentRole === 'dealer_admin';
   const isCompanyAdmin = currentRole === 'company_admin';
 
-  // Allowed roles this user can create
   const allowedRoles = isSuperadmin
     ? [{ value: 'company_admin', label: 'Company Admin' }, { value: 'executive', label: 'Executive' }]
     : isDealerAdmin
@@ -24,50 +137,39 @@ export default function UserListing() {
 
   const defaultRole = allowedRoles[0]?.value || 'user';
 
-  // ========== STATE MANAGEMENT ==========
+  // ── Data state ───────────────────────────────────────────────────────────────
   const [users, setUsers] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [executiveMappings, setExecutiveMappings] = useState([]);
+  const [execPanelOpen, setExecPanelOpen] = useState(false);
+  const [executiveMappingForm, setExecutiveMappingForm] = useState({ executive_user: '', company: '', is_active: true });
 
-  const [executiveMappingForm, setExecutiveMappingForm] = useState({
-    executive_user: '',
-    company: '',
-    is_active: true
-  });
+  // ── Filter / sort / paginate state ───────────────────────────────────────────
+  const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [sortField, setSortField] = useState('date_joined');
+  const [sortDir, setSortDir] = useState('desc');
+  const [page, setPage] = useState(1);
+  const perPage = 10;
 
-  // Modal Management
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
-  const [modalMode, setModalMode] = useState('create'); // 'create', 'view', 'edit'
-  const [editingUser, setEditingUser] = useState(null);
+  // ── Modal state ──────────────────────────────────────────────────────────────
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState('create');
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [pwModalOpen, setPwModalOpen] = useState(false);
 
-  const navigate=useNavigate()
+  // ── Form state ───────────────────────────────────────────────────────────────
+  const [formData, setFormData] = useState({ username: '', email: '', role: defaultRole, company_id: '', password: '' });
+  const [pw, setPw] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
+  const [showPw, setShowPw] = useState(false);
 
-  const handleLogout = async () => {
-      try {
-        await api.post(`${BASE_URL}/logout`);
-      } catch {}
-      finally {
-        localStorage.removeItem("user");
-        localStorage.removeItem("authToken");
-        localStorage.removeItem("refreshToken");
-        localStorage.removeItem("userRole");
-        navigate("/login");
-      }
-    };
+  const navigate = useNavigate();
 
-  // Form State
-  const [formData, setFormData] = useState({
-    username: '',
-    email: '',
-    role: defaultRole,
-    company_id: '',
-    password: ''
-  });
-
-  // ========== DATA FETCHING ==========
+  // ── Fetch ────────────────────────────────────────────────────────────────────
   useEffect(() => {
     fetchUsers();
     fetchCompanies();
@@ -77,10 +179,10 @@ export default function UserListing() {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const response = await api.get(`${BASE_URL}/get_users`);
-      setUsers(response.data.data || []);
+      const res = await api.get(`${BASE_URL}/get_users`);
+      setUsers(res.data.data || []);
     } catch (err) {
-      console.error("Error fetching users:", err);
+      console.error('Error fetching users:', err);
     } finally {
       setLoading(false);
     }
@@ -88,100 +190,164 @@ export default function UserListing() {
 
   const fetchCompanies = async () => {
     try {
-      const response = await api.get(`${BASE_URL}/customer-data`);
-      setCompanies(response.data?.data || []); 
+      const res = await api.get(`${BASE_URL}/customer-data`);
+      setCompanies(res.data?.data || []);
     } catch (err) {
-      console.error("Error fetching companies:", err);
-      setCompanies([]);
+      console.error('Error fetching companies:', err);
     }
   };
 
   const fetchExecutiveMappings = async () => {
     try {
-      const response = await api.get(`${BASE_URL}/executive-mappings`);
-      setExecutiveMappings(response.data?.data || []);
+      const res = await api.get(`${BASE_URL}/executive-mappings`);
+      setExecutiveMappings(res.data?.data || []);
     } catch (err) {
-      console.error("Error fetching executive mappings:", err);
-      setExecutiveMappings([]);
+      console.error('Error fetching executive mappings:', err);
     }
   };
 
-  // ========== HELPER FUNCTIONS ==========
-  const getCompanyNameById = (companyId) => {
-    if (!companyId) return 'N/A';
-    const company = companies.find(comp => comp.id === companyId);
-    return company ? company.company_name : 'N/A';
+  const handleLogout = async () => {
+    try { await api.post(`${BASE_URL}/logout`); } catch {}
+    finally {
+      localStorage.removeItem('user');
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('refreshToken');
+      localStorage.removeItem('userRole');
+      navigate('/login');
+    }
   };
 
-  const resetFormData = () => {
-    setFormData({
-      username: '',
-      email: '',
-      role: defaultRole,
-      company_id: '',
-      password: ''
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+  const getCompany = (id) => companies.find(c => c.id === id)?.company_name || null;
+
+  // ── Filter + sort + paginate ─────────────────────────────────────────────────
+  const filtered = useMemo(() => {
+    let list = [...users];
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter(u => u.username?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q));
+    }
+    if (roleFilter !== 'ALL') list = list.filter(u => u.role === roleFilter);
+    if (statusFilter !== 'ALL') list = list.filter(u => statusFilter === 'active' ? u.is_active : !u.is_active);
+    list.sort((a, b) => {
+      let va = a[sortField], vb = b[sortField];
+      if (sortField === 'date_joined' || sortField === 'last_login') {
+        va = va ? new Date(va).getTime() : 0;
+        vb = vb ? new Date(vb).getTime() : 0;
+      }
+      if (typeof va === 'string') { va = va.toLowerCase(); vb = (vb || '').toLowerCase(); }
+      if (va < vb) return sortDir === 'asc' ? -1 : 1;
+      if (va > vb) return sortDir === 'asc' ? 1 : -1;
+      return 0;
     });
+    return list;
+  }, [users, search, roleFilter, statusFilter, sortField, sortDir]);
+
+  useEffect(() => setPage(1), [search, roleFilter, statusFilter]);
+
+  const totalPages = Math.ceil(filtered.length / perPage);
+  const paged = filtered.slice((page - 1) * perPage, page * perPage);
+
+  // ── Stats ────────────────────────────────────────────────────────────────────
+  const stats = useMemo(() => {
+    const active = users.filter(u => u.is_active).length;
+    const admins = users.filter(u => ['superadmin', 'company_admin', 'dealer_admin'].includes(u.role)).length;
+    const recentLogins = users.filter(u => u.last_login && Date.now() - new Date(u.last_login).getTime() < 86400000).length;
+    return { total: users.length, active, admins, recentLogins };
+  }, [users]);
+
+  // ── Sort ─────────────────────────────────────────────────────────────────────
+  const toggleSort = (field) => {
+    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortField(field); setSortDir('asc'); }
   };
 
-  const populateFormData = (user) => {
-    setFormData({
-      username: user.username || '',
-      email: user.email || '',
-      role: user.role || 'user',
-      company_id: user.company || '',
-      password: '' // Never populate password
-    });
+  const SortIcon = ({ field }) => {
+    if (sortField !== field) return <ArrowUpDown size={10} className="ml-0.5 opacity-30 inline" />;
+    return sortDir === 'asc'
+      ? <ArrowUp size={10} className="ml-0.5 inline" />
+      : <ArrowDown size={10} className="ml-0.5 inline" />;
   };
 
-  // ========== MODAL HANDLERS ==========
-  const openCreateModal = () => {
+  // ── Modal handlers ───────────────────────────────────────────────────────────
+  const openCreate = () => {
     setModalMode('create');
-    setEditingUser(null);
-    resetFormData();
-    setIsModalOpen(true);
+    setSelectedUser(null);
+    setFormData({ username: '', email: '', role: defaultRole, company_id: '', password: '' });
+    setModalOpen(true);
   };
 
-  const openViewModal = (user) => {
-    setModalMode('view');
-    setEditingUser(user);
-    populateFormData(user);
-    setIsModalOpen(true);
-  };
+  const openView = (u) => { setModalMode('view'); setSelectedUser(u); setModalOpen(true); };
 
-  const openEditModal = (user) => {
+  const openEdit = (u) => {
     setModalMode('edit');
-    setEditingUser(user);
-    populateFormData(user);
-    setIsModalOpen(true);
+    setSelectedUser(u);
+    setFormData({ username: u.username, email: u.email, role: u.role, company_id: u.company || '', password: '' });
+    setModalOpen(true);
   };
 
-  const openPasswordModal = (user) => {
-    setEditingUser(user);
-    setIsPasswordModalOpen(true);
+  const openPw = (u) => {
+    setSelectedUser(u);
+    setPw(''); setConfirmPw(''); setShowPw(false);
+    setPwModalOpen(true);
   };
 
-  const closeModal = () => {
-    setIsModalOpen(false);
-    setEditingUser(null);
-    setModalMode('create');
-    resetFormData();
-  };
+  const closeModal = () => { setModalOpen(false); setSelectedUser(null); };
 
-  const closePasswordModal = () => {
-    setIsPasswordModalOpen(false);
-    setEditingUser(null);
-  };
-
-  // ========== FORM HANDLERS ==========
+  // ── Form handlers ────────────────────────────────────────────────────────────
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => {
       const next = { ...prev, [name]: value };
-      if (name === 'role' && value === 'executive') {
-        next.company_id = '';
-      }
+      if (name === 'role' && value === 'executive') next.company_id = '';
       return next;
     });
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      let response;
+      if (modalMode === 'edit') {
+        response = await api.put(`${BASE_URL}/update_user/${selectedUser.id}`, {
+          username: formData.username,
+          email: formData.email,
+          role: formData.role,
+          company_id: formData.company_id,
+        });
+      } else {
+        response = await api.post(`${BASE_URL}/create_user`, formData);
+      }
+      if (response?.status === 200 || response?.status === 201) {
+        window.alert(response.data.message || 'Operation successful!');
+        closeModal();
+        fetchUsers();
+      }
+    } catch (err) {
+      window.alert(err.response?.data?.message || err.response?.data?.error || 'Operation failed');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handlePasswordChange = async (e) => {
+    e.preventDefault();
+    if (pw !== confirmPw || pw.length < 8) return;
+    setSubmitting(true);
+    try {
+      const res = await api.post(`${BASE_URL}/change_user_password/${selectedUser.id}`, { new_password: pw });
+      if (res?.status === 200) {
+        window.alert(res.data.message || 'Password changed successfully!');
+        setPwModalOpen(false);
+        const cur = JSON.parse(localStorage.getItem('user'));
+        if (cur && cur.id === selectedUser.id) handleLogout();
+      }
+    } catch (err) {
+      window.alert(err.response?.data?.message || err.response?.data?.error || 'Password change failed');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleExecutiveMappingChange = (e) => {
@@ -192,440 +358,606 @@ export default function UserListing() {
   const handleCreateExecutiveMapping = async (e) => {
     e.preventDefault();
     try {
-      const response = await api.post(`${BASE_URL}/create-executive-mapping`, executiveMappingForm);
-      if (response?.status === 201) {
-        window.alert(response.data.message || 'Mapping created');
+      const res = await api.post(`${BASE_URL}/create-executive-mapping`, executiveMappingForm);
+      if (res?.status === 201) {
+        window.alert(res.data.message || 'Mapping created');
         setExecutiveMappingForm({ executive_user: '', company: '', is_active: true });
         fetchExecutiveMappings();
       }
     } catch (err) {
-      const errorMessage = err.response?.data?.message || err.response?.data?.error || 'Mapping failed';
-      window.alert(errorMessage);
+      window.alert(err.response?.data?.message || err.response?.data?.error || 'Mapping failed');
     }
   };
 
   const handleToggleExecutiveMapping = async (mapping) => {
     try {
-      const response = await api.put(`${BASE_URL}/update-executive-mapping/${mapping.id}`, {
-        is_active: !mapping.is_active
-      });
-      if (response?.status === 200) {
-        fetchExecutiveMappings();
-      }
+      const res = await api.put(`${BASE_URL}/update-executive-mapping/${mapping.id}`, { is_active: !mapping.is_active });
+      if (res?.status === 200) fetchExecutiveMappings();
     } catch (err) {
-      const errorMessage = err.response?.data?.message || err.response?.data?.error || 'Update failed';
-      window.alert(errorMessage);
+      window.alert(err.response?.data?.message || err.response?.data?.error || 'Update failed');
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setSubmitting(true);
-
-    try {
-      let response;
-      if (modalMode === 'edit') {
-        // Update existing user (without password)
-        const updateData = {
-          username: formData.username,
-          email: formData.email,
-          role: formData.role,
-          company_id: formData.company_id
-        };
-        response = await api.put(`${BASE_URL}/update_user/${editingUser.id}`, updateData);
-      } else if (modalMode === 'create') {
-        // Create new user (with password)
-        response = await api.post(`${BASE_URL}/create_user`, formData);
-      }
-
-      if (response?.status === 200 || response?.status === 201) {
-        window.alert(response.data.message || 'Operation successful!');
-        closeModal();
-        fetchUsers();
-      }
-    } catch (err) {
-      console.error("Error:", err);
-      const errorMessage = err.response?.data?.message || err.response?.data?.error || 'Operation failed';
-      window.alert(errorMessage);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  // ========== PASSWORD CHANGE HANDLER ==========
-  const handlePasswordChange = async (newPassword) => {
-    try {
-      const response = await api.post(`${BASE_URL}/change_user_password/${editingUser.id}`, {
-        new_password: newPassword
-      });
-      
-      if (response?.status === 200) {
-        window.alert(response.data.message || 'Password changed successfully!');
-        closePasswordModal();
-        const current_user=JSON.parse(localStorage.getItem('user'))
-        if (!current_user) return;
-
-        if(current_user.id==editingUser.id){
-          console.log("LOGOUT")
-          handleLogout();
-        }
-      }
-    } catch (err) {
-      console.error("Password change error:", err);
-      const errorMessage = err.response?.data?.message || err.response?.data?.error || 'Password change failed';
-      throw new Error(errorMessage);
-    }
-  };
-
-  // ========== HELPER FUNCTIONS FOR STYLING ==========
-  const getRoleBadgeStyle = (role) => {
-    switch(role) {
-      case 'company_admin': return 'bg-purple-100 text-purple-700 border-purple-200';
-      case 'superadmin':
-      case 'super_admin': return 'bg-rose-100 text-rose-700 border-rose-200';
-      case 'executive': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-      case 'dealer_admin': return 'bg-amber-100 text-amber-700 border-amber-200';
-      default: return 'bg-blue-100 text-blue-700 border-blue-200';
-    }
-  };
-
-  const formatRole = (role) => {
-    return role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-  };
-
-  const getModalTitle = () => {
-    if (modalMode === 'view') return 'User Details';
-    if (modalMode === 'edit') return 'Edit User';
-    return 'Create User Account';
-  };
-
-  const isReadOnly = modalMode === 'view';
-
-  // ========== RENDER ==========
+  // ─── Render ───────────────────────────────────────────────────────────────────
   return (
-    <div className="p-6 md:p-10 min-h-screen bg-slate-50 animate-fade-in">
-      
-      {/* Page Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-800 tracking-tight">User Management</h1>
-          <p className="text-slate-500 mt-1">Manage system users and access roles</p>
+    <div className="p-6 md:p-8 min-h-screen bg-slate-50">
+
+      {/* ── Page header ────────────────────────────────────────────────────── */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
+        {/* Left: icon + title */}
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 text-white shadow-md shrink-0">
+            <Users size={18} color="#fff" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">User Management</h1>
+            <p className="text-sm text-slate-500 mt-0.5">{stats.total} users across {companies.length} companies</p>
+          </div>
         </div>
-        <button 
-          onClick={openCreateModal}
-          className="flex items-center justify-center space-x-2 bg-slate-800 hover:bg-slate-700 text-white px-5 py-2.5 rounded-xl transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 active:translate-y-0"
-        >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
-          </svg>
-          <span className="font-medium">Add New User</span>
-        </button>
+
+        {/* Center: inline stats */}
+        <div className="hidden lg:flex items-center gap-5">
+          <InlineStat icon={Users} label="Total" value={stats.total} color="#0f172a" />
+          <div className="w-px h-6 bg-slate-200" />
+          <InlineStat icon={CheckCircle2} label="Active" value={stats.active} color="#059669" />
+          <div className="w-px h-6 bg-slate-200" />
+          <InlineStat icon={KeyRound} label="Admins" value={stats.admins} color="#7c3aed" />
+          <div className="w-px h-6 bg-slate-200" />
+          <InlineStat icon={Activity} label="24h Logins" value={stats.recentLogins} color="#2563eb" />
+        </div>
+
+        {/* Right: action buttons */}
+        <div className="flex items-center gap-2">
+          {isSuperadmin && (
+            <button
+              onClick={() => setExecPanelOpen(v => !v)}
+              className={`inline-flex items-center gap-1.5 h-9 px-3 text-xs rounded-lg font-medium border transition-colors cursor-pointer ${execPanelOpen ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+            >
+              <Layers size={13} />
+              Exec Mapping
+            </button>
+          )}
+          <button
+            onClick={openCreate}
+            className="inline-flex items-center gap-1.5 h-9 px-4 text-sm rounded-lg font-medium bg-slate-900 hover:bg-slate-700 text-white cursor-pointer transition-colors shadow-sm"
+          >
+            <Plus size={14} />
+            Add User
+          </button>
+        </div>
       </div>
 
-      {isSuperadmin && (
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-6">
-        <h2 className="text-lg font-semibold text-slate-800 mb-4">Map Executive Users to Companies</h2>
-        <form onSubmit={handleCreateExecutiveMapping} className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div>
-            <label className="text-sm font-medium text-slate-700">Executive User</label>
-            <select
-              name="executive_user"
-              value={executiveMappingForm.executive_user}
-              onChange={handleExecutiveMappingChange}
-              required
-              className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg"
-            >
-              <option value="" disabled>Select executive</option>
-              {users.filter(u => u.role === 'executive').map(user => (
-                <option key={user.id} value={user.id}>{user.username}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-slate-700">Company</label>
-            <select
-              name="company"
-              value={executiveMappingForm.company}
-              onChange={handleExecutiveMappingChange}
-              required
-              className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg"
-            >
-              <option value="" disabled>Select company</option>
-              {companies.map(company => (
-                <option key={company.id} value={company.id}>{company.company_name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-center space-x-2 mt-6">
-            <input
-              type="checkbox"
-              name="is_active"
-              checked={executiveMappingForm.is_active}
-              onChange={handleExecutiveMappingChange}
-            />
-            <span className="text-sm text-slate-700">Active</span>
-          </div>
-          <div className="flex items-end">
-            <button type="submit" className="w-full bg-slate-800 hover:bg-slate-700 text-white py-2 rounded-lg cursor-pointer">
-              Create Mapping
-            </button>
-          </div>
-        </form>
-
-        {executiveMappings.length > 0 && (
-          <div className="mt-4">
-            <h3 className="text-sm font-semibold text-slate-700 mb-2">Existing Executive Mappings</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {executiveMappings.map(mapping => (
-                <div key={mapping.id} className="text-xs text-slate-600 border border-slate-200 rounded-lg p-2 flex items-center justify-between gap-2">
-                  <div>
-                    <div className="font-semibold text-slate-700">
-                      {users.find(u => u.id === mapping.executive_user)?.username || 'Unknown User'}
-                    </div>
-                    <div>
-                      {companies.find(c => c.id === mapping.company)?.company_name || 'Unknown Company'}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleToggleExecutiveMapping(mapping)}
-                    className={`px-2 py-1 rounded-full text-[11px] font-medium cursor-pointer ${mapping.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}
+      {/* ── Executive Mapping Panel (superadmin only, collapsible) ──────────── */}
+      {execPanelOpen && isSuperadmin && (
+        <div className="mb-5">
+          <div className="border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/60">
+              <div className="flex items-center gap-2">
+                <Layers size={13} className="text-emerald-600" />
+                <span className="text-xs font-semibold text-slate-700">Executive → Company Mapping</span>
+              </div>
+              <button onClick={() => setExecPanelOpen(false)} className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer">
+                <X size={13} />
+              </button>
+            </div>
+            <div className="p-4">
+              <form onSubmit={handleCreateExecutiveMapping} className="flex flex-wrap items-end gap-3 mb-4">
+                <div className="flex-1 min-w-[160px]">
+                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Executive</label>
+                  <select
+                    name="executive_user"
+                    value={executiveMappingForm.executive_user}
+                    onChange={handleExecutiveMappingChange}
+                    required
+                    className="w-full h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-400"
                   >
-                    {mapping.is_active ? 'Active' : 'Inactive'}
-                  </button>
+                    <option value="">Select…</option>
+                    {users.filter(u => u.role === 'executive').map(u => (
+                      <option key={u.id} value={u.id}>{u.username}</option>
+                    ))}
+                  </select>
                 </div>
-              ))}
+                <ArrowRight size={14} className="text-slate-300 mb-1" />
+                <div className="flex-1 min-w-[160px]">
+                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Company</label>
+                  <select
+                    name="company"
+                    value={executiveMappingForm.company}
+                    onChange={handleExecutiveMappingChange}
+                    required
+                    className="w-full h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-400"
+                  >
+                    <option value="">Select…</option>
+                    {companies.map(c => (
+                      <option key={c.id} value={c.id}>{c.company_name}</option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  type="submit"
+                  disabled={!executiveMappingForm.executive_user || !executiveMappingForm.company}
+                  className="inline-flex items-center gap-1.5 h-8 px-3 text-xs rounded-lg font-medium bg-slate-900 hover:bg-slate-700 text-white cursor-pointer transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Plus size={12} />
+                  Assign
+                </button>
+              </form>
+
+              {executiveMappings.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {executiveMappings.map(m => {
+                    const exec = users.find(u => u.id === m.executive_user);
+                    const comp = companies.find(c => c.id === m.company);
+                    return (
+                      <div key={m.id} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs">
+                        <span className="font-medium text-slate-700">{exec?.username || 'Unknown'}</span>
+                        <ArrowRight size={10} className="text-slate-300" />
+                        <span className="text-slate-500">{comp?.company_name || 'Unknown'}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleExecutiveMapping(m)}
+                          className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold cursor-pointer transition-colors ${m.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}
+                        >
+                          {m.is_active ? 'On' : 'Off'}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
-        )}
-      </div>
+        </div>
       )}
 
-      {/* Table Container */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+      {/* ── Search + filter bar ─────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm mb-4">
+        {/* Search input */}
+        <div className="relative min-w-[180px] flex-1 max-w-xs">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search users…"
+            className="w-full h-7 pl-8 pr-2 rounded-md border border-slate-200 bg-slate-50 text-xs text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-400"
+          />
+        </div>
+
+        <div className="w-px h-5 bg-slate-200 hidden sm:block" />
+
+        {/* Role pills */}
+        <div className="flex items-center gap-1 flex-wrap">
+          {['ALL', 'superadmin', 'company_admin', 'dealer_admin', 'executive', 'user'].map(r => (
+            <button
+              key={r}
+              onClick={() => setRoleFilter(r)}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${roleFilter === r ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+            >
+              {r === 'ALL' ? 'All' : ROLE_CONFIG[r]?.label || r}
+            </button>
+          ))}
+        </div>
+
+        <div className="w-px h-5 bg-slate-200 hidden sm:block" />
+
+        {/* Status filter */}
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          className="h-7 rounded-md border border-slate-200 bg-slate-50 px-2 text-[11px] text-slate-600 focus:outline-none focus:ring-1 focus:ring-slate-400 cursor-pointer"
+        >
+          <option value="ALL">All Status</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+
+        <span className="ml-auto text-[11px] text-slate-400 tabular-nums">
+          {filtered.length} result{filtered.length !== 1 ? 's' : ''}
+        </span>
+      </div>
+
+      {/* ── Table ───────────────────────────────────────────────────────────── */}
+      <div className="border border-slate-200 rounded-2xl bg-white shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-slate-50/50 border-b border-slate-200">
-                <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">ID</th>
-                <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">User</th>
-                <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Role</th>
-                <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Company</th>
-                <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Joined Date</th>
-                <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Actions</th>
+              <tr className="border-b border-slate-200 bg-slate-50/80">
+                <Th onClick={() => toggleSort('username')}>User <SortIcon field="username" /></Th>
+                <Th onClick={() => toggleSort('role')}>Role <SortIcon field="role" /></Th>
+                <Th>Company</Th>
+                <Th>Status</Th>
+                <Th onClick={() => toggleSort('last_login')}>Last Login <SortIcon field="last_login" /></Th>
+                <Th onClick={() => toggleSort('date_joined')}>Joined <SortIcon field="date_joined" /></Th>
+                <Th right>Actions</Th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <TableSkeleton columns={['w-8', 'w-36', 'w-20', 'w-24', 'w-20', 'w-16']} />
-              ) : users.length === 0 ? (
-                <tr><td colSpan="6" className="px-6 py-8 text-center text-slate-500">No users found.</td></tr>
-              ) : (
-                users.map((user) => (
-                  <tr key={user.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="px-6 py-4 text-sm text-slate-500 font-mono">#{user.id}</td>
-                    <td className="px-6 py-4">
-                      <div className="flex flex-col">
-                        <span className="font-semibold text-slate-800">{user.username}</span>
-                        <span className="text-xs text-slate-500">{user.email}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium border ${getRoleBadgeStyle(user.role)}`}>
-                        {formatRole(user.role)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-base text-slate-600">
-                      {getCompanyNameById(user.company)}
-                    </td>
-                    <td className="px-6 py-4 text-base text-slate-500">
-                      {user.date_joined ? new Date(user.date_joined).toLocaleDateString() : '-'}
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex justify-end items-center space-x-2">
-                        <button
-                          onClick={() => openViewModal(user)}
-                          className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-md transition-colors"
-                          title="View"
-                        >
-                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                          </svg>
-                        </button>
-                        <button
-                          onClick={() => openEditModal(user)}
-                          className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-                          title="Edit"
-                        >
-                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                          </svg>
-                        </button>
-                        <button
-                          onClick={() => openPasswordModal(user)}
-                          className="p-2 text-slate-500 hover:text-purple-600 hover:bg-purple-50 rounded-md transition-colors"
-                          title="Change Password"
-                        >
-                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-                          </svg>
-                        </button>
-                      </div>
-                    </td>
+                [...Array(6)].map((_, i) => (
+                  <tr key={i}>
+                    {[...Array(7)].map((_, j) => (
+                      <td key={j} className="px-4 py-3.5">
+                        <div className="h-4 bg-slate-100 rounded animate-pulse" style={{ width: j === 0 ? '160px' : '80px' }} />
+                      </td>
+                    ))}
                   </tr>
                 ))
-              )}
+              ) : paged.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-10 text-center">
+                    <div className="flex flex-col items-center gap-2">
+                      <Users size={20} className="text-slate-300" />
+                      <p className="text-sm text-slate-400">No users match your filters</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : paged.map(user => (
+                <tr key={user.id} className="group hover:bg-slate-50/60 transition-colors">
+                  {/* User */}
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2.5">
+                      <div
+                        className="h-8 w-8 rounded-lg flex items-center justify-center text-[10px] font-bold text-white shrink-0"
+                        style={{ backgroundColor: avatarColor(user.username || '') }}
+                      >
+                        {initials(user.username || '')}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[13px] font-semibold text-slate-800 truncate leading-tight">{user.username}</p>
+                        <p className="text-[11px] text-slate-500 truncate leading-tight">{user.email}</p>
+                      </div>
+                    </div>
+                  </td>
+                  {/* Role */}
+                  <td className="px-4 py-3"><RoleBadge role={user.role} /></td>
+                  {/* Company */}
+                  <td className="px-4 py-3">
+                    {getCompany(user.company) ? (
+                      <div className="flex items-center gap-1.5">
+                        <Building2 size={11} className="text-slate-400 shrink-0" />
+                        <span className="text-[12px] text-slate-600 truncate max-w-[160px]">{getCompany(user.company)}</span>
+                      </div>
+                    ) : (
+                      <span className="text-[11px] text-slate-400">—</span>
+                    )}
+                  </td>
+                  {/* Status */}
+                  <td className="px-4 py-3"><StatusPill active={user.is_active} /></td>
+                  {/* Last Login */}
+                  <td className="px-4 py-3">
+                    <span className={`text-[11px] font-medium ${user.last_login ? 'text-slate-600' : 'text-slate-400'}`}>
+                      {timeAgo(user.last_login)}
+                    </span>
+                  </td>
+                  {/* Joined */}
+                  <td className="px-4 py-3">
+                    <span className="text-[11px] text-slate-500">
+                      {user.date_joined
+                        ? new Date(user.date_joined).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                        : '—'}
+                    </span>
+                  </td>
+                  {/* Actions */}
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => openView(user)} className="p-1.5 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer" title="View details">
+                        <Eye size={14} />
+                      </button>
+                      <button onClick={() => openEdit(user)} className="p-1.5 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50 cursor-pointer" title="Edit user">
+                        <Edit size={14} />
+                      </button>
+                      <button onClick={() => openPw(user)} className="p-1.5 rounded-md text-slate-400 hover:text-violet-600 hover:bg-violet-50 cursor-pointer" title="Change password">
+                        <KeyRound size={14} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
+
+        {/* Pagination footer */}
+        <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between bg-white">
+          <p className="text-[11px] text-slate-500">
+            {filtered.length === 0 ? '0 results' : (
+              <>
+                <span className="font-semibold text-slate-700">
+                  {Math.min((page - 1) * perPage + 1, filtered.length)}–{Math.min(page * perPage, filtered.length)}
+                </span>{' '}of {filtered.length}
+              </>
+            )}
+          </p>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="h-7 px-2.5 text-[11px] rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >Prev</button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                <button
+                  key={p}
+                  onClick={() => setPage(p)}
+                  className={`h-7 w-7 text-[11px] font-medium rounded-md cursor-pointer ${page === p ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+                >{p}</button>
+              ))}
+              <button
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="h-7 px-2.5 text-[11px] rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >Next</button>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* User Details/Edit Modal */}
-      <Modal isOpen={isModalOpen} onClose={closeModal} title={getModalTitle()}>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-1">
-            <label className="text-sm font-medium text-slate-700">Username</label>
-            <input 
-              type="text" 
-              name="username" 
-              value={formData.username} 
-              onChange={handleInputChange} 
-              required 
-              readOnly={isReadOnly}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 transition-all read-only:bg-slate-50"
-            />
+      {/* ── View Modal ──────────────────────────────────────────────────────── */}
+      <ModalWrapper open={modalOpen && modalMode === 'view'} onClose={closeModal} title="User Details" icon={Eye}>
+        {selectedUser && (
+          <div className="space-y-5">
+            <div className="flex items-center gap-4 p-4 rounded-xl bg-slate-50 border border-slate-100">
+              <div
+                className="h-14 w-14 rounded-xl flex items-center justify-center text-lg font-bold text-white shadow-md shrink-0"
+                style={{ backgroundColor: avatarColor(selectedUser.username || '') }}
+              >
+                {initials(selectedUser.username || '')}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-lg font-bold text-slate-900">{selectedUser.username}</p>
+                  <RoleBadge role={selectedUser.role} />
+                </div>
+                <p className="text-sm text-slate-500 mt-0.5">{selectedUser.email}</p>
+              </div>
+              <div
+                className={`h-3 w-3 rounded-full shrink-0 ${selectedUser.is_active ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                title={selectedUser.is_active ? 'Active' : 'Inactive'}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { label: 'User ID', value: `#${selectedUser.id}` },
+                { label: 'Status', value: selectedUser.is_active ? 'Active' : 'Inactive' },
+                { label: 'Company', value: getCompany(selectedUser.company) || 'Not assigned' },
+                { label: 'Role', value: ROLE_CONFIG[selectedUser.role]?.label || selectedUser.role },
+                { label: 'Joined', value: selectedUser.date_joined ? new Date(selectedUser.date_joined).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—' },
+                { label: 'Last Login', value: timeAgo(selectedUser.last_login) },
+              ].map(({ label, value }) => (
+                <div key={label} className="rounded-lg bg-slate-50 px-3 py-2.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">{label}</p>
+                  <p className="text-sm font-medium mt-0.5 text-slate-800 break-all">{value ?? '—'}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+              <button
+                onClick={() => { closeModal(); setTimeout(() => openEdit(selectedUser), 100); }}
+                className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 px-4 text-sm rounded-lg font-medium bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer transition-colors"
+              >
+                <Edit size={14} />Edit User
+              </button>
+              <button
+                onClick={() => { closeModal(); setTimeout(() => openPw(selectedUser), 100); }}
+                className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 px-4 text-sm rounded-lg font-medium bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer transition-colors"
+              >
+                <KeyRound size={14} />Change Password
+              </button>
+            </div>
           </div>
-          
-          <div className="space-y-1">
-            <label className="text-sm font-medium text-slate-700">Email Address</label>
-            <input 
-              type="email" 
-              name="email" 
-              value={formData.email} 
-              onChange={handleInputChange} 
-              required 
-              readOnly={isReadOnly}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 transition-all read-only:bg-slate-50"
-            />
+        )}
+      </ModalWrapper>
+
+      {/* ── Create / Edit Modal ─────────────────────────────────────────────── */}
+      <ModalWrapper
+        open={modalOpen && (modalMode === 'create' || modalMode === 'edit')}
+        onClose={closeModal}
+        title={modalMode === 'edit' ? 'Edit User' : 'Create User'}
+        icon={modalMode === 'edit' ? Edit : Plus}
+      >
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-slate-700 flex items-center gap-1">
+                Username <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="text"
+                name="username"
+                value={formData.username}
+                onChange={handleInputChange}
+                required
+                readOnly={modalMode === 'edit'}
+                placeholder="e.g. ravi.kumar"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400 read-only:bg-slate-50"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-slate-700 flex items-center gap-1">
+                Email <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="email"
+                name="email"
+                value={formData.email}
+                onChange={handleInputChange}
+                required
+                placeholder="user@company.in"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1">
-              <label className="text-sm font-medium text-slate-700">Role</label>
-              <div className="relative">
-                <select
-                  name="role"
-                  value={formData.role}
-                  onChange={handleInputChange}
-                  required
-                  disabled={isReadOnly}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 transition-all appearance-none bg-white disabled:bg-slate-50"
-                >
-                  {allowedRoles.map(r => (
-                    <option key={r.value} value={r.value}>{r.label}</option>
-                  ))}
-                </select>
-                {!isReadOnly && (
-                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path>
-                    </svg>
-                  </div>
-                )}
-              </div>
+              <label className="text-sm font-medium text-slate-700 flex items-center gap-1">
+                Role <span className="text-rose-500">*</span>
+              </label>
+              <select
+                name="role"
+                value={formData.role}
+                onChange={handleInputChange}
+                required
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              >
+                {allowedRoles.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
             </div>
-
             <div className="space-y-1">
-              <label className="text-sm font-medium text-slate-700">Assign Company</label>
-              <div className="relative">
-                <select
-                  name="company_id"
-                  value={formData.company_id}
-                  onChange={handleInputChange}
-                  required={formData.role !== 'executive' && !isCompanyAdmin}
-                  disabled={isReadOnly || formData.role === 'executive' || isCompanyAdmin}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 transition-all appearance-none bg-white disabled:bg-slate-50"
-                >
-                  <option value="" disabled>Select company</option>
-                  {companies.map(company => (
-                    <option key={company.id} value={company.id}>
-                      {company.company_name}
-                    </option>
-                  ))}
-                </select>
-                {!isReadOnly && (
-                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path>
-                    </svg>
-                  </div>
-                )}
-              </div>
+              <label className="text-sm font-medium text-slate-700 flex items-center gap-1">
+                Company
+                {formData.role !== 'executive' && !isCompanyAdmin && <span className="text-rose-500">*</span>}
+              </label>
+              <select
+                name="company_id"
+                value={formData.company_id}
+                onChange={handleInputChange}
+                required={formData.role !== 'executive' && !isCompanyAdmin}
+                disabled={formData.role === 'executive' || isCompanyAdmin}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:bg-slate-50 disabled:cursor-not-allowed"
+              >
+                <option value="">Select company…</option>
+                {companies.map(c => <option key={c.id} value={c.id}>{c.company_name}</option>)}
+              </select>
             </div>
           </div>
 
-          {/* Password field only shown when creating new user */}
           {modalMode === 'create' && (
             <div className="space-y-1">
-              <label className="text-sm font-medium text-slate-700">Password</label>
-              <input 
-                type="password" 
-                name="password" 
-                value={formData.password} 
-                onChange={handleInputChange} 
-                required 
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 transition-all"
+              <label className="text-sm font-medium text-slate-700 flex items-center gap-1">
+                Password <span className="text-rose-500">*</span>
+              </label>
+              <p className="text-xs text-slate-400">Minimum 8 characters</p>
+              <input
+                type="text"
+                name="password"
+                value={formData.password}
+                onChange={handleInputChange}
+                required
+                placeholder="Temporary password"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400"
               />
             </div>
           )}
 
-          {/* Note for editing users */}
           {modalMode === 'edit' && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-              <p className="text-sm text-blue-700 flex items-start space-x-2">
-                <svg className="w-5 h-5 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span>To change the password, use the "Change Password" button in the actions menu.</span>
-              </p>
+            <div className="flex items-start gap-2 rounded-lg bg-blue-50 border border-blue-100 px-3 py-2.5 text-xs text-blue-700">
+              <Info size={13} className="mt-0.5 shrink-0" />
+              <span>To change password, use the <strong>Change Password</strong> action from the user table.</span>
             </div>
           )}
 
-          <div className="flex items-center justify-end space-x-3 pt-6 border-t border-slate-100 mt-6">
-            <button 
-              type="button" 
-              className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 transition-colors"
+          <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100">
+            <button
+              type="button"
               onClick={closeModal}
+              className="inline-flex items-center gap-1.5 h-9 px-4 text-sm rounded-lg font-medium bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer transition-colors"
             >
-              {modalMode === 'view' ? 'Close' : 'Cancel'}
+              Cancel
             </button>
-            {modalMode !== 'view' && (
-              <button 
-                type="submit" 
-                disabled={submitting}
-                className="px-4 py-2 text-sm font-medium text-white bg-slate-800 border border-transparent rounded-lg hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 shadow-md transition-all flex items-center"
-              >
-                {submitting && (
-                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                )}
-                {submitting ? 'Saving...' : modalMode === 'edit' ? 'Update User' : 'Create User'}
-              </button>
-            )}
+            <button
+              type="submit"
+              disabled={submitting}
+              className="inline-flex items-center gap-1.5 h-9 px-4 text-sm rounded-lg font-medium bg-slate-900 hover:bg-slate-700 text-white cursor-pointer transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {submitting
+                ? <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg>
+                : modalMode === 'edit' ? <Save size={14} /> : <Plus size={14} />}
+              {submitting ? 'Saving…' : modalMode === 'edit' ? 'Update User' : 'Create User'}
+            </button>
           </div>
         </form>
-      </Modal>
+      </ModalWrapper>
 
-      {/* Password Change Modal */}
-      <ChangePasswordModal
-        isOpen={isPasswordModalOpen}
-        onClose={closePasswordModal}
-        onSubmit={handlePasswordChange}
-        userName={editingUser?.username}
-      />
+      {/* ── Change Password Modal ───────────────────────────────────────────── */}
+      <ModalWrapper open={pwModalOpen} onClose={() => setPwModalOpen(false)} title="Change Password" icon={KeyRound} width="max-w-md">
+        {selectedUser && (
+          <form onSubmit={handlePasswordChange} className="space-y-4">
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-slate-50 border border-slate-100">
+              <div
+                className="h-9 w-9 rounded-lg flex items-center justify-center text-[11px] font-bold text-white shrink-0"
+                style={{ backgroundColor: avatarColor(selectedUser.username || '') }}
+              >
+                {initials(selectedUser.username || '')}
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-slate-800">{selectedUser.username}</p>
+                <p className="text-xs text-slate-500">{selectedUser.email}</p>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-slate-700 flex items-center gap-1">
+                New Password <span className="text-rose-500">*</span>
+              </label>
+              {pw.length > 0 && pw.length < 8 && (
+                <p className="text-xs text-rose-600">Must be at least 8 characters</p>
+              )}
+              <div className="relative">
+                <input
+                  type={showPw ? 'text' : 'password'}
+                  value={pw}
+                  onChange={e => setPw(e.target.value)}
+                  placeholder="Enter new password"
+                  required
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 pr-10 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPw(v => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                >
+                  <Eye size={14} />
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-slate-700 flex items-center gap-1">
+                Confirm Password <span className="text-rose-500">*</span>
+              </label>
+              {confirmPw && pw !== confirmPw && (
+                <p className="text-xs text-rose-600">Passwords do not match</p>
+              )}
+              <input
+                type={showPw ? 'text' : 'password'}
+                value={confirmPw}
+                onChange={e => setConfirmPw(e.target.value)}
+                placeholder="Re-enter password"
+                required
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              />
+            </div>
+
+            {pw && confirmPw && pw === confirmPw && pw.length >= 8 && (
+              <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2 text-xs text-emerald-700">
+                <CheckCircle2 size={13} /> Passwords match
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setPwModalOpen(false)}
+                className="inline-flex items-center gap-1.5 h-9 px-4 text-sm rounded-lg font-medium bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!pw || !confirmPw || pw !== confirmPw || pw.length < 8 || submitting}
+                className="inline-flex items-center gap-1.5 h-9 px-4 text-sm rounded-lg font-medium bg-blue-600 hover:bg-blue-700 text-white cursor-pointer transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <KeyRound size={14} />
+                Change Password
+              </button>
+            </div>
+          </form>
+        )}
+      </ModalWrapper>
     </div>
   );
 }
