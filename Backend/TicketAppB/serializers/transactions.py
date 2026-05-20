@@ -15,6 +15,7 @@ class TicketDataSerializer(serializers.ModelSerializer):
     ticket_type_display = serializers.SerializerMethodField()
     formatted_ticket_date = serializers.SerializerMethodField()
     route_code = serializers.SerializerMethodField()
+    depot_code = serializers.SerializerMethodField()
 
     class Meta:
         model = TransactionData
@@ -31,6 +32,7 @@ class TicketDataSerializer(serializers.ModelSerializer):
             'ticket_type',
             'ticket_type_display',
             'route_code',
+            'depot_code',
             'full_count',
             'half_count',
             'st_count',
@@ -70,6 +72,12 @@ class TicketDataSerializer(serializers.ModelSerializer):
         if obj.route_id:
             return obj.route_id.route_code
         return None
+
+    def get_depot_code(self, obj):
+        if not obj.route_id:
+            return None
+        rd = obj.route_id.route_depots.first()
+        return rd.depot.depot_code if rd else None
 
 
 class TripDataSerializer(serializers.ModelSerializer):
