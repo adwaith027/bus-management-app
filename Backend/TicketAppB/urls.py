@@ -1,11 +1,24 @@
 from django.urls import path
-from .views import ticket_data_views, transport_views, crew_views, settings_views
-from .views import auth_views, company_views, user_views, mdb_views
-from .views import palmtec_data_views
-from .views import depot_views, mosambee_views, dealer_views, executive_views, device_approval_views
-from .views import device_registry_views
-from .views import route_import_views
-from .views import apk_views
+from .views.web import auth as auth_views
+from .views.web import users as user_views
+from .views.web import company as company_views
+from .views.web import dealers as dealer_views
+from .views.web import depots as depot_views
+from .views.web import executives as executive_views
+from .views.web import device_approvals as device_approval_views
+from .views.web import device_registry as device_registry_views
+from .views.web import ticket_reports
+from .views.web import settlements as settlement_views
+from .views.web.masterdata import transport as transport_views
+from .views.web.masterdata import crew as crew_views
+from .views.web.masterdata import settings as settings_views
+from .views.web.imports import mdb as mdb_views
+from .views.web.imports import routes as route_import_views
+from .views.palmtec import master_send as palmtec_views
+from .views.palmtec import data_post as palmtec_ingest
+from .views.webhooks import mosambee as mosambee_webhooks
+from .views.apk import reports as apk_views
+from .views.apk import apk_upload as apk_upload_views
 
 urlpatterns = [
     # authentication
@@ -41,19 +54,34 @@ urlpatterns = [
     path('create-depot', depot_views.create_depot, name='create_depot'),
     path('update-depot-details/<int:pk>', depot_views.update_depot_details, name='update_depot_details'),
 
-    # ticket data
-    path('getTicket', ticket_data_views.getTransactionDataFromDevice, name='get_transaction_data'),
-    path('get_all_transaction_data', ticket_data_views.get_all_transaction_data, name='get_all_transaction_data'),
-    path('getTripClose', ticket_data_views.getTripCloseDataFromDevice, name='get_trip_close_data'),
-    path('get_all_trip_close_data', ticket_data_views.get_all_trip_close_data, name='get_all_trip_close_data'),
+    # ticket data — device push (ETM → server)
+    path('getScheduleOpen', palmtec_ingest.getScheduleOpenDataFromDevice, name='get_schedule_open_data'),
+    path('getScheduleClose', palmtec_ingest.getScheduleCloseDataFromDevice, name='get_schedule_close_data'),
 
-    # mosambee data
-    path('postTransactionDetails', mosambee_views.mosambee_settlement_data, name='postTransactionDetails'),
-    path('postPayoutDetails', mosambee_views.mosambee_payout_callback, name='postPayoutDetails'),
-    path('get_settlement_data', mosambee_views.get_settlement_data, name='get_settlement_data'),
-    path('get_payout_data', mosambee_views.get_payout_data, name='get_payout_data'),
-    path('verify_settlement', mosambee_views.verify_settlement, name='verify_settlement'),
-    path('get_settlement_summary', mosambee_views.get_settlement_summary, name='get_settlement_summary'),
+    path('getTripOpen', palmtec_ingest.getTripOpenDataFromDevice, name='get_trip_open_data'),
+    path('getTripClose', palmtec_ingest.getTripCloseDataFromDevice, name='get_trip_close_data'),
+
+    path('getTicket', palmtec_ingest.getTicketDataFromDevice, name='get_ticket_data'),
+
+    path('getTripCloseSummary', palmtec_ingest.getTripCloseSummaryFromDevice, name='get_trip_close_summary'),
+    path('getScheduleCloseSummary', palmtec_ingest.getScheduleCloseSummaryFromDevice, name='get_schedule_close_summary'),
+
+    path('getOdometerDetails', palmtec_ingest.getOdometerDataFromDevice, name='get_odometer_data'),
+    path('getExpenseDetails', palmtec_ingest.getExpenseDataFromDevice, name='get_expense_data'),
+
+    # ticket data — web fetch
+    path('get_all_transaction_data', ticket_reports.get_all_transaction_data, name='get_all_transaction_data'),
+    path('get_all_trip_data',        ticket_reports.get_all_trip_data,        name='get_all_trip_data'),
+    path('get_all_schedule_data',    ticket_reports.get_all_schedule_data,    name='get_all_schedule_data'),
+
+    # mosambee webhooks (Mosambee server → us)
+    path('postTransactionDetails', mosambee_webhooks.mosambee_settlement_data, name='postTransactionDetails'),
+    path('postPayoutDetails', mosambee_webhooks.mosambee_payout_callback, name='postPayoutDetails'),
+    # mosambee web fetch
+    path('get_settlement_data', settlement_views.get_settlement_data, name='get_settlement_data'),
+    path('get_payout_data', settlement_views.get_payout_data, name='get_payout_data'),
+    path('verify_settlement', settlement_views.verify_settlement, name='verify_settlement'),
+    path('get_settlement_summary', settlement_views.get_settlement_summary, name='get_settlement_summary'),
 
     # dealer data
     path('dealers', dealer_views.get_all_dealers, name='get_all_dealers'),
@@ -135,18 +163,19 @@ urlpatterns = [
     path('etm-devices/<int:device_id>/deactivate',     device_registry_views.deactivate_device,          name='etm_deactivate'),
 
     # Palmtec device data APIs (server → APK → USB → device)
-    path('device/routes',      palmtec_data_views.get_routes_list),
-    path('device/settings',    palmtec_data_views.get_settings_file),
-    path('device/crew',        palmtec_data_views.get_crew_file),
-    path('device/vehicles',    palmtec_data_views.get_vehicles_file),
-    path('device/expenses',    palmtec_data_views.get_expenses_file),
+    path('device/getEtmVersion', palmtec_views.get_etm_device_version),
+    path('device/routes',      palmtec_views.get_routes_list),
+    path('device/settings',    palmtec_views.get_settings_file),
+    path('device/crew',        palmtec_views.get_crew_file),
+    path('device/vehicles',    palmtec_views.get_vehicles_file),
+    path('device/expenses',    palmtec_views.get_expenses_file),
     # Route group
-    path('device/routelst',    palmtec_data_views.get_routelst_file),
-    path('device/stagelst',    palmtec_data_views.get_stagelst_file),
-    path('device/languagedat', palmtec_data_views.get_languagedat_file),
-    path('device/rtedat',      palmtec_data_views.get_rtedat_file),
+    path('device/routelst',    palmtec_views.get_routelst_file),
+    path('device/stagelst',    palmtec_views.get_stagelst_file),
+    path('device/languagedat', palmtec_views.get_languagedat_file),
+    path('device/rtedat',      palmtec_views.get_rtedat_file),
     # Settings group
-    path('device/currency',    palmtec_data_views.get_currency_file),
+    path('device/currency',    palmtec_views.get_currency_file),
 
     # android apk data apis
     path('reports/duty', apk_views.duty_report, name='duty_report'),
@@ -156,4 +185,9 @@ urlpatterns = [
     path('reports/passenger-info', apk_views.passenger_info, name='passenger_info'),
     path('reports/trip-details', apk_views.trip_details, name='trip_details'),
     path('reports/ticket-details', apk_views.ticket_details, name='ticket_details'),
+
+
+    # APK file uploads
+    path('apk/upload/odometer-dat', apk_upload_views.uploadOdometerDat, name='upload_odometer_dat'),
+    path('apk/upload/expense-dat', apk_upload_views.uploadExpenseDat, name='upload_expense_dat'),
 ]
