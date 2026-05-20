@@ -8,6 +8,7 @@ from .views.web import executives as executive_views
 from .views.web import device_approvals as device_approval_views
 from .views.web import device_registry as device_registry_views
 from .views.web import ticket_reports
+from .views.web import raw_data_logs as raw_log_views
 from .views.web import settlements as settlement_views
 from .views.web.masterdata import transport as transport_views
 from .views.web.masterdata import crew as crew_views
@@ -68,6 +69,10 @@ urlpatterns = [
 
     path('getOdometerDetails', palmtec_ingest.getOdometerDataFromDevice, name='get_odometer_data'),
     path('getExpenseDetails', palmtec_ingest.getExpenseDataFromDevice, name='get_expense_data'),
+
+    # failed payload management (superadmin only)
+    path('failed-payloads',                   raw_log_views.get_failed_payloads,   name='get_failed_payloads'),
+    path('failed-payloads/<int:log_id>/retry', raw_log_views.retry_failed_payload, name='retry_failed_payload'),
 
     # ticket data — web fetch
     path('get_all_transaction_data', ticket_reports.get_all_transaction_data, name='get_all_transaction_data'),
