@@ -75,4 +75,7 @@ htmlcov/
 
 _backups/
 
+
+# temporary analysis files
 Claude Design References
+SUGGESTIONS_AND_FIXES.md
