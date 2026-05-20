@@ -40,12 +40,26 @@ import SettingsPage from './pages/tools/SettingsPage'
 import DeviceDownload from './pages/tools/DeviceDownload'
 import FailedPayloadsPage from './pages/tools/FailedPayloadsPage'
 
-import NotFound from './components/NotFound'
+// Catch-all: hard-redirect based on auth state
+function SmartRedirect() {
+  const userStr = localStorage.getItem('user');
+  if (userStr) {
+    try {
+      const role = JSON.parse(userStr)?.role;
+      window.location.replace(role === 'production' ? '/dashboard/device-registry' : '/dashboard');
+    } catch {
+      window.location.replace('/login');
+    }
+  } else {
+    window.location.replace('/login');
+  }
+  return null;
+}
 
 const router = createBrowserRouter([
   {
-    path:'*',
-    element:<NotFound />
+    path: '*',
+    element: <SmartRedirect />,
   },
   {
     path: '/',
