@@ -4,7 +4,7 @@ import environ
 import os
 
 from datetime import timedelta
-
+from celery.schedules import crontab
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -19,7 +19,6 @@ DEBUG = env.bool('DEBUG', default=False)
 
 ALLOWED_HOSTS = env.list('ALLOWED_HOSTS')
 
-
 # Application definition
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -32,6 +31,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
+    'django_celery_beat',
     'TicketAppB',
 ]
 
@@ -152,12 +152,36 @@ LOGGING = {
             'backupCount': 10,
             'formatter': 'verbose',
         },
-        'device_file': {
-            'level': 'DEBUG',
-            'class': 'logging.handlers.RotatingFileHandler',
-            'filename': os.path.join(BASE_DIR, 'logs', 'device_transactions.log'),
-            'maxBytes': 1024 * 1024 * 50,  # 50MB
-            'backupCount': 10,
+        'ticket_transactions_file': {
+            'level': 'ERROR',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'ticket_transactions.log'),
+            'when': 'midnight',
+            'backupCount': 30,
+            'formatter': 'verbose',
+        },
+        'tripclose_transactions_file': {
+            'level': 'ERROR',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'tripclose_transactions.log'),
+            'when': 'midnight',
+            'backupCount': 30,
+            'formatter': 'verbose',
+        },
+        'mosambee_transactions_file': {
+            'level': 'ERROR',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'mosambee_transactions.log'),
+            'when': 'midnight',
+            'backupCount': 30,
+            'formatter': 'verbose',
+        },
+        'mosambee_payouts_file': {
+            'level': 'ERROR',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'mosambee_payouts.log'),
+            'when': 'midnight',
+            'backupCount': 30,
             'formatter': 'verbose',
         },
     },
@@ -167,14 +191,29 @@ LOGGING = {
             'level': 'INFO',
             'propagate': False,
         },
-        'TicketAppB.views2': {
-            'handlers': ['device_file', 'console'],
-            'level': 'DEBUG',
-            'propagate': False,
-        },
         'TicketAppB': {
             'handlers': ['console', 'file'],
             'level': 'DEBUG',
+            'propagate': False,
+        },
+        'ticket.transactions': {
+            'handlers': ['ticket_transactions_file', 'console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+        'tripclose.transactions': {
+            'handlers': ['tripclose_transactions_file', 'console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+        'mosambee.transactions': {
+            'handlers': ['mosambee_transactions_file', 'console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+        'mosambee.payouts': {
+            'handlers': ['mosambee_payouts_file', 'console'],
+            'level': 'ERROR',
             'propagate': False,
         },
     },
@@ -191,6 +230,9 @@ if not os.path.exists(LOGS_DIR):
 
 STATIC_URL = 'static/'
 
+MEDIA_ROOT = os.path.join(BASE_DIR, 'uploads')
+MEDIA_URL  = '/uploads/'
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
@@ -200,8 +242,6 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS')
 
 CORS_ALLOW_CREDENTIALS = True
-
-# CORS_ALLOW_ALL_ORIGINS = True
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
@@ -254,17 +294,33 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'Asia/Kolkata'  # Set to your local time
 
 # Optimization for high-concurrency (Reliability)
-CELERY_TASK_ACKS_LATE = True  # Task isn't "gone" until it's finished
-CELERY_WORKER_PREFETCH_MULTIPLIER = 1  # Prevents one worker from hogging 100 tasks
-CELERY_TASK_REJECT_ON_WORKER_LOST = True # Re-queue if worker crashes
+CELERY_TASK_ACKS_LATE = True # Task isn't "gone" until it's finished
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1 # Prevents one worker from hogging 100 tasks
+CELERY_TASK_REJECT_ON_WORKER_LOST = True  # Re-queue if worker crashes
 
 # Django Cache (Redis DB 1 — separate from Celery broker on DB 0)
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": env('REDIS_CACHE_URL', default='redis://localhost:6379/1'),
+        "LOCATION": env('REDIS_CACHE_URL', default='redis://127.0.0.1:6379/1'),
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
         }
     }
+}
+
+
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+
+CELERY_BEAT_SCHEDULE = {
+    'scan-pending-raw-logs': {
+        'task': 'TicketAppB.tasks.scan_pending_raw_logs',
+        # interval in seconds
+        'schedule': 60.0,
+    },
+    'cleanup-processed-raw-logs': {
+        'task': 'TicketAppB.tasks.cleanup_processed_raw_logs',
+        # every day 2 AM
+        'schedule': crontab(hour=2, minute=0),
+    },
 }
