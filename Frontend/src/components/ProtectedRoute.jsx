@@ -3,6 +3,44 @@ import { useEffect, useState } from 'react';
 import api, { BASE_URL } from '../assets/js/axiosConfig';
 import { PropagateLoader } from "react-spinners";
 
+// Allowed sub-paths per role (path.startsWith check).
+// '/dashboard' index is always allowed for every role except 'production'.
+const ROLE_PATHS = {
+  superadmin:    [
+    '/dashboard/companies',
+    '/dashboard/dealers',
+    '/dashboard/users',
+    '/dashboard/device-registry',
+    '/dashboard/device-approvals',
+    '/dashboard/data-import',
+    '/dashboard/failed-payloads',
+  ],
+  company_admin: [
+    '/dashboard/depots',
+    '/dashboard/master-data',
+    '/dashboard/device-download',
+    '/dashboard/schedule-data',
+    '/dashboard/trip-data',
+    '/dashboard/ticket-data',
+    '/dashboard/settlements',
+  ],
+  dealer_admin:  [
+    '/dashboard/companies',
+    '/dashboard/device-registry',
+  ],
+  executive:     [
+    '/dashboard/companies',
+    '/dashboard/device-registry',
+  ],
+  user:          [],
+  company_user:  [
+    '/dashboard/schedule-data',
+    '/dashboard/trip-data',
+    '/dashboard/ticket-data',
+  ],
+  production:    [],  // handled separately — always /dashboard/device-registry
+};
+
 export default function ProtectedRoute() {
   const [isAuthenticated, setIsAuthenticated] = useState(null);
   const [userRole, setUserRole] = useState(null);
@@ -10,7 +48,6 @@ export default function ProtectedRoute() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Verify authentication on mount
   useEffect(() => {
     verifyAuthFromBackend();
   }, []);
@@ -28,8 +65,6 @@ export default function ProtectedRoute() {
 
   const verifyAuthFromBackend = async () => {
     try {
-      // Interceptor handles 401 → refresh → retry transparently.
-      // Interceptor handles 403 → clear storage + hard redirect.
       const response = await api.get(`${BASE_URL}/verify-auth`);
       if (response.data.authenticated) {
         setIsAuthenticated(true);
@@ -42,7 +77,6 @@ export default function ProtectedRoute() {
     } catch (error) {
       const status = error.response?.status;
       if (status === 401 || status === 403) {
-        // Interceptor already handled redirect; mark not authenticated
         setIsAuthenticated(false);
         localStorage.removeItem('user');
       } else {
@@ -66,136 +100,49 @@ export default function ProtectedRoute() {
     }
   };
 
-
-  // Check if user is trying to access pages they shouldn't
+  // Whitelist-based route guard — hard redirect for any unauthorized path
   useEffect(() => {
     if (!loading && isAuthenticated && userRole) {
       const path = location.pathname;
-      const isMasterDataPath = path.includes('/master-data/');
-      
-      // Superadmin restrictions: cannot access company admin pages
-      if (userRole === 'superadmin') {
-        if (path.includes('/depots') ||
-            path.includes('/ticket-data') ||
-            path.includes('/trip-data') ||
-            path.includes('/schedule-data') ||
-            isMasterDataPath) {
-          window.alert('Access Denied: This page is only for Company Admins');
-          navigate('/dashboard', { replace: true });
-        }
-      }
-      
-      // Company admin restrictions: cannot access superadmin pages
-      if (userRole === 'company_admin') {
-        if (path.includes('/companies') ||
-            path.includes('/users') ||
-            path.includes('/device-approvals') ||
-            path.includes('/dealers') ||
-            path.includes('/executive-dashboard') ||
-            path.includes('/dealer-dashboard')) {
-          window.alert('Access Denied: This page is only for System Admins');
-          navigate('/dashboard', { replace: true });
-        }
-      }
-      
-      if (userRole === 'user') {
-        if (path.includes('/companies') ||
-            path.includes('/users') ||
-            path.includes('/device-approvals') ||
-            path.includes('/depots') ||
-            path.includes('/ticket-data') ||
-            path.includes('/trip-data') ||
-            path.includes('/schedule-data') ||
-            isMasterDataPath ||
-            path.includes('/dealers') ||
-            path.includes('/dealer-dashboard') ||
-            path.includes('/executive-dashboard')) {
-          window.alert('Access Denied: This page is only for Administrators');
-          navigate('/dashboard', { replace: true });
-        }
-      }
 
-      if (userRole === 'executive') {
-        if (path.includes('/companies') ||
-            path.includes('/users') ||
-            path.includes('/device-approvals') ||
-            path.includes('/depots') ||
-            path.includes('/ticket-data') ||
-            path.includes('/trip-data') ||
-            path.includes('/schedule-data') ||
-            isMasterDataPath ||
-            path.includes('/dealers') ||
-            path.includes('/dealer-dashboard')) {
-          window.alert('Access Denied: This page is only for Administrators');
-          navigate('/dashboard', { replace: true });
-        }
-      }
-
-      if (userRole === 'dealer_admin') {
-        // dealer_admin CAN access /companies (their mapped companies) and /users
-        if (path.includes('/device-approvals') ||
-            path.includes('/depots') ||
-            path.includes('/ticket-data') ||
-            path.includes('/trip-data') ||
-            path.includes('/schedule-data') ||
-            isMasterDataPath ||
-            path.includes('/settlements') ||
-            path.includes('/dealers') ||
-            path.includes('/executive-dashboard')) {
-          window.alert('Access Denied: This page is not available for Dealer Admins');
-          navigate('/dashboard', { replace: true });
-        }
-      }
-
-      if (userRole === 'company_user') {
-        const allowed = ['/dashboard/ticket-data', '/dashboard/trip-data', '/dashboard/schedule-data'];
-        const isAllowed = path === '/dashboard' || allowed.some(p => path.startsWith(p));
-        if (!isAllowed) {
-          window.alert('Access Denied: This page is not available for your role');
-          navigate('/dashboard', { replace: true });
-        }
-      }
-
+      // Production: always stays on device-registry
       if (userRole === 'production') {
-        // Production users can only access device-registry
-        if (!path.includes('/device-registry')) {
-          navigate('/dashboard/device-registry', { replace: true });
+        if (!path.startsWith('/dashboard/device-registry')) {
+          window.location.replace('/dashboard/device-registry');
         }
+        return;
+      }
+
+      // Dashboard index is allowed for all non-production roles
+      if (path === '/dashboard') return;
+
+      // Check whitelist
+      const allowed = ROLE_PATHS[userRole] || [];
+      const isAllowed = allowed.some(p => path.startsWith(p));
+      if (!isAllowed) {
+        window.location.replace('/dashboard');
       }
     }
-  }, [loading, isAuthenticated, userRole, location.pathname, navigate]);
+  }, [loading, isAuthenticated, userRole, location.pathname]);
 
-  // Redirect to login if not authenticated
   if (!loading && !isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
 
-  // If loading but no cached session → show full screen spinner (first login)
   const hasCachedSession = !!localStorage.getItem('user');
   if (loading && !hasCachedSession) {
     return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-      }}>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
         <PropagateLoader />
       </div>
     );
   }
 
-  // If loading but cached session exists → show page with non-blocking overlay
   return (
     <>
       <Outlet />
       {loading && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          zIndex: 9999,
-          pointerEvents: 'all',
-        }} />
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, pointerEvents: 'all' }} />
       )}
     </>
   );
