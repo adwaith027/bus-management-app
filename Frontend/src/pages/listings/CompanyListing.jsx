@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import Modal from '../../components/Modal';
 import TableSkeleton from '../../components/TableSkeleton';
 import api, { BASE_URL } from '../../assets/js/axiosConfig';
+import statesDistricts from '../../assets/json/indiaStatesDistricts.json';
 
 export default function CompanyListing() {
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
@@ -40,6 +41,7 @@ export default function CompanyListing() {
     address_2: '',
     city: '',
     state: '',
+    district: '',
     zip_code: '',
     number_of_licence: 1,
     // dealer_admin sets these to allocate from their licence pool
@@ -72,7 +74,11 @@ export default function CompanyListing() {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    if (name === 'state') {
+      setFormData(prev => ({ ...prev, state: value, district: '' }));
+    } else {
+      setFormData(prev => ({ ...prev, [name]: value }));
+    }
   };
 
   const resetFormData = () => {
@@ -86,6 +92,7 @@ export default function CompanyListing() {
       address_2: '',
       city: '',
       state: '',
+      district: '',
       zip_code: '',
       number_of_licence: 1,
       device_count: 0,
@@ -104,6 +111,7 @@ export default function CompanyListing() {
       address_2:         company.address_2         || '',
       city:              company.city              || '',
       state:             company.state             || '',
+      district:          company.district          || '',
       zip_code:          company.zip_code          || '',
       number_of_licence: company.number_of_licence || 1,
     });
@@ -364,16 +372,43 @@ export default function CompanyListing() {
           rows="2" readOnly={isReadOnly}
           className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 transition-all read-only:bg-slate-50" />
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-slate-700">State <span className="text-red-500">*</span></label>
+          {isReadOnly ? (
+            <input type="text" value={formData.state} readOnly
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-slate-50" />
+          ) : (
+            <select name="state" value={formData.state} onChange={handleInputChange} required
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 transition-all bg-white">
+              <option value="">Select State</option>
+              {Object.keys(statesDistricts).sort().map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          )}
+        </div>
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-slate-700">District <span className="text-red-500">*</span></label>
+          {isReadOnly ? (
+            <input type="text" value={formData.district} readOnly
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-slate-50" />
+          ) : (
+            <select name="district" value={formData.district} onChange={handleInputChange} required
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 transition-all bg-white"
+              disabled={!formData.state}>
+              <option value="">Select District</option>
+              {(statesDistricts[formData.state] || []).map(d => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-1">
           <label className="text-sm font-medium text-slate-700">City <span className="text-red-500">*</span></label>
           <input type="text" name="city" value={formData.city} onChange={handleInputChange}
-            required readOnly={isReadOnly}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 transition-all read-only:bg-slate-50" />
-        </div>
-        <div className="space-y-1">
-          <label className="text-sm font-medium text-slate-700">State <span className="text-red-500">*</span></label>
-          <input type="text" name="state" value={formData.state} onChange={handleInputChange}
             required readOnly={isReadOnly}
             className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 transition-all read-only:bg-slate-50" />
         </div>
@@ -620,10 +655,10 @@ export default function CompanyListing() {
         )}
 
         {/* ── New Company ── */}
-        {modalMode === 'create' && <FormFields />}
+        {modalMode === 'create' && FormFields()}
 
         {/* ── View / Edit ── */}
-        {(modalMode === 'view' || modalMode === 'edit') && <FormFields />}
+        {(modalMode === 'view' || modalMode === 'edit') && FormFields()}
 
         {/* ── Add Existing: Step 1 — Search ── */}
         {modalMode === 'import' && importStep === 'search' && (
@@ -690,7 +725,7 @@ export default function CompanyListing() {
               </button>
             </div>
 
-            <FormFields />
+            {FormFields()}
           </div>
         )}
 

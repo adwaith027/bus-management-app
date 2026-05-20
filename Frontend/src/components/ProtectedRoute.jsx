@@ -1,6 +1,6 @@
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import api, { BASE_URL, refreshApi } from '../assets/js/axiosConfig';  // imported refreshApi
+import api, { BASE_URL } from '../assets/js/axiosConfig';
 import { PropagateLoader } from "react-spinners";
 
 export default function ProtectedRoute() {
@@ -28,11 +28,8 @@ export default function ProtectedRoute() {
 
   const verifyAuthFromBackend = async () => {
     try {
-      // Step 1: Refresh token first using refreshApi (no interceptor loops)
-      // If this fails, the user's session is truly expired → go to login
-      await refreshApi.post(`${BASE_URL}/token/refresh`);
-
-      // Step 2: Now verify auth with a guaranteed fresh token
+      // Interceptor handles 401 → refresh → retry transparently.
+      // Interceptor handles 403 → clear storage + hard redirect.
       const response = await api.get(`${BASE_URL}/verify-auth`);
       if (response.data.authenticated) {
         setIsAuthenticated(true);
@@ -43,9 +40,27 @@ export default function ProtectedRoute() {
         localStorage.removeItem('user');
       }
     } catch (error) {
-      console.error('Auth verification failed:', error);
-      setIsAuthenticated(false);
-      localStorage.removeItem('user');
+      const status = error.response?.status;
+      if (status === 401 || status === 403) {
+        // Interceptor already handled redirect; mark not authenticated
+        setIsAuthenticated(false);
+        localStorage.removeItem('user');
+      } else {
+        // Network/server error — keep cached session optimistically
+        const cached = localStorage.getItem('user');
+        if (cached) {
+          try {
+            const cachedUser = JSON.parse(cached);
+            setIsAuthenticated(true);
+            setUserRole(cachedUser.role);
+          } catch {
+            setIsAuthenticated(false);
+            localStorage.removeItem('user');
+          }
+        } else {
+          setIsAuthenticated(false);
+        }
+      }
     } finally {
       setLoading(false);
     }

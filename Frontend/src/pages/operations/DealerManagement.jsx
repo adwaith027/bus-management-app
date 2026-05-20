@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import Modal from '../../components/Modal';
 import TableSkeleton from '../../components/TableSkeleton';
 import api, { BASE_URL } from '../../assets/js/axiosConfig';
+import statesDistricts from '../../assets/json/indiaStatesDistricts.json';
 
 export default function DealerManagement() {
   const [dealers, setDealers] = useState([]);
@@ -21,6 +22,7 @@ export default function DealerManagement() {
     address: '',
     city: '',
     state: '',
+    district: '',
     zip_code: '',
     gst_number: '',
     is_active: true,
@@ -56,6 +58,7 @@ export default function DealerManagement() {
       address: '',
       city: '',
       state: '',
+      district: '',
       zip_code: '',
       gst_number: '',
       is_active: true,
@@ -78,6 +81,7 @@ export default function DealerManagement() {
       address: dealer.address || '',
       city: dealer.city || '',
       state: dealer.state || '',
+      district: dealer.district || '',
       zip_code: dealer.zip_code || '',
       gst_number: dealer.gst_number || '',
       is_active: dealer.is_active ?? true,
@@ -113,7 +117,11 @@ export default function DealerManagement() {
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
-    setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
+    if (name === 'state') {
+      setFormData(prev => ({ ...prev, state: value, district: '' }));
+    } else {
+      setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -250,13 +258,29 @@ export default function DealerManagement() {
                 required className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg" />
             </div>
             <div>
-              <label className="text-sm font-medium text-slate-700">City</label>
-              <input type="text" name="city" value={formData.city} onChange={handleInputChange}
-                required className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg" />
+              <label className="text-sm font-medium text-slate-700">State</label>
+              <select name="state" value={formData.state} onChange={handleInputChange} required
+                className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg bg-white">
+                <option value="">Select State</option>
+                {Object.keys(statesDistricts).sort().map(s => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
             </div>
             <div>
-              <label className="text-sm font-medium text-slate-700">State</label>
-              <input type="text" name="state" value={formData.state} onChange={handleInputChange}
+              <label className="text-sm font-medium text-slate-700">District</label>
+              <select name="district" value={formData.district} onChange={handleInputChange} required
+                className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg bg-white"
+                disabled={!formData.state}>
+                <option value="">Select District</option>
+                {(statesDistricts[formData.state] || []).map(d => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">City</label>
+              <input type="text" name="city" value={formData.city} onChange={handleInputChange}
                 required className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg" />
             </div>
             <div>

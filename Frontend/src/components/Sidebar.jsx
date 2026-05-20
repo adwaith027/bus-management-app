@@ -351,7 +351,7 @@ export default function Sidebar() {
                   <SubLink to="/dashboard/trip-close-report" icon={TrendingDown} label="Trip Close"    onClose={close} />
                 </DropdownSection>
 
-                <NavItem to="/dashboard/settlements/transactions" icon={Receipt} label="Settlements" isCollapsed={isCollapsed} onClose={close} />
+                <NavItem to="/dashboard/settlements" icon={Receipt} label="Settlements" isCollapsed={isCollapsed} onClose={close} />
               </>
             )}
 

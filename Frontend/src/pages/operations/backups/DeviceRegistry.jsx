@@ -84,7 +84,7 @@ export default function DeviceRegistry() {
       ];
       if (isSuperadmin) {
         reqs.push(api.get(`${BASE_URL}/customer-data`));
-        reqs.push(api.get(`${BASE_URL}/dealers`));
+        reqs.push(api.get(`${BASE_URL}/dealer-data`));
       }
       if (isDealerAdmin) {
         reqs.push(api.get(`${BASE_URL}/customer-data`));

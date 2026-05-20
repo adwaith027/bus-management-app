@@ -291,7 +291,7 @@ export default function TicketReport() {
   const getUniqueOptions = () => {
     const deviceIds = [...new Set(transactions.map(t => t.palmtec_id).filter(Boolean))].sort();
     const depotCodes = [...new Set(transactions.map(t => t.depot_code).filter(Boolean))].sort();
-    const paymentModes = [...new Set(transactions.map(t => t.payment_mode_display).filter(Boolean))].sort();
+    const paymentModes = [...new Set(transactions.map(t => t.ticket_status).filter(Boolean))].sort();
     
     return { deviceIds, depotCodes, paymentModes };
   };
@@ -310,7 +310,7 @@ export default function TicketReport() {
       }
 
       if (filters.paymentMode && filters.paymentMode !== 'ALL') {
-        if (t.payment_mode_display !== filters.paymentMode) return false;
+        if (t.ticket_status !== filters.paymentMode) return false;
       }
 
       return true;
@@ -355,8 +355,8 @@ export default function TicketReport() {
   const calculateSummary = (data) => {
     const totalTickets = data.reduce((sum, t) => sum + (t.total_tickets || 0), 0);
     const totalAmount = data.reduce((sum, t) => sum + parseFloat(t.ticket_amount || 0), 0);
-    const upiCount = data.filter(t => t.payment_mode_display === 'UPI').length;
-    const cashCount = data.filter(t => t.payment_mode_display === 'Cash').length;
+    const upiCount = data.filter(t => t.ticket_status === 'UPI').length;
+    const cashCount = data.filter(t => t.ticket_status === 'Cash').length;
     
     return { totalTickets, totalAmount, upiCount, cashCount };
   };
@@ -458,7 +458,7 @@ export default function TicketReport() {
       { header: 'Depot Code', key: 'depot_code', width: 14 },
       { header: 'Total Tickets', key: 'total_tickets', width: 14 },
       { header: 'Ticket Amount', key: 'ticket_amount', width: 14 },
-      { header: 'Payment Mode', key: 'payment_mode_display', width: 14 },
+      { header: 'Payment Mode', key: 'ticket_status', width: 14 },
       { header: 'Ticket Type', key: 'ticket_type_display', width: 14 },
       { header: 'From Stage', key: 'from_stage', width: 18 },
       { header: 'To Stage', key: 'to_stage', width: 18 },
@@ -489,7 +489,7 @@ export default function TicketReport() {
         depot_code: t.depot_code,
         total_tickets: t.total_tickets,
         ticket_amount: t.ticket_amount,
-        payment_mode_display: t.payment_mode_display,
+        ticket_status: t.ticket_status,
         ticket_type_display: t.ticket_type_display,
         from_stage: t.from_stage,
         to_stage: t.to_stage,
@@ -792,10 +792,10 @@ export default function TicketReport() {
                       <td className="px-4 py-3 font-medium text-slate-800">₹{t.ticket_amount}</td>
                       <td className="px-4 py-3">
                         <Badge variant="outline"
-                          className={t.payment_mode_display === 'UPI'
+                          className={t.ticket_status === 'UPI'
                             ? 'border-blue-200 bg-blue-50 text-blue-700'
                             : 'border-emerald-200 bg-emerald-50 text-emerald-700'}>
-                          {t.payment_mode_display}
+                          {t.ticket_status}
                         </Badge>
                       </td>
                       <td className="px-4 py-3">
@@ -845,6 +845,7 @@ export default function TicketReport() {
       {/* Transaction Detail Dialog */}
       <Dialog open={showModal} onOpenChange={(open) => { if (!open) closeModal(); }}>
         <DialogContent className="sm:max-w-3xl rounded-2xl max-h-[85vh] overflow-y-auto">
+          <span tabIndex={0} className="sr-only" />
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-slate-800">
               <Ticket size={16} className="text-slate-600" /> Transaction Details

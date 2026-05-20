@@ -334,7 +334,7 @@ export default function PayoutPosting() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {selectedPayout.transactions.map((t, i) => (
+                      {(selectedPayout.transactions ?? []).map((t, i) => (
                         <tr key={i} className="hover:bg-slate-50">
                           <td className="px-3 py-2 font-mono text-xs text-slate-600">
                             {t.transactionId || t.transactionID}
