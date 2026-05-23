@@ -3,7 +3,26 @@ from django.utils import timezone
 from django.dispatch import receiver
 from decimal import Decimal, ROUND_HALF_UP
 from django.db.models.signals import post_save, pre_save
-from .models import MosambeeTransaction, TransactionData, Route, Fare
+from django.contrib.auth import get_user_model
+from .models import MosambeeTransaction, TransactionData, Route, Fare, Company, Dealer
+
+
+# COMPANY / DEALER ACTIVE STATUS CASCADE
+
+@receiver(post_save, sender=Company)
+def cascade_company_active_status(sender, instance, created, **kwargs):
+    if created:
+        return
+    User = get_user_model()
+    User.objects.filter(company=instance).update(is_active=instance.is_active)
+
+
+@receiver(post_save, sender=Dealer)
+def cascade_dealer_active_status(sender, instance, created, **kwargs):
+    if created:
+        return
+    User = get_user_model()
+    User.objects.filter(dealer=instance).update(is_active=instance.is_active)
 
 
 # MOSAMBEE TRANSACTION SIGNALS
