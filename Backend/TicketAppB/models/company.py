@@ -73,10 +73,13 @@ class Company(models.Model):
     depot_count = models.IntegerField(default=0, null=True, blank=True)       # NoOfDepot
     mobile_device_count = models.IntegerField(default=2, null=True, blank=True) # NoOfMobileDevice
     
+    # Account Status
+    is_active = models.BooleanField(default=True)
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         db_table = 'company'
         verbose_name = 'Company'
@@ -155,6 +158,7 @@ class Dealer(models.Model):
     contact_number = models.CharField(max_length=20)
     email = models.EmailField(unique=True)
     address = models.TextField()
+    address_2 = models.TextField(blank=True, null=True)
     city = models.CharField(max_length=100)
     state = models.CharField(max_length=100)
     district = models.CharField(max_length=100, blank=True, null=True)
