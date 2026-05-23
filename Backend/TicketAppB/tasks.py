@@ -98,9 +98,9 @@ def _resolve_vehicle(bus_reg_num, company_id):
 #   [21]=pass_id  [22]=warrant  [23]=refund_status  [24]=refund_amount
 #   [25]=ladies  [26]=senior
 #   [27]=bus_no  [28]=schedule_no  [29]=driver  [30]=conductor
-#   [31]=up_down_trip
-#   [32]=trip_start_date  [33]=trip_start_time
-#   [34]=battery  [35]=passenger_count
+#   [31]=up_down_trip (char as %d, e.g. 85='U', 68='D')
+#   [32]=trip_start_date  [33]=trip_start_time  [34]=battery
+#   [35]=passenger_count
 #   [36]=full_total  [37]=half_total  [38]=phy_total  [39]=ladies_total
 #   [40]=senior_total  [41]=lugg_total  [42]=st_total
 #   [43]=transaction_id  [44]=ticket_status  [45]=bqr_merchant_id
@@ -157,7 +157,11 @@ def process_transaction_data(self, log_id):
                 else TransactionData.PaymentMode.CASH
             )
 
-            raw_dir = _p(31, '')
+            raw_dir_val = _p(31, '')
+            try:
+                raw_dir = chr(int(raw_dir_val)) if raw_dir_val else ''
+            except (ValueError, TypeError):
+                raw_dir = raw_dir_val
             up_down_trip = (
                 Direction.UP   if raw_dir == 'U' else
                 Direction.DOWN if raw_dir == 'D' else None
@@ -222,7 +226,7 @@ def process_transaction_data(self, log_id):
                         conductor            = _p(30),
                         up_down_trip         = up_down_trip,
                         trip_start_date      = trip_start_date,
-                        trip_start_time      = _parse_time(_p(33), "%H:%M"),
+                        trip_start_time      = _parse_time(_p(33)),
                         battery_percentage   = int(_p(34)) if _p(34) else None,
                         passenger_count      = int(_p(35)) if _p(35) else None,
                         full_total_amount    = Decimal(_p(36, '0')),
@@ -462,10 +466,9 @@ def process_trip_close_data(self, log_id):
                                   physical_count + pass_count + ladies_count + senior_count)
             total_cash_tickets = max(0, total_tickets - upi_count)
 
-            total_coll    = Decimal(_p(35, '0'))
-            upi_amount    = Decimal(_p(37, '0'))
-            cash_amount   = max(Decimal('0.00'), total_coll - upi_amount)
-            total_pass    = int(_p(39, 0))
+            total_coll = Decimal(_p(35, '0'))
+            upi_amount = Decimal(_p(37, '0'))
+            total_pass = int(_p(39, 0))
 
             raw_dir = _p(38, '')
             up_down_trip = (
@@ -834,17 +837,163 @@ def process_schedule_close_data(self, log_id):
         raise self.retry(exc=exc, countdown=60)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Trip Close Summary
+# Protocol: identical to TrpCl (fn=TrpClSum). Firmware resend when TrpCl
+# was not acknowledged. Idempotent: if trip already closed → DUPLICATE.
+# ─────────────────────────────────────────────────────────────────────────────
 @shared_task(bind=True, max_retries=3)
 def process_trip_close_summary_data(self, log_id):
-    # Protocol: identical to TrpCl (fn=TrpClSum) — stub until confirmed
     try:
         with transaction.atomic():
-            log = RawDataLog.objects.select_for_update().get(id=log_id)
+            log = RawDataLog.objects.select_related('company_code').select_for_update().get(id=log_id)
+
             if log.status != RawDataLog.statusChoices.PENDING:
                 return f"Log {log_id} already processed."
-            log.status = RawDataLog.statusChoices.FAILED
-            log.error_message = "TripCloseSummary processing not yet implemented"
+
+            company = log.company_code
+            if not company:
+                _fail(log, "Invalid Company Code")
+                return
+
+            parts = log.raw_payload.split("|")
+
+            def _p(i, default=None):
+                return parts[i] if len(parts) > i and parts[i].strip() else default
+
+            required = {'route_code': _p(4), 'schedule_no': _p(5), 'trip_no': _p(6)}
+            missing = [k for k, v in required.items() if not v]
+            if missing:
+                _fail(log, f"Missing required fields: {', '.join(missing)}")
+                return
+
+            route = _get_route_for_palmtec(_p(4), company)
+            if not route:
+                _fail(log, f"Route not found: {_p(4)}")
+                return
+
+            schedule_no         = int(_p(5))
+            trip_no             = int(_p(6))
+            schedule_start_date = _parse_date(_p(7))
+            schedule_start_time = _parse_time(_p(8))
+            start_date          = _parse_date(_p(9))
+            start_time          = _parse_time(_p(10))
+            end_date            = _parse_date(_p(11))
+            end_time            = _parse_time(_p(12))
+            start_datetime      = datetime.combine(start_date, start_time) if start_date and start_time else None
+            end_datetime        = datetime.combine(end_date,   end_time)   if end_date   and end_time   else None
+
+            full_count     = int(_p(18, 0))
+            half_count     = int(_p(19, 0))
+            st1_count      = int(_p(20, 0))
+            luggage_count  = int(_p(21, 0))
+            physical_count = int(_p(22, 0))
+            pass_count     = int(_p(23, 0))
+            ladies_count   = int(_p(24, 0))
+            senior_count   = int(_p(25, 0))
+            upi_count      = int(_p(36, 0))
+
+            total_tickets      = (full_count + half_count + st1_count + luggage_count +
+                                  physical_count + pass_count + ladies_count + senior_count)
+            total_cash_tickets = max(0, total_tickets - upi_count)
+
+            total_coll  = Decimal(_p(35, '0'))
+            upi_amount  = Decimal(_p(37, '0'))
+            total_pass  = int(_p(39, 0))
+
+            raw_dir = _p(38, '')
+            up_down_trip = (
+                Direction.UP   if raw_dir == 'U' else
+                Direction.DOWN if raw_dir == 'D' else None
+            )
+
+            # ── Idempotency guard ─────────────────────────────────────────────
+            existing = _resolve_trip(_p(2), company.id, trip_no, start_date)
+            if existing and existing.is_closed:
+                log.status = RawDataLog.statusChoices.DUPLICATE
+                log.error_message = "TrpClSum: trip already closed by TrpCl"
+                log.save()
+                return
+
+            schedule_obj  = _resolve_schedule(_p(2), company.id, schedule_no, schedule_start_date)
+            driver_obj    = _resolve_employee(_p(13), company.id)
+            conductor_obj = _resolve_employee(_p(14), company.id)
+
+            close_fields = dict(
+                close_unique_code   = _p(1),
+                schedule_id         = schedule_obj,
+                schedule_no         = schedule_no,
+                schedule_start_date = schedule_start_date,
+                schedule_start_time = schedule_start_time,
+                end_date            = end_date,
+                end_time            = end_time,
+                end_datetime        = end_datetime,
+                driver              = _p(13),
+                driver_id           = driver_obj,
+                conductor           = _p(14),
+                conductor_id        = conductor_obj,
+                total_km            = Decimal(_p(15, '0')),
+                start_ticket_no     = int(_p(16, 0)),
+                end_ticket_no       = int(_p(17, 0)),
+                full_count          = full_count,
+                half_count          = half_count,
+                st_count            = st1_count,
+                luggage_count       = luggage_count,
+                physical_count      = physical_count,
+                pass_count          = pass_count,
+                ladies_count        = ladies_count,
+                senior_count        = senior_count,
+                total_tickets       = total_tickets,
+                total_cash_tickets  = total_cash_tickets,
+                total_passengers    = total_pass,
+                full_collection     = Decimal(_p(26, '0')),
+                half_collection     = Decimal(_p(27, '0')),
+                st_collection       = Decimal(_p(28, '0')),
+                luggage_collection  = Decimal(_p(29, '0')),
+                physical_collection = Decimal(_p(30, '0')),
+                ladies_collection   = Decimal(_p(31, '0')),
+                senior_collection   = Decimal(_p(32, '0')),
+                adjust_collection   = Decimal(_p(33, '0')),
+                expense_amount      = Decimal(_p(34, '0')),
+                total_collection    = total_coll,
+                upi_ticket_count    = upi_count,
+                upi_ticket_amount   = upi_amount,
+                up_down_trip        = up_down_trip,
+                is_closed           = True,
+                auto_opened         = False,
+                ghost_note          = None,
+                close_raw_payload   = log.raw_payload,
+            )
+
+            if existing:
+                for k, v in close_fields.items():
+                    setattr(existing, k, v)
+                existing.save()
+            else:
+                try:
+                    with transaction.atomic():
+                        TripData.objects.create(
+                            palmtec_id   = _p(2),
+                            route_id     = route,
+                            trip_no      = trip_no,
+                            start_date   = start_date,
+                            start_time   = start_time,
+                            start_datetime = start_datetime,
+                            auto_opened  = True,
+                            ghost_note   = "TrpClSum received; TrpOp missing",
+                            company_code = company,
+                            **close_fields,
+                        )
+                except IntegrityError as ie:
+                    log.status = RawDataLog.statusChoices.DUPLICATE
+                    log.error_message = str(ie)
+                    log.save()
+                    return
+
+            log.status = RawDataLog.statusChoices.PROCESSED
+            log.processed_at = timezone.now()
             log.save()
+
     except Exception as exc:
         RawDataLog.objects.filter(id=log_id).update(
             status=RawDataLog.statusChoices.FAILED,
@@ -852,17 +1001,153 @@ def process_trip_close_summary_data(self, log_id):
         raise self.retry(exc=exc, countdown=60)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Schedule Close Summary
+# Protocol: identical to ShdCls (fn=ShdClsSum). Firmware resend when ShdCls
+# was not acknowledged. Idempotent: if schedule already closed → DUPLICATE.
+# ─────────────────────────────────────────────────────────────────────────────
 @shared_task(bind=True, max_retries=3)
 def process_schedule_close_summary_data(self, log_id):
-    # Protocol: identical to ShdCls (fn=ShdClsSum) — stub until confirmed
     try:
         with transaction.atomic():
-            log = RawDataLog.objects.select_for_update().get(id=log_id)
+            log = RawDataLog.objects.select_related('company_code').select_for_update().get(id=log_id)
+
             if log.status != RawDataLog.statusChoices.PENDING:
                 return f"Log {log_id} already processed."
-            log.status = RawDataLog.statusChoices.FAILED
-            log.error_message = "ScheduleCloseSummary processing not yet implemented"
+
+            company = log.company_code
+            if not company:
+                _fail(log, "Invalid Company Code")
+                return
+
+            parts = log.raw_payload.split("|")
+
+            def _p(i, default=None):
+                return parts[i] if len(parts) > i and parts[i].strip() else default
+
+            required = {
+                'route_code':  _p(4),
+                'schedule_no': _p(5),
+                'end_date':    _p(8),
+                'end_time':    _p(9),
+            }
+            missing = [k for k, v in required.items() if not v]
+            if missing:
+                _fail(log, f"Missing required fields: {', '.join(missing)}")
+                return
+
+            route = _get_route_for_palmtec(_p(4), company)
+            if not route:
+                _fail(log, f"Route not found: {_p(4)}")
+                return
+
+            schedule_no         = int(_p(5))
+            schedule_start_date = _parse_date(_p(6))
+            schedule_start_time = _parse_time(_p(7))
+            end_date            = _parse_date(_p(8))
+            end_time            = _parse_time(_p(9))
+            end_datetime        = datetime.combine(end_date, end_time) if end_date and end_time else None
+
+            # ── Idempotency guard ─────────────────────────────────────────────
+            existing = ScheduleData.objects.filter(
+                palmtec_id=_p(2),
+                company_code=company,
+                schedule_no=schedule_no,
+                start_date=schedule_start_date,
+            ).first()
+            if existing and existing.is_closed:
+                log.status = RawDataLog.statusChoices.DUPLICATE
+                log.error_message = "ShdClsSum: schedule already closed by ShdCls"
+                log.save()
+                return
+
+            driver_obj    = _resolve_employee(_p(10), company.id)
+            conductor_obj = _resolve_employee(_p(11), company.id)
+            bus_obj       = _resolve_vehicle(_p(12),  company.id)
+
+            close_fields_new = dict(
+                close_unique_code       = _p(1),
+                route_id                = route,
+                driver                  = _p(10),
+                driver_id               = driver_obj,
+                conductor               = _p(11),
+                conductor_id            = conductor_obj,
+                bus_no                  = _p(12),
+                bus_id                  = bus_obj,
+                end_date                = end_date,
+                end_time                = end_time,
+                end_datetime            = end_datetime,
+                battery_close           = int(_p(46)) if _p(46) else None,
+                total_tickets           = int(_p(13, 0)),
+                full_count              = int(_p(14, 0)),
+                half_count              = int(_p(15, 0)),
+                physical_count          = int(_p(16, 0)),
+                ladies_count            = int(_p(17, 0)),
+                senior_count            = int(_p(18, 0)),
+                luggage_count           = int(_p(19, 0)),
+                st_count                = int(_p(20, 0)),
+                adjust_count            = int(_p(21, 0)),
+                total_collection        = Decimal(_p(22, '0')),
+                full_collection         = Decimal(_p(23, '0')),
+                half_collection         = Decimal(_p(24, '0')),
+                physical_collection     = Decimal(_p(25, '0')),
+                ladies_collection       = Decimal(_p(26, '0')),
+                senior_collection       = Decimal(_p(27, '0')),
+                st_collection           = Decimal(_p(28, '0')),
+                adjust_collection       = Decimal(_p(29, '0')),
+                luggage_collection      = Decimal(_p(30, '0')),
+                upi_total_collection    = Decimal(_p(31, '0')),
+                upi_full_collection     = Decimal(_p(32, '0')),
+                upi_half_collection     = Decimal(_p(33, '0')),
+                upi_physical_collection = Decimal(_p(34, '0')),
+                upi_ladies_collection   = Decimal(_p(35, '0')),
+                upi_senior_collection   = Decimal(_p(36, '0')),
+                upi_st_collection       = Decimal(_p(37, '0')),
+                upi_luggage_collection  = Decimal(_p(38, '0')),
+                upi_full_count          = int(_p(39, 0)),
+                upi_half_count          = int(_p(40, 0)),
+                upi_physical_count      = int(_p(41, 0)),
+                upi_ladies_count        = int(_p(42, 0)),
+                upi_senior_count        = int(_p(43, 0)),
+                upi_luggage_count       = int(_p(44, 0)),
+                upi_st_count            = int(_p(45, 0)),
+                is_closed               = True,
+                auto_opened             = False,
+                ghost_note              = None,
+                close_raw_payload       = log.raw_payload,
+            )
+
+            if existing:
+                for k, v in close_fields_new.items():
+                    setattr(existing, k, v)
+                existing.save()
+            else:
+                try:
+                    with transaction.atomic():
+                        ScheduleData.objects.create(
+                            palmtec_id  = _p(2),
+                            schedule_no = schedule_no,
+                            start_date  = schedule_start_date,
+                            start_time  = schedule_start_time,
+                            start_datetime = (
+                                datetime.combine(schedule_start_date, schedule_start_time)
+                                if schedule_start_date and schedule_start_time else None
+                            ),
+                            auto_opened  = True,
+                            ghost_note   = "ShdClsSum received; ShdOpn missing",
+                            company_code = company,
+                            **close_fields_new,
+                        )
+                except IntegrityError as ie:
+                    log.status = RawDataLog.statusChoices.DUPLICATE
+                    log.error_message = str(ie)
+                    log.save()
+                    return
+
+            log.status = RawDataLog.statusChoices.PROCESSED
+            log.processed_at = timezone.now()
             log.save()
+
     except Exception as exc:
         RawDataLog.objects.filter(id=log_id).update(
             status=RawDataLog.statusChoices.FAILED,
@@ -886,7 +1171,7 @@ def scan_pending_raw_logs():
 
     requeue_records = RawDataLog.objects.filter(
         status=RawDataLog.statusChoices.PENDING,
-        received_at__range=(requeue_cutoff, stale_cutoff),
+        received_at__range=(stale_cutoff, requeue_cutoff),
     )
 
     TASK_MAP = {
