@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from django.utils import timezone as tz
 from rest_framework import status
-from ...models import TransactionData, TripCloseData, Company, MosambeeTransaction, MosambeePayoutCallback
+from ...models import TransactionData, Company, MosambeeTransaction, MosambeePayoutCallback
 from django.http import HttpResponse, JsonResponse
 from rest_framework.response import Response
 from django.contrib.auth import get_user_model
