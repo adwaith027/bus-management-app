@@ -45,6 +45,7 @@ class CompanySerializer(serializers.ModelSerializer):
             'updated_at',
             'is_validated',
             'needs_validation',
+            'is_active',
             'client_type',
             'created_by',
         ]

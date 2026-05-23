@@ -24,6 +24,7 @@ class DealerSerializer(serializers.ModelSerializer):
             'contact_number',
             'email',
             'address',
+            'address_2',
             'city',
             'state',
             'district',
