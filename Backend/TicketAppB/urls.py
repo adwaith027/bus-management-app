@@ -190,6 +190,9 @@ urlpatterns = [
     path('reports/passenger-info', apk_views.passenger_info, name='passenger_info'),
     path('reports/trip-details', apk_views.trip_details, name='trip_details'),
     path('reports/ticket-details', apk_views.ticket_details, name='ticket_details'),
+    path('reports/expense', apk_views.expense_report, name='expense_report'),
+    path('reports/stage-wise', apk_views.stage_wise_report, name='stage_wise_report'),
+    path('apk/dashboard', apk_views.apk_dashboard, name='apk_dashboard'),
 
 
     # APK file uploads
