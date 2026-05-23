@@ -16,7 +16,7 @@ from django.contrib.auth import get_user_model
 from rest_framework.decorators import api_view
 from django.db.utils import OperationalError, ProgrammingError
 from django.db.models import Sum, Q, Count, Case, When, IntegerField
-from ...models import Company,TransactionData,TripCloseData,Route,VehicleType,MosambeeTransaction,Dealer,DealerCustomerMapping
+from ...models import Company,TransactionData,TripData,Route,VehicleType,MosambeeTransaction,Dealer,DealerCustomerMapping
 from ..utils import _is_superadmin, _is_executive, _is_dealer_admin, _is_company_admin
 
 
@@ -1021,17 +1021,17 @@ def get_company_dashboard_metrics(request):
     #  Section 2: Operations (from TripCloseData, Route, VehicleType) ─
     try:
         # Trips completed on this date
-        trips_completed = TripCloseData.objects.filter(
+        trips_completed = TripData.objects.filter(
             company_code=company,
-            start_date=selected_date
+            start_date=selected_date,
+            is_closed=True,
         ).count()
         operations["trips_completed"] = trips_completed
-        operations["trips_scheduled"] = trips_completed  # Assuming all completed trips were scheduled
-        
-        # Active buses (distinct palmtec_id on this date)
-        buses_active = TripCloseData.objects.filter(
+        operations["trips_scheduled"] = trips_completed
+
+        buses_active = TripData.objects.filter(
             company_code=company,
-            start_date=selected_date
+            start_date=selected_date,
         ).values('palmtec_id').distinct().count()
         operations["buses_active"] = buses_active
         

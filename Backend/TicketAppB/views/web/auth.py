@@ -268,14 +268,21 @@ def login_view(request):
     if not user.is_active:
         return Response({"error": "Account is inactive"}, status=status.HTTP_403_FORBIDDEN)
 
-    # ── Step 2: Company license checks ──
+    # ── Step 2: Entity active + license checks ──
     company = user.company
     if company:
+        if not company.is_active:
+            return Response({"error": "Company account is deactivated. Contact Administrator."}, status=status.HTTP_403_FORBIDDEN)
+
         if company.product_to_date and date.today() > company.product_to_date:
             return Response({"error": f"License Expired (ID: {company.company_id}). Contact Administrator"}, status=status.HTTP_403_FORBIDDEN)
 
         if company.authentication_status and company.authentication_status != Company.AuthStatus.APPROVED:
             return Response({"error": "Pending License Approval. Contact Administrator"}, status=status.HTTP_403_FORBIDDEN)
+
+    dealer = user.dealer
+    if dealer and not dealer.is_active:
+        return Response({"error": "Dealer account is deactivated. Contact Administrator."}, status=status.HTTP_403_FORBIDDEN)
 
     # ── Step 3: Classify device type (for info/storage only, not for gating) ──
     user_agent = request.headers.get("User-Agent", "")

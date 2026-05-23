@@ -59,7 +59,13 @@ def get_all_transaction_data(request):
                 company_code=user.company,
                 ticket_date__gte=from_date,
                 ticket_date__lte=to_date,
-            ).select_related('route_id').prefetch_related('route_id__route_depots__depot')
+            ).select_related(
+                'route_id',
+                'from_stage_id__stage',
+                'to_stage_id__stage',
+                'trip_id',
+                'schedule_id',
+            ).prefetch_related('route_id__route_depots__depot')
         else:
             qs = TransactionData.objects.none()
 

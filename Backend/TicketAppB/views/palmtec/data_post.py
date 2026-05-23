@@ -6,7 +6,7 @@ from django.db import IntegrityError, transaction
 from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 
-from ...models import RawDataLog, OdometerData, ExpenseData, Employee, VehicleType
+from ...models import RawDataLog, OdometerData, ExpenseData, Employee, VehicleType, TripData, ScheduleData, ExpenseMaster
 from ...tasks import (
     process_transaction_data,
     process_trip_open_data, process_trip_close_data, process_trip_close_summary_data,
@@ -14,7 +14,37 @@ from ...tasks import (
 )
 from ..utils import _get_company_for_palmtec, _validate_checksum
 
-logger = logging.getLogger('ticket.palmtec')
+log_ticket           = logging.getLogger('ticket.palmtec.ticket')
+log_trip_open        = logging.getLogger('ticket.palmtec.trip_open')
+log_trip_close       = logging.getLogger('ticket.palmtec.trip_close')
+log_trip_close_sum   = logging.getLogger('ticket.palmtec.trip_close_summary')
+log_schedule_open    = logging.getLogger('ticket.palmtec.schedule_open')
+log_schedule_close   = logging.getLogger('ticket.palmtec.schedule_close')
+log_schedule_close_sum = logging.getLogger('ticket.palmtec.schedule_close_summary')
+log_odometer         = logging.getLogger('ticket.palmtec.odometer')
+log_expense          = logging.getLogger('ticket.palmtec.expense')
+
+
+def _resolve_trip_by_palmtec(palmtec_id, company, trip_no, record_date):
+    if not trip_no or not record_date:
+        return None
+    return TripData.objects.filter(
+        palmtec_id=palmtec_id,
+        company_code=company,
+        trip_no=trip_no,
+        start_date__lte=record_date,
+    ).order_by('-start_date').first()
+
+
+def _resolve_schedule_by_palmtec(palmtec_id, company, schedule_no, record_date):
+    if not schedule_no or not record_date:
+        return None
+    return ScheduleData.objects.filter(
+        palmtec_id=palmtec_id,
+        company_code=company,
+        schedule_no=schedule_no,
+        start_date__lte=record_date,
+    ).order_by('-start_date').first()
 
 
 @csrf_exempt
@@ -35,6 +65,8 @@ def getScheduleOpenDataFromDevice(request):
     if parts[0] != 'ShdOpn':
         return HttpResponse("INVALID", status=400, content_type="text/plain")
 
+    log_schedule_open.info("RECV %s", raw)
+
     if not _validate_checksum('getScheduleOpen', raw):
         return HttpResponse("INVALID_CHECKSUM", status=400, content_type="text/plain")
 
@@ -54,7 +86,7 @@ def getScheduleOpenDataFromDevice(request):
         return HttpResponse(f'OK#SUCCESS#fn={parts[1]}#', content_type="text/plain", status=200)
 
     except Exception as e:
-        logger.exception("ScheduleOpen failed: %s", e)
+        log_schedule_open.exception("ScheduleOpen failed: %s", e)
         return HttpResponse("ERROR", status=500, content_type="text/plain")
 
 
@@ -76,6 +108,8 @@ def getTripOpenDataFromDevice(request):
     if parts[0] != 'TrpOp':
         return HttpResponse("INVALID", status=400, content_type="text/plain")
 
+    log_trip_open.info("RECV %s", raw)
+
     if not _validate_checksum('getTripOpen', raw):
         return HttpResponse("INVALID_CHECKSUM", status=400, content_type="text/plain")
 
@@ -95,7 +129,7 @@ def getTripOpenDataFromDevice(request):
         return HttpResponse(f'OK#SUCCESS#fn={parts[1]}#', content_type="text/plain", status=200)
 
     except Exception as e:
-        logger.exception("TripOpen failed: %s", e)
+        log_trip_open.exception("TripOpen failed: %s", e)
         return HttpResponse("ERROR", status=500, content_type="text/plain")
 
 
@@ -110,18 +144,20 @@ def getTicketDataFromDevice(request):
 
     parts = raw.split("|")
 
-    # Need at least parts[45] (checksum); parts[44] = company
-    if len(parts) < 46:
+    # Need at least parts[46] (license_code/company); parts[44]=ticket_status, parts[45]=bqr_merchant_id
+    if len(parts) < 47:
         return HttpResponse("MISSING_DATA", status=400, content_type="text/plain")
 
     if parts[0] != 'Ticket':
         return HttpResponse("INVALID", status=400, content_type="text/plain")
 
+    log_ticket.info("RECV %s", raw)
+
     if not _validate_checksum('getTicket', raw):
         return HttpResponse("INVALID_CHECKSUM", status=400, content_type="text/plain")
 
     try:
-        company_instance = _get_company_for_palmtec(parts[44]) if parts[44] else None
+        company_instance = _get_company_for_palmtec(parts[46]) if parts[46] else None
         if not company_instance:
             return HttpResponse("INVALID_COMPANY", status=400, content_type="text/plain")
 
@@ -136,8 +172,9 @@ def getTicketDataFromDevice(request):
         return HttpResponse(f'OK#SUCCESS#fn={parts[1]}#', content_type="text/plain", status=200)
 
     except Exception as e:
-        logger.exception("Ticket failed: %s", e)
+        log_ticket.exception("Ticket failed: %s", e)
         return HttpResponse("ERROR", status=500, content_type="text/plain")
+
 
 
 @csrf_exempt
@@ -158,6 +195,8 @@ def getScheduleCloseDataFromDevice(request):
     if parts[0] != 'ShdCls':
         return HttpResponse("INVALID", status=400, content_type="text/plain")
 
+    log_schedule_close.info("RECV %s", raw)
+
     if not _validate_checksum('getScheduleClose', raw):
         return HttpResponse("INVALID_CHECKSUM", status=400, content_type="text/plain")
 
@@ -177,7 +216,7 @@ def getScheduleCloseDataFromDevice(request):
         return HttpResponse(f'OK#SUCCESS#fn={parts[1]}#', content_type="text/plain", status=200)
 
     except Exception as e:
-        logger.exception("ScheduleClose failed: %s", e)
+        log_schedule_close.exception("ScheduleClose failed: %s", e)
         return HttpResponse("ERROR", status=500, content_type="text/plain")
 
 
@@ -199,11 +238,13 @@ def getTripCloseDataFromDevice(request):
     if parts[0] != 'TrpCl':
         return HttpResponse("INVALID", status=400, content_type="text/plain")
 
+    log_trip_close.info("RECV %s", raw)
+
     if not _validate_checksum('getTripClose', raw):
         return HttpResponse("INVALID_CHECKSUM", status=400, content_type="text/plain")
 
     try:
-        company_instance = _get_company_for_palmtec(parts[4]) if parts[4] else None
+        company_instance = _get_company_for_palmtec(parts[3]) if parts[3] else None
         if not company_instance:
             return HttpResponse("INVALID_COMPANY", status=400, content_type="text/plain")
 
@@ -218,7 +259,7 @@ def getTripCloseDataFromDevice(request):
         return HttpResponse(f'OK#SUCCESS#fn={parts[1]}#', content_type="text/plain", status=200)
 
     except Exception as e:
-        logger.exception("TripClose failed: %s", e)
+        log_trip_close.exception("TripClose failed: %s", e)
         return HttpResponse("ERROR", status=500, content_type="text/plain")
 
 
@@ -233,11 +274,19 @@ def getTripCloseSummaryFromDevice(request):
 
     parts = raw.split("|")
 
+    if len(parts) < 38:
+        return HttpResponse("MISSING_DATA", status=400, content_type="text/plain")
+
     if parts[0] != 'TrpClSum':
         return HttpResponse("INVALID", status=400, content_type="text/plain")
 
+    log_trip_close_sum.info("RECV %s", raw)
+
+    if not _validate_checksum('getTripCloseSummary', raw):
+        return HttpResponse("INVALID_CHECKSUM", status=400, content_type="text/plain")
+
     try:
-        company_instance = _get_company_for_palmtec(parts[3]) if len(parts) > 3 and parts[3] else None
+        company_instance = _get_company_for_palmtec(parts[4]) if len(parts) > 4 and parts[4] else None
         if not company_instance:
             return HttpResponse("INVALID_COMPANY", status=400, content_type="text/plain")
 
@@ -252,7 +301,7 @@ def getTripCloseSummaryFromDevice(request):
         return HttpResponse(f'OK#SUCCESS#fn={parts[1]}#', content_type="text/plain", status=200)
 
     except Exception as e:
-        logger.exception("TripCloseSummary failed: %s", e)
+        log_trip_close_sum.exception("TripCloseSummary failed: %s", e)
         return HttpResponse("ERROR", status=500, content_type="text/plain")
 
 
@@ -267,11 +316,19 @@ def getScheduleCloseSummaryFromDevice(request):
 
     parts = raw.split("|")
 
+    if len(parts) < 47:
+        return HttpResponse("MISSING_DATA", status=400, content_type="text/plain")
+
     if parts[0] != 'ShdClsSum':
         return HttpResponse("INVALID", status=400, content_type="text/plain")
 
+    log_schedule_close_sum.info("RECV %s", raw)
+
+    if not _validate_checksum('getScheduleCloseSummary', raw):
+        return HttpResponse("INVALID_CHECKSUM", status=400, content_type="text/plain")
+
     try:
-        company_instance = _get_company_for_palmtec(parts[3]) if len(parts) > 3 and parts[3] else None
+        company_instance = _get_company_for_palmtec(parts[3]) if parts[3] else None
         if not company_instance:
             return HttpResponse("INVALID_COMPANY", status=400, content_type="text/plain")
 
@@ -286,7 +343,7 @@ def getScheduleCloseSummaryFromDevice(request):
         return HttpResponse(f'OK#SUCCESS#fn={parts[1]}#', content_type="text/plain", status=200)
 
     except Exception as e:
-        logger.exception("ScheduleCloseSummary failed: %s", e)
+        log_schedule_close_sum.exception("ScheduleCloseSummary failed: %s", e)
         return HttpResponse("ERROR", status=500, content_type="text/plain")
 
 
@@ -310,6 +367,8 @@ def getOdometerDataFromDevice(request):
 
     if parts[0] != 'OdoMtr':
         return HttpResponse("INVALID", status=400, content_type="text/plain")
+
+    log_odometer.info("RECV %s", raw)
 
     if not _validate_checksum('getOdometerDetails', raw):
         return HttpResponse("INVALID_CHECKSUM", status=400, content_type="text/plain")
@@ -343,12 +402,20 @@ def getOdometerDataFromDevice(request):
         end_time       = datetime.strptime(_p(9), "%H:%M:%S").time() if _p(9) else None
         end_datetime   = datetime.combine(end_date, end_time) if end_date and end_time else None
 
+        schedule_no = int(_p(4)) if _p(4) else None
+        trip_no     = int(_p(5)) if _p(5) else None
+
+        trip_obj     = _resolve_trip_by_palmtec(_p(2), company_instance, trip_no, start_date)
+        schedule_obj = _resolve_schedule_by_palmtec(_p(2), company_instance, schedule_no, start_date)
+
         OdometerData.objects.create(
             unique_code    = _p(1),
             palmtec_id     = _p(2),
             company_code   = company_instance,
-            schedule_no    = int(_p(4)),
-            trip_no        = int(_p(5)),
+            schedule_no    = schedule_no,
+            trip_no        = trip_no,
+            trip_id        = trip_obj,
+            schedule_id    = schedule_obj,
             start_date     = start_date,
             start_time     = start_time,
             start_datetime = start_datetime,
@@ -372,7 +439,7 @@ def getOdometerDataFromDevice(request):
     except IntegrityError:
         return HttpResponse(f'OK#DUPLICATE#fn={parts[1]}#', content_type="text/plain", status=200)
     except Exception as e:
-        logger.exception("OdometerData failed: %s", e)
+        log_odometer.exception("OdometerData failed: %s", e)
         return HttpResponse("ERROR", status=500, content_type="text/plain")
 
 
@@ -396,6 +463,8 @@ def getExpenseDataFromDevice(request):
 
     if parts[0] != 'ExpDtl':
         return HttpResponse("INVALID", status=400, content_type="text/plain")
+
+    log_expense.info("RECV %s", raw)
 
     if not _validate_checksum('getExpenseDetails', raw):
         return HttpResponse("INVALID_CHECKSUM", status=400, content_type="text/plain")
@@ -426,12 +495,20 @@ def getExpenseDataFromDevice(request):
         expense_time     = datetime.strptime(_p(7), "%H:%M:%S").time() if _p(7) else None
         expense_datetime = datetime.combine(expense_date, expense_time) if expense_date and expense_time else None
 
+        schedule_no = int(_p(4)) if _p(4) else None
+        trip_no     = int(_p(5)) if _p(5) else None
+
+        trip_obj     = _resolve_trip_by_palmtec(_p(2), company_instance, trip_no, expense_date)
+        schedule_obj = _resolve_schedule_by_palmtec(_p(2), company_instance, schedule_no, expense_date)
+
         ExpenseData.objects.create(
             unique_code      = _p(1),
             palmtec_id       = _p(2),
             company_code     = company_instance,
-            schedule_no      = int(_p(4)),
-            trip_no          = int(_p(5)),
+            schedule_no      = schedule_no,
+            trip_no          = trip_no,
+            trip_id          = trip_obj,
+            schedule_id      = schedule_obj,
             expense_date     = expense_date,
             expense_time     = expense_time,
             expense_datetime = expense_datetime,
@@ -441,8 +518,9 @@ def getExpenseDataFromDevice(request):
             bus_id           = bus_instance,
             expense_amount   = Decimal(_p(10, '0')),
             diesel_amount    = Decimal(_p(11, '0')),
-            expense_type     = int(_p(12)) if _p(12) else None,
-            expense_name     = _p(13),
+            expense_type      = int(_p(12)) if _p(12) else None,
+            expense_master_id = ExpenseMaster.objects.filter(company=company_instance, expense_code=str(int(_p(12)))).first() if _p(12) else None,
+            expense_name      = _p(13),
             source           = ExpenseData.SourceType.API,
             checksum         = _p(14),
             raw_payload      = raw,
@@ -454,5 +532,5 @@ def getExpenseDataFromDevice(request):
     except IntegrityError:
         return HttpResponse(f'OK#DUPLICATE#fn={parts[1]}#', content_type="text/plain", status=200)
     except Exception as e:
-        logger.exception("ExpenseData failed: %s", e)
+        log_expense.exception("ExpenseData failed: %s", e)
         return HttpResponse("ERROR", status=500, content_type="text/plain")
