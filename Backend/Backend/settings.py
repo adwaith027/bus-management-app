@@ -45,6 +45,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'TicketAppB.middleware.UserOnlineMiddleware',
     'TicketAppB.middleware.LicenseExpiryMiddleware',
 ]
 
@@ -69,8 +70,6 @@ WSGI_APPLICATION = 'Backend.wsgi.application'
 
 
 # Database
-# https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-
 
 DATABASES = {
     'default': {
@@ -93,8 +92,6 @@ AUTH_USER_MODEL = 'TicketAppB.CustomUser'
 
 
 # Password validation
-# https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
-
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
@@ -112,8 +109,6 @@ AUTH_PASSWORD_VALIDATORS = [
 
 
 # Internationalization
-# https://docs.djangoproject.com/en/5.2/topics/i18n/
-
 LANGUAGE_CODE = 'en-us'
 
 USE_I18N = True
@@ -184,6 +179,78 @@ LOGGING = {
             'backupCount': 30,
             'formatter': 'verbose',
         },
+        'palmtec_ticket_file': {
+            'level': 'INFO',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'palmtec_ticket.log'),
+            'when': 'midnight',
+            'backupCount': 30,
+            'formatter': 'simple',
+        },
+        'palmtec_trip_open_file': {
+            'level': 'INFO',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'palmtec_trip_open.log'),
+            'when': 'midnight',
+            'backupCount': 30,
+            'formatter': 'simple',
+        },
+        'palmtec_trip_close_file': {
+            'level': 'INFO',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'palmtec_trip_close.log'),
+            'when': 'midnight',
+            'backupCount': 30,
+            'formatter': 'simple',
+        },
+        'palmtec_trip_close_summary_file': {
+            'level': 'INFO',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'palmtec_trip_close_summary.log'),
+            'when': 'midnight',
+            'backupCount': 30,
+            'formatter': 'simple',
+        },
+        'palmtec_schedule_open_file': {
+            'level': 'INFO',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'palmtec_schedule_open.log'),
+            'when': 'midnight',
+            'backupCount': 30,
+            'formatter': 'simple',
+        },
+        'palmtec_schedule_close_file': {
+            'level': 'INFO',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'palmtec_schedule_close.log'),
+            'when': 'midnight',
+            'backupCount': 30,
+            'formatter': 'simple',
+        },
+        'palmtec_schedule_close_summary_file': {
+            'level': 'INFO',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'palmtec_schedule_close_summary.log'),
+            'when': 'midnight',
+            'backupCount': 30,
+            'formatter': 'simple',
+        },
+        'palmtec_odometer_file': {
+            'level': 'INFO',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'palmtec_odometer.log'),
+            'when': 'midnight',
+            'backupCount': 30,
+            'formatter': 'simple',
+        },
+        'palmtec_expense_file': {
+            'level': 'INFO',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs', 'palmtec_expense.log'),
+            'when': 'midnight',
+            'backupCount': 30,
+            'formatter': 'simple',
+        },
     },
     'loggers': {
         'django': {
@@ -216,6 +283,51 @@ LOGGING = {
             'level': 'ERROR',
             'propagate': False,
         },
+        'ticket.palmtec.ticket': {
+            'handlers': ['palmtec_ticket_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'ticket.palmtec.trip_open': {
+            'handlers': ['palmtec_trip_open_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'ticket.palmtec.trip_close': {
+            'handlers': ['palmtec_trip_close_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'ticket.palmtec.trip_close_summary': {
+            'handlers': ['palmtec_trip_close_summary_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'ticket.palmtec.schedule_open': {
+            'handlers': ['palmtec_schedule_open_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'ticket.palmtec.schedule_close': {
+            'handlers': ['palmtec_schedule_close_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'ticket.palmtec.schedule_close_summary': {
+            'handlers': ['palmtec_schedule_close_summary_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'ticket.palmtec.odometer': {
+            'handlers': ['palmtec_odometer_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'ticket.palmtec.expense': {
+            'handlers': ['palmtec_expense_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
     },
 }
 
@@ -226,15 +338,12 @@ if not os.path.exists(LOGS_DIR):
 
 
 # Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.2/howto/static-files/
-
 STATIC_URL = 'static/'
 
 MEDIA_ROOT = os.path.join(BASE_DIR, 'uploads')
 MEDIA_URL  = '/uploads/'
 
 # Default primary key field type
-# https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -268,7 +377,7 @@ SESSION_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SAMESITE = 'Lax'
 
 # License Server Configuration
-LICENSE_SERVER_BASE_URL = env('LICENSE_SERVER_BASE_URL',default='http://202.88.237.210:8093/LicenceMgmt/public/api')
+LICENSE_SERVER_BASE_URL = env('LICENSE_SERVER_BASE_URL')
 PRODUCT_REGISTRATION_ENDPOINT = env('PRODUCT_REGISTRATION_ENDPOINT', default='/product-registration')
 PRODUCT_AUTH_ENDPOINT = env('PRODUCT_AUTH_ENDPOINT', default='/product-authentication')
 
@@ -277,17 +386,17 @@ PRODUCT_REGISTRATION_URL = f"{LICENSE_SERVER_BASE_URL}{PRODUCT_REGISTRATION_ENDP
 PRODUCT_AUTH_URL = f"{LICENSE_SERVER_BASE_URL}{PRODUCT_AUTH_ENDPOINT}"
 
 # Application Configuration
-APP_VERSION = env('APP_VERSION', default='1.0.0')
-PROJECT_NAME = env('PROJECT_NAME', default='Bus Ticketing System')
+APP_VERSION = env('APP_VERSION')
+PROJECT_NAME = env('PROJECT_NAME')
 
 # Mosambee salt
-MOSAMBEE_SALT=env('MOSAMBEE_SALT', default='448B2EAC08375149D8D352D56D8BD42C30A913C696893EDC')
+MOSAMBEE_SALT=env('MOSAMBEE_SALT')
 
 # automatically append slash to URLs (for DRF)
 APPEND_SLASH = False
 
 # Celery Configuration
-CELERY_BROKER_URL = env('CELERY_BROKER_URL', default='redis://localhost:6379/0')
+CELERY_BROKER_URL = env('CELERY_BROKER_URL')
 
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
@@ -302,7 +411,7 @@ CELERY_TASK_REJECT_ON_WORKER_LOST = True  # Re-queue if worker crashes
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": env('REDIS_CACHE_URL', default='redis://127.0.0.1:6379/1'),
+        "LOCATION": env('REDIS_CACHE_URL'),
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
         }
@@ -315,12 +424,12 @@ CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
 CELERY_BEAT_SCHEDULE = {
     'scan-pending-raw-logs': {
         'task': 'TicketAppB.tasks.scan_pending_raw_logs',
-        # interval in seconds
+        # interval in seconds. runs every 60 seconds
         'schedule': 60.0,
     },
     'cleanup-processed-raw-logs': {
         'task': 'TicketAppB.tasks.cleanup_processed_raw_logs',
-        # every day 2 AM
+        # every day @ 2 AM
         'schedule': crontab(hour=2, minute=0),
     },
 }
