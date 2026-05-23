@@ -104,7 +104,7 @@ function FieldGroup({ title, children, columns = 2 }) {
 // ─── Trip lifecycle row ────────────────────────────────────────────────────────
 function TripRow({ trip, onView, isNew }) {
   const isOpen = trip.status === 'open';
-  const upiShare = trip.total_collection ? (Number(trip.upi_ticket_amount) / Number(trip.total_collection)) * 100 : 0;
+  const upiShare = trip.total_collection ? ((Number(trip.upi_ticket_amount) || 0) / Number(trip.total_collection)) * 100 : 0;
 
   return (
     <div className={`border border-slate-200 shadow-sm rounded-2xl bg-white overflow-hidden transition-shadow hover:shadow-md ${isNew ? 'ring-2 ring-slate-300' : ''}`}>
@@ -208,6 +208,7 @@ function TripRow({ trip, onView, isNew }) {
             <p className="text-base font-bold text-slate-900">{fmt.inr(trip.total_collection)}</p>
             <div className="flex items-center gap-1 justify-end mt-0.5">
               <div className="h-1 w-12 rounded-full bg-emerald-100 overflow-hidden">
+                {/* UPI SHARE AS NAN IN UI. REQUIRES UI FIX */}
                 <div className="h-full bg-blue-500" style={{ width: `${Math.round(upiShare)}%` }} />
               </div>
               <span className="text-[10px] text-slate-500 tabular-nums">{Math.round(upiShare)}%</span>
@@ -283,6 +284,7 @@ function TripDetailModal({ trip, onClose }) {
                 <p className="text-lg font-bold text-slate-900">{fmt.time(trip.start_datetime)}</p>
                 <p className="text-xs text-slate-500">{fmt.fullDate(trip.start_datetime)}</p>
                 {trip.start_ticket_no && <p className="text-[11px] text-slate-400 mt-0.5">Start ticket #{trip.start_ticket_no}</p>}
+                {trip.battery_percentage != null && <p className="text-[11px] text-slate-400 mt-0.5">Battery {trip.battery_percentage}%</p>}
               </div>
               <div className="text-center">
                 <div className="relative h-2 rounded-full bg-white overflow-hidden shadow-inner">
@@ -320,6 +322,28 @@ function TripDetailModal({ trip, onClose }) {
               </div>
             </div>
           </div>
+
+          {/* Identity */}
+          <FieldGroup title="Identity" columns={3}>
+            <FieldBlock label="Company"          value={trip.company_name} />
+            <FieldBlock label="Open Unique Code"  value={trip.open_unique_code  || '—'} />
+            <FieldBlock label="Close Unique Code" value={trip.close_unique_code || '—'} />
+          </FieldGroup>
+
+          {/* Ghost / auto-opened warning */}
+          {trip.auto_opened && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700 flex items-start gap-2">
+              <span className="font-semibold shrink-0">⚠ Auto-opened:</span>
+              <span>{trip.ghost_note || 'Open signal was missed; record created from close signal.'}</span>
+            </div>
+          )}
+
+          {/* Schedule reference */}
+          <FieldGroup title="Schedule" columns={3}>
+            <FieldBlock label="Schedule No"        value={trip.schedule_no} />
+            <FieldBlock label="Schedule Start Date" value={trip.schedule_start_date || '—'} />
+            <FieldBlock label="Schedule Start Time" value={trip.schedule_start_time || '—'} />
+          </FieldGroup>
 
           {/* Vehicle & Crew */}
           <FieldGroup title="Vehicle & Crew" columns={2}>
@@ -600,29 +624,34 @@ export default function TripDataPage() {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Trip Data');
     ws.columns = [
-      { header: 'Palmtec ID',       key: 'palmtec_id',         width: 14 },
-      { header: 'Depot Code',        key: 'depot_code',         width: 14 },
-      { header: 'Route',             key: 'route_code',         width: 14 },
-      { header: 'Schedule No',       key: 'schedule_no',        width: 14 },
-      { header: 'Trip No',           key: 'trip_no',            width: 10 },
-      { header: 'Direction',         key: 'up_down_trip',       width: 12 },
-      { header: 'Status',            key: 'status',             width: 12 },
-      { header: 'Bus No',            key: 'bus_no',             width: 16 },
-      { header: 'Driver',            key: 'driver',             width: 18 },
-      { header: 'Conductor',         key: 'conductor',          width: 18 },
-      { header: 'Start DateTime',    key: 'start_datetime',     width: 20 },
-      { header: 'End DateTime',      key: 'end_datetime',       width: 20 },
-      { header: 'Start Ticket No',   key: 'start_ticket_no',    width: 16 },
-      { header: 'End Ticket No',     key: 'end_ticket_no',      width: 14 },
-      { header: 'Total KM',          key: 'total_km',           width: 12 },
-      { header: 'Total Tickets',     key: 'total_tickets',      width: 14 },
-      { header: 'Total Passengers',  key: 'total_passengers',   width: 16 },
-      { header: 'UPI Tickets',       key: 'upi_ticket_count',   width: 14 },
-      { header: 'Cash Tickets',      key: 'total_cash_tickets', width: 14 },
-      { header: 'UPI Amount',        key: 'upi_ticket_amount',  width: 14 },
-      { header: 'Cash Amount',       key: 'total_cash_amount',  width: 14 },
-      { header: 'Expense Amount',    key: 'expense_amount',     width: 14 },
-      { header: 'Total Collection',  key: 'total_collection',   width: 16 },
+      { header: 'Company',           key: 'company_name',         width: 20 },
+      { header: 'Palmtec ID',        key: 'palmtec_id',           width: 14 },
+      { header: 'Depot Code',        key: 'depot_code',           width: 14 },
+      { header: 'Route',             key: 'route_code',           width: 14 },
+      { header: 'Schedule No',       key: 'schedule_no',          width: 14 },
+      { header: 'Trip No',           key: 'trip_no',              width: 10 },
+      { header: 'Direction',         key: 'up_down_trip',         width: 12 },
+      { header: 'Status',            key: 'status',               width: 12 },
+      { header: 'Auto Opened',       key: 'auto_opened',          width: 12 },
+      { header: 'Bus No',            key: 'bus_no',               width: 16 },
+      { header: 'Driver',            key: 'driver',               width: 18 },
+      { header: 'Conductor',         key: 'conductor',            width: 18 },
+      { header: 'Battery %',         key: 'battery_percentage',   width: 12 },
+      { header: 'Start DateTime',    key: 'start_datetime',       width: 20 },
+      { header: 'End DateTime',      key: 'end_datetime',         width: 20 },
+      { header: 'Start Ticket No',   key: 'start_ticket_no',      width: 16 },
+      { header: 'End Ticket No',     key: 'end_ticket_no',        width: 14 },
+      { header: 'Total KM',          key: 'total_km',             width: 12 },
+      { header: 'Total Tickets',     key: 'total_tickets',        width: 14 },
+      { header: 'Total Passengers',  key: 'total_passengers',     width: 16 },
+      { header: 'UPI Tickets',       key: 'upi_ticket_count',     width: 14 },
+      { header: 'Cash Tickets',      key: 'total_cash_tickets',   width: 14 },
+      { header: 'UPI Amount',        key: 'upi_ticket_amount',    width: 14 },
+      { header: 'Cash Amount',       key: 'total_cash_amount',    width: 14 },
+      { header: 'Expense Amount',    key: 'expense_amount',       width: 14 },
+      { header: 'Total Collection',  key: 'total_collection',     width: 16 },
+      { header: 'Open Unique Code',  key: 'open_unique_code',     width: 32 },
+      { header: 'Close Unique Code', key: 'close_unique_code',    width: 32 },
     ];
     filteredData.forEach(t => {
       ws.addRow({
@@ -737,18 +766,8 @@ export default function TripDataPage() {
               Date filters modified — click Apply Filters to refresh data
             </div>
           )}
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
-            {[
-              { label: 'Start Date', key: 'startDate', type: 'date' },
-              { label: 'End Date',   key: 'endDate',   type: 'date' },
-            ].map(f => (
-              <div key={f.key} className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-slate-500">{f.label}</label>
-                <Input type="date" max={getTodayDate()} value={filters[f.key]}
-                  onChange={e => setFilters(p => ({ ...p, [f.key]: e.target.value }))}
-                  className="text-sm h-9" />
-              </div>
-            ))}
+          {/* Row 1: dropdown + search filters */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             {[
               { label: 'Palmtec ID', key: 'palmtecId', options: palmtecIds },
               { label: 'Route Code', key: 'routeCode',  options: routeCodes },
@@ -783,15 +802,26 @@ export default function TripDataPage() {
                 <option value="closed">Closed</option>
               </select>
             </div>
-          </div>
-          {/* Trip No search in second row */}
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-3 mt-3">
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-slate-500">Trip No</label>
               <Input type="text" placeholder="Search..." value={filters.tripNo}
                 onChange={e => handleClientFilter('tripNo', e.target.value)}
                 className="text-sm h-9" />
             </div>
+          </div>
+          {/* Row 2: date filters + buttons */}
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mt-3 items-end">
+            {[
+              { label: 'Start Date', key: 'startDate' },
+              { label: 'End Date',   key: 'endDate' },
+            ].map(f => (
+              <div key={f.key} className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-slate-500">{f.label}</label>
+                <Input type="date" max={getTodayDate()} value={filters[f.key]}
+                  onChange={e => setFilters(p => ({ ...p, [f.key]: e.target.value }))}
+                  className="text-sm h-9" />
+              </div>
+            ))}
           </div>
           <div className="flex justify-end mt-4 gap-2">
             <Button variant="outline" onClick={clearFilters} className="text-slate-600 text-sm h-9">Clear Filters</Button>

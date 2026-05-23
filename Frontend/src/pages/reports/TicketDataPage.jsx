@@ -138,16 +138,16 @@ function TicketRow({ ticket: t, onView, isNew }) {
       {/* Device + trip */}
       <td className="px-4 py-3.5">
         <div className="text-sm font-medium text-slate-700 font-mono">{t.palmtec_id}</div>
-        <div className="text-[11px] text-slate-500">Trip #{t.trip_number}</div>
+        <div className="text-[11px] text-slate-500">Trip #{t.trip_no ?? t.trip_id}</div>
       </td>
 
       {/* Route segment */}
       <td className="px-4 py-3.5">
-        {t.from_stage || t.to_stage ? (
+        {t.from_stage_name || t.to_stage_name ? (
           <div className="flex items-center gap-1.5 text-sm">
-            <span className="text-slate-800 truncate max-w-[90px]" title={t.from_stage}>{t.from_stage}</span>
+            <span className="text-slate-800 truncate max-w-[90px]" title={t.from_stage_name}>{t.from_stage_name}</span>
             <Bus size={12} className="text-slate-300 shrink-0" />
-            <span className="text-slate-800 truncate max-w-[90px]" title={t.to_stage}>{t.to_stage}</span>
+            <span className="text-slate-800 truncate max-w-[90px]" title={t.to_stage_name}>{t.to_stage_name}</span>
           </div>
         ) : <span className="text-slate-400 text-xs">—</span>}
         {t.route_code && <div className="text-[11px] text-slate-500 mt-0.5">{t.route_code}</div>}
@@ -222,11 +222,11 @@ function TicketDetailModal({ ticket: t, onClose }) {
             </div>
 
             {/* Route visualization */}
-            {(t.from_stage || t.to_stage) && (
+            {(t.from_stage_name || t.to_stage_name) && (
               <div className="flex items-center gap-3 pt-4 border-t border-dashed border-slate-300">
                 <div className="flex-1">
                   <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">From</p>
-                  <p className="text-sm font-semibold text-slate-800">{t.from_stage || '—'}</p>
+                  <p className="text-sm font-semibold text-slate-800">{t.from_stage_name || '—'}</p>
                 </div>
                 <div className="flex flex-col items-center text-slate-400">
                   <div className="flex items-center gap-1">
@@ -240,20 +240,32 @@ function TicketDetailModal({ ticket: t, onClose }) {
                 </div>
                 <div className="flex-1 text-right">
                   <p className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">To</p>
-                  <p className="text-sm font-semibold text-slate-800">{t.to_stage || '—'}</p>
+                  <p className="text-sm font-semibold text-slate-800">{t.to_stage_name || '—'}</p>
                 </div>
               </div>
             )}
           </div>
 
+          {/* Identity */}
+          <FieldGroup title="Identity" columns={3}>
+            <FieldBlock label="Company"      value={t.company_name} />
+            <FieldBlock label="Unique Code"  value={t.unique_code || '—'} />
+            <FieldBlock label="Checksum"     value={t.checksum || '—'} />
+          </FieldGroup>
+
           {/* Trip context */}
           <FieldGroup title="Trip Context" columns={3}>
-            <FieldBlock label="Palmtec ID"   value={t.palmtec_id} />
-            <FieldBlock label="Trip Number"  value={t.trip_number} />
-            <FieldBlock label="Route Code"   value={t.route_code} />
-            <FieldBlock label="Ticket Date"  value={t.formatted_ticket_date || fmt.date(t.ticket_date)} />
-            <FieldBlock label="Ticket Time"  value={t.ticket_time} />
-            <FieldBlock label="Ticket Type"  value={t.ticket_type_display} />
+            <FieldBlock label="Palmtec ID"       value={t.palmtec_id} />
+            <FieldBlock label="Trip No"          value={t.trip_no ?? '—'} />
+            <FieldBlock label="Schedule No"      value={t.schedule_no ?? '—'} />
+            <FieldBlock label="Route Code"       value={t.route_code} />
+            <FieldBlock label="Trip Start Date"  value={t.trip_start_date || '—'} />
+            <FieldBlock label="Trip Start Time"  value={t.trip_start_time || '—'} />
+            <FieldBlock label="Ticket Date"      value={t.formatted_ticket_date || fmt.date(t.ticket_date)} />
+            <FieldBlock label="Ticket Time"      value={t.ticket_time} />
+            <FieldBlock label="Ticket Type"      value={t.ticket_type_display} />
+            <FieldBlock label="Battery %"        value={t.battery_percentage ?? '—'} />
+            <FieldBlock label="Passenger Count"  value={t.passenger_count ?? '—'} />
           </FieldGroup>
 
           {/* Passenger counts */}
@@ -269,12 +281,20 @@ function TicketDetailModal({ ticket: t, onClose }) {
           </FieldGroup>
 
           {/* Amounts */}
-          <FieldGroup title="Amount Details" columns={2}>
+          <FieldGroup title="Amount Details" columns={3}>
+            <FieldBlock label="Full Amount"    value={fmt.inr(t.full_total_amount)} />
+            <FieldBlock label="Student Amount" value={fmt.inr(t.st_total_amount)} />
             <FieldBlock label="Luggage Amount" value={fmt.inr(t.lugg_amount)} />
             <FieldBlock label="Adjust Amount"  value={fmt.inr(t.adjust_amount)} />
             <FieldBlock label="Warrant Amount" value={fmt.inr(t.warrant_amount)} />
             <FieldBlock label="Refund Amount"  value={fmt.inr(t.refund_amount)} />
           </FieldGroup>
+
+          {t.bqr_merchant_id && (
+            <FieldGroup title="BQR / Merchant" columns={2}>
+              <FieldBlock label="BQR Merchant ID" value={t.bqr_merchant_id} />
+            </FieldGroup>
+          )}
 
           {/* UPI reference — only when payment is UPI */}
           {isUpi && (
@@ -562,15 +582,21 @@ export default function TicketDataPage() {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Ticket Data');
     ws.columns = [
+      { header: 'Company',         key: 'company_name',          width: 20 },
       { header: 'Palmtec ID',      key: 'palmtec_id',            width: 14 },
-      { header: 'Trip Number',     key: 'trip_number',           width: 14 },
+      { header: 'Trip No',         key: 'trip_no',               width: 14 },
+      { header: 'Schedule No',     key: 'schedule_no',           width: 14 },
       { header: 'Ticket Number',   key: 'ticket_number',         width: 16 },
+      { header: 'Unique Code',     key: 'unique_code',           width: 30 },
       { header: 'Date',            key: 'formatted_ticket_date', width: 14 },
       { header: 'Time',            key: 'ticket_time',           width: 12 },
+      { header: 'Trip Start Date', key: 'trip_start_date',       width: 16 },
+      { header: 'Trip Start Time', key: 'trip_start_time',       width: 16 },
       { header: 'Route Code',      key: 'route_code',            width: 14 },
-      { header: 'From Stage',      key: 'from_stage',            width: 18 },
-      { header: 'To Stage',        key: 'to_stage',              width: 18 },
+      { header: 'From Stage',      key: 'from_stage_name',       width: 18 },
+      { header: 'To Stage',        key: 'to_stage_name',         width: 18 },
       { header: 'Total Tickets',   key: 'total_tickets',         width: 14 },
+      { header: 'Passenger Count', key: 'passenger_count',       width: 14 },
       { header: 'Amount',          key: 'ticket_amount',         width: 14 },
       { header: 'Payment Mode',    key: 'ticket_status',         width: 14 },
       { header: 'Ticket Type',     key: 'ticket_type_display',   width: 14 },
@@ -581,12 +607,16 @@ export default function TicketDataPage() {
       { header: 'Luggage Count',   key: 'lugg_count',            width: 14 },
       { header: 'Ladies Count',    key: 'ladies_count',          width: 14 },
       { header: 'Senior Count',    key: 'senior_count',          width: 14 },
+      { header: 'Full Amount',     key: 'full_total_amount',     width: 14 },
+      { header: 'Student Amount',  key: 'st_total_amount',       width: 14 },
       { header: 'Luggage Amount',  key: 'lugg_amount',           width: 14 },
       { header: 'Adjust Amount',   key: 'adjust_amount',         width: 14 },
       { header: 'Warrant Amount',  key: 'warrant_amount',        width: 14 },
       { header: 'Refund Amount',   key: 'refund_amount',         width: 14 },
       { header: 'Transaction ID',  key: 'transaction_id',        width: 22 },
       { header: 'Reference No',    key: 'reference_number',      width: 20 },
+      { header: 'BQR Merchant ID', key: 'bqr_merchant_id',       width: 22 },
+      { header: 'Battery %',       key: 'battery_percentage',    width: 12 },
       { header: 'Pass ID',         key: 'pass_id',               width: 18 },
       { header: 'Refund Status',   key: 'refund_status',         width: 14 },
     ];

@@ -329,6 +329,21 @@ function ScheduleDetailModal({ schedule: s, onClose }) {
             </div>
           </div>
 
+          {/* Identity */}
+          <FieldGroup title="Identity" columns={3}>
+            <FieldBlock label="Company"          value={s.company_name} />
+            <FieldBlock label="Open Unique Code"  value={s.open_unique_code  || '—'} />
+            <FieldBlock label="Close Unique Code" value={s.close_unique_code || '—'} />
+          </FieldGroup>
+
+          {/* Ghost / auto-opened warning */}
+          {s.auto_opened && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700 flex items-start gap-2">
+              <span className="font-semibold shrink-0">⚠ Auto-opened:</span>
+              <span>{s.ghost_note || 'Open signal was missed; record created from close signal.'}</span>
+            </div>
+          )}
+
           {/* Vehicle & Crew */}
           <FieldGroup title="Vehicle & Crew" columns={2}>
             <FieldBlock label="Palmtec Device" value={s.palmtec_id} />
@@ -338,7 +353,7 @@ function ScheduleDetailModal({ schedule: s, onClose }) {
           </FieldGroup>
 
           {/* Passenger breakdown */}
-          <FieldGroup title="Passenger Breakdown" columns={4}>
+          <FieldGroup title="Passenger Breakdown (Cash)" columns={4}>
             <FieldBlock label="Full"     value={s.full_count} />
             <FieldBlock label="Half"     value={s.half_count} />
             <FieldBlock label="Student"  value={s.st_count} />
@@ -348,6 +363,19 @@ function ScheduleDetailModal({ schedule: s, onClose }) {
             <FieldBlock label="Senior"   value={s.senior_count} />
             <FieldBlock label="Adjust"   value={s.adjust_count} />
           </FieldGroup>
+
+          {/* UPI Passenger breakdown */}
+          {(s.upi_full_count || s.upi_half_count || s.upi_physical_count || s.upi_ladies_count || s.upi_senior_count || s.upi_luggage_count || s.upi_st_count) && (
+            <FieldGroup title="Passenger Breakdown (UPI)" columns={4}>
+              <FieldBlock label="Full"     value={s.upi_full_count} />
+              <FieldBlock label="Half"     value={s.upi_half_count} />
+              <FieldBlock label="Student"  value={s.upi_st_count} />
+              <FieldBlock label="Luggage"  value={s.upi_luggage_count} />
+              <FieldBlock label="Physical" value={s.upi_physical_count} />
+              <FieldBlock label="Ladies"   value={s.upi_ladies_count} />
+              <FieldBlock label="Senior"   value={s.upi_senior_count} />
+            </FieldGroup>
+          )}
 
           {/* Collection breakdown */}
           <FieldGroup title="Collection Breakdown" columns={3}>
@@ -601,29 +629,40 @@ export default function ScheduleDataPage() {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Schedule Data');
     ws.columns = [
-      { header: 'Palmtec ID',      key: 'palmtec_id',         width: 14 },
-      { header: 'Schedule No',     key: 'schedule_no',        width: 14 },
-      { header: 'Depot Code',      key: 'depot_code',         width: 14 },
-      { header: 'Route Code',      key: 'route_code',         width: 14 },
-      { header: 'Status',          key: 'status',             width: 12 },
-      { header: 'Bus No',          key: 'bus_no',             width: 16 },
-      { header: 'Driver',          key: 'driver',             width: 18 },
-      { header: 'Conductor',       key: 'conductor',          width: 18 },
-      { header: 'Start DateTime',  key: 'start_datetime',     width: 20 },
-      { header: 'End DateTime',    key: 'end_datetime',       width: 20 },
-      { header: 'Battery Start',   key: 'battery_start',      width: 14 },
-      { header: 'Battery End',     key: 'battery_end',        width: 14 },
-      { header: 'Trips Count',     key: 'trips_count',        width: 14 },
-      { header: 'Total Tickets',   key: 'total_tickets',      width: 14 },
-      { header: 'UPI Collection',  key: 'upi_total_collection', width: 16 },
-      { header: 'Total Collection',key: 'total_collection',   width: 16 },
-      { header: 'Full Count',      key: 'full_count',         width: 12 },
-      { header: 'Half Count',      key: 'half_count',         width: 12 },
-      { header: 'Student Count',   key: 'st_count',           width: 14 },
-      { header: 'Physical Count',  key: 'physical_count',     width: 14 },
-      { header: 'Ladies Count',    key: 'ladies_count',       width: 14 },
-      { header: 'Senior Count',    key: 'senior_count',       width: 14 },
-      { header: 'Luggage Count',   key: 'luggage_count',      width: 14 },
+      { header: 'Company',            key: 'company_name',          width: 20 },
+      { header: 'Palmtec ID',         key: 'palmtec_id',            width: 14 },
+      { header: 'Schedule No',        key: 'schedule_no',           width: 14 },
+      { header: 'Depot Code',         key: 'depot_code',            width: 14 },
+      { header: 'Route Code',         key: 'route_code',            width: 14 },
+      { header: 'Status',             key: 'status',                width: 12 },
+      { header: 'Auto Opened',        key: 'auto_opened',           width: 12 },
+      { header: 'Bus No',             key: 'bus_no',                width: 16 },
+      { header: 'Driver',             key: 'driver',                width: 18 },
+      { header: 'Conductor',          key: 'conductor',             width: 18 },
+      { header: 'Start DateTime',     key: 'start_datetime',        width: 20 },
+      { header: 'End DateTime',       key: 'end_datetime',          width: 20 },
+      { header: 'Battery Start',      key: 'battery_start',         width: 14 },
+      { header: 'Battery End',        key: 'battery_end',           width: 14 },
+      { header: 'Trips Count',        key: 'trips_count',           width: 14 },
+      { header: 'Total Tickets',      key: 'total_tickets',         width: 14 },
+      { header: 'UPI Collection',     key: 'upi_total_collection',  width: 16 },
+      { header: 'Total Collection',   key: 'total_collection',      width: 16 },
+      { header: 'Full Count',         key: 'full_count',            width: 12 },
+      { header: 'Half Count',         key: 'half_count',            width: 12 },
+      { header: 'Student Count',      key: 'st_count',              width: 14 },
+      { header: 'Physical Count',     key: 'physical_count',        width: 14 },
+      { header: 'Ladies Count',       key: 'ladies_count',          width: 14 },
+      { header: 'Senior Count',       key: 'senior_count',          width: 14 },
+      { header: 'Luggage Count',      key: 'luggage_count',         width: 14 },
+      { header: 'UPI Full',           key: 'upi_full_count',        width: 12 },
+      { header: 'UPI Half',           key: 'upi_half_count',        width: 12 },
+      { header: 'UPI Student',        key: 'upi_st_count',          width: 12 },
+      { header: 'UPI Physical',       key: 'upi_physical_count',    width: 14 },
+      { header: 'UPI Ladies',         key: 'upi_ladies_count',      width: 12 },
+      { header: 'UPI Senior',         key: 'upi_senior_count',      width: 12 },
+      { header: 'UPI Luggage',        key: 'upi_luggage_count',     width: 14 },
+      { header: 'Open Unique Code',   key: 'open_unique_code',      width: 32 },
+      { header: 'Close Unique Code',  key: 'close_unique_code',     width: 32 },
     ];
     filteredData.forEach(s => {
       ws.addRow({
@@ -734,18 +773,8 @@ export default function ScheduleDataPage() {
               Date filters modified — click Apply Filters to refresh data
             </div>
           )}
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
-            {[
-              { label: 'Start Date', key: 'startDate', type: 'date' },
-              { label: 'End Date',   key: 'endDate',   type: 'date' },
-            ].map(f => (
-              <div key={f.key} className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-slate-500">{f.label}</label>
-                <Input type="date" max={getTodayDate()} value={filters[f.key]}
-                  onChange={e => setFilters(p => ({ ...p, [f.key]: e.target.value }))}
-                  className="text-sm h-9" />
-              </div>
-            ))}
+          {/* Row 1: dropdown + search filters */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             {[
               { label: 'Palmtec ID', key: 'palmtecId', options: palmtecIds },
               { label: 'Depot Code', key: 'depotCode', options: depotCodes },
@@ -780,15 +809,26 @@ export default function ScheduleDataPage() {
                 <option value="closed">Closed</option>
               </select>
             </div>
-          </div>
-          {/* Schedule No search */}
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-3 mt-3">
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-slate-500">Schedule No</label>
               <Input type="text" placeholder="Search..." value={filters.scheduleNo}
                 onChange={e => handleClientFilter('scheduleNo', e.target.value)}
                 className="text-sm h-9" />
             </div>
+          </div>
+          {/* Row 2: date filters */}
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mt-3 items-end">
+            {[
+              { label: 'Start Date', key: 'startDate' },
+              { label: 'End Date',   key: 'endDate' },
+            ].map(f => (
+              <div key={f.key} className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-slate-500">{f.label}</label>
+                <Input type="date" max={getTodayDate()} value={filters[f.key]}
+                  onChange={e => setFilters(p => ({ ...p, [f.key]: e.target.value }))}
+                  className="text-sm h-9" />
+              </div>
+            ))}
           </div>
           <div className="flex justify-end mt-4 gap-2">
             <Button variant="outline" onClick={clearFilters} className="text-slate-600 text-sm h-9">Clear Filters</Button>
