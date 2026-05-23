@@ -6,7 +6,7 @@
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![Django](https://img.shields.io/badge/django-5.2-green.svg)
 ![React](https://img.shields.io/badge/react-18.0-blue.svg)
-![Version](https://img.shields.io/badge/version-1.2.0-orange.svg)
+![Version](https://img.shields.io/badge/version-1.2.1-orange.svg)
 
 Private multi-tenant platform for bus fleet operations with real-time ticketing, payment reconciliation, and comprehensive reporting.
 
@@ -35,60 +35,79 @@ The **Bus Ticketing Management System** streamlines bus operations for transport
 - Device approval workflow for security
 
 ### 💳 Transaction Processing
-- Real-time ticket data collection from handheld devices
+- Real-time ticket data collection from handheld ETM devices
 - Cash and UPI payment tracking
-- Trip and schedule data reports with financial summaries
-- Passenger breakdown (Full, Half, Student, Senior, Physical, Luggage)
+- Trip, schedule, and ticket data reports with financial summaries
+- Passenger breakdown (Full, Half, Student, Senior, Physical, Luggage, Ladies)
+- Raw payload logging with failed payload retry management
+- Odometer data capture per trip (API and DAT file upload)
 
 ### 💰 Payment Reconciliation
 - **Mosambee Payment Gateway Integration**
 - **Automatic matching** of UPI payments to tickets
 - **Intelligent detection**: Amount mismatches, duplicates, missing tickets
 - **Manager verification workflow**: Verify/Reject/Flag transactions
+- **Payout callback tracking**
 - **Checksum validation** (SHA512) for data integrity
 - **Real-time polling** with 15-second updates
 
 ### 📊 Reporting & Analytics
 - Transaction reports with date/device/depot/payment filters
 - Trip and schedule data reports with route and financial analytics
+- APK reports: duty, bus summary, payment type, farewise, passenger info, trip details, ticket details, stage-wise, expense
+- APK dashboard metrics
 - Excel export (ExcelJS)
 - Dashboard metrics for collections, operations, settlements
 - Summary cards with live KPIs
 - Multiple specialized dashboards (Company, Dealer, Executive)
 
-### 🚌 Master Data Management (NEW v1.1)
+### 🚌 Master Data Management
 - **Bus Types** - Bus category management with company isolation
 - **Vehicles/Buses** - Individual bus tracking and assignment
-- **Routes** - Route definition and management
+- **Routes** - Route definition and management with Excel import
 - **Stages** - Transit stages/hubs per route
 - **Fares** - Dynamic fare tables per route and bus type
 - **MDB Import** - Bulk import from Microsoft Access files
 - **Currencies** - Multi-currency support
 
-### 👥 Crew Management (NEW v1.1)
-- **Employee Types** - Driver, Conductor, Inspector roles
+### 👥 Crew Management
+- **Employee Types** - Driver, Conductor, Inspector, Cleaner roles
 - **Employees** - Staff directory with type classification
 - **Crew Assignments** - Dynamic trip-wise crew scheduling
+- **Inspector Details** - Inspector check records during trips
 
-### 🏢 Dealer & Executive Management (NEW v1.1, Enhanced v1.2)
-- **Dealer Management** - Restructured dealer registration flow with improved data validation
-- **Dealer Mappings** - Enhanced mapping system with better access control
+### 💸 Expense Management
+- **Expense Master** - Expense category codes imported via MDB or managed manually
+- **Expense Records** - Trip-level expense tracking from ETM devices
+- **Expense DAT Upload** - Batch upload of expense DAT files from devices
+- **Expense Reports** - Expense summary and breakdown via APK reports
+
+### 🔧 Device Management
+- **Device Registry** - ETM device registration with company/dealer assignment
+- **Device Approvals** - Secure device-to-user binding workflow
+- **Device Sync** - On-demand master data files (routes, crew, vehicles, settings, expenses) served to devices
+- **Failed Payload Retry** - View and requeue failed device data payloads
+
+### 🏢 Dealer & Executive Management
+- **Dealer Management** - Dealer registration with improved data validation
+- **Dealer Mappings** - Dealer-to-company association management
 - **Executive Mappings** - Executive territory management with granular permissions
 - **Specialized Dashboards** - Role-specific views with transaction visibility
 - **User Access Control** - Granular permission system for dealer and executive roles
 
-### 🏢 Operational Management (NEW v1.1, Enhanced v1.2)
+### 🏢 Operational Management
 - **Depot Management** - Transit hub/depot configuration
-- **Settings Management** - System and company-level configurations
-- **License Allocation & Management** - Improved license allocation workflow and company license lifecycle
-- **Company Registration Flow** - Restructured company registration with enhanced validation and approval process
+- **Settings Management** - System and company-level configurations with device settings profiles
+- **License Allocation & Management** - License lifecycle management with allocation workflow
+- **Company Registration Flow** - Enhanced validation and approval process
 
 ### 🔐 Security
 - JWT authentication with HTTP-only cookies
 - Auto token refresh on expiration
-- Checksum validation for payment data
+- Checksum validation (SHA512) for payment and device data
 - Role-based UI rendering
 - Device authentication & approval workflow
+- Company/dealer cascade deactivation via signals
 
 ---
 
@@ -98,11 +117,10 @@ The **Bus Ticketing Management System** streamlines bus operations for transport
 - Django 5.2 + Django REST Framework
 - MySQL 8.0+ with timezone support (Asia/Kolkata)
 - JWT Authentication (30-min access, 7-day refresh)
-- Django Signals for auto-reconciliation
+- Django Signals for auto-reconciliation and cascading logic
 - **Celery + Redis** for async task processing
 - **MDB Parser** for bulk data import from Access files
 - **Flower** for Celery task monitoring
-- **APK Reporting** - Comprehensive reporting system for mobile device data with advanced filtering
 
 **Frontend**
 - React 18 with Vite
@@ -128,11 +146,12 @@ The **Bus Ticketing Management System** streamlines bus operations for transport
 
 ### Key Data Flow
 
-1. **Ticket Transactions**: Devices send pipe-delimited data via GET
-2. **Trip Close**: Aggregated trip summaries posted by devices
-3. **Payment Gateway**: Mosambee POSTs UPI transaction data
+1. **Ticket Transactions**: Devices send pipe-delimited data via GET → stored as RawDataLog → Celery parses to TransactionData
+2. **Trip/Schedule Lifecycle**: Open and close payloads merged into TripData / ScheduleData
+3. **Payment Gateway**: Mosambee POSTs UPI transaction data → stored as MosambeeTransaction
 4. **Auto-Reconciliation**: Django signal matches payments to tickets
 5. **Manager Verification**: Manual review before settlement
+6. **Device Sync**: Devices fetch route, crew, vehicle, settings, and expense files built from current DB state
 
 ---
 
@@ -220,7 +239,7 @@ PRODUCT_AUTH_ENDPOINT=/ProductAuthentication
 MOSAMBEE_SALT=your-mosambee-salt-key
 
 # App Info
-APP_VERSION=1.2.0
+APP_VERSION=1.2.1
 PROJECT_NAME=Bus Ticketing System
 ```
 
@@ -274,7 +293,32 @@ POST /device-approvals/{id}/approve/
 POST /device-approvals/{id}/revoke/
 ```
 
-**Master Data - Transport (NEW)**
+**Device Registry**
+```http
+GET  /device-registry/
+POST /device-registry/upload/
+GET  /device-registry/summary/
+POST /device-registry/{id}/assign-dealer/
+POST /device-registry/{id}/assign-company/
+POST /device-registry/bulk-assign/
+```
+
+**Device Sync (ETM File Endpoints)**
+```http
+GET /getETMDeviceVersion/
+GET /getRoutesList/
+GET /getSettingsFile/
+GET /getCrewFile/
+GET /getVehiclesFile/
+GET /getExpensesFile/
+GET /getRouteLstFile/
+GET /getStageLstFile/
+GET /getLanguageDatFile/
+GET /getRteDatFile/
+GET /getCurrencyFile/
+```
+
+**Master Data - Transport**
 ```http
 GET  /masterdata/bus-types/
 POST /masterdata/bus-types/create/
@@ -285,6 +329,7 @@ PUT  /masterdata/stages/update/{id}/
 GET  /masterdata/routes/
 POST /masterdata/routes/create/
 PUT  /masterdata/routes/update/{id}/
+GET  /masterdata/routes/{id}/
 GET  /masterdata/vehicles/
 POST /masterdata/vehicles/create/
 PUT  /masterdata/vehicles/update/{id}/
@@ -295,7 +340,7 @@ GET  /masterdata/dropdowns/stages/
 GET  /masterdata/dropdowns/vehicles/
 ```
 
-**Master Data - Crew (NEW)**
+**Master Data - Crew**
 ```http
 GET  /masterdata/employee-types/
 POST /masterdata/employee-types/create/
@@ -311,15 +356,19 @@ GET  /masterdata/dropdowns/employee-types/
 GET  /masterdata/dropdowns/employees/
 ```
 
-**Operational Management (NEW)**
+**Master Data - Settings & Currencies**
 ```http
 GET  /masterdata/currencies/
 POST /masterdata/currencies/create/
 PUT  /masterdata/currencies/update/{id}/
 GET  /masterdata/settings/
+GET  /masterdata/device-settings/
+GET  /masterdata/settings-profiles/
+POST /masterdata/settings-profiles/create/
+PUT  /masterdata/settings-profiles/update/{id}/
 ```
 
-**Dealer & Executive Management (NEW)**
+**Dealer & Executive Management**
 ```http
 GET  /dealers/
 POST /create-dealer/
@@ -337,26 +386,65 @@ GET  /executive-dashboard/
 **Transaction Data (Device Endpoints)**
 ```http
 GET /getTicket?fn={pipe_delimited_data}
+GET /getTripOpen?fn={pipe_delimited_data}
 GET /getTripClose?fn={pipe_delimited_data}
+GET /getTripCloseSummary?fn={pipe_delimited_data}
+GET /getScheduleOpen?fn={pipe_delimited_data}
+GET /getScheduleClose?fn={pipe_delimited_data}
+GET /getScheduleCloseSummary?fn={pipe_delimited_data}
+GET /getOdometerDetails?fn={pipe_delimited_data}
+GET /getExpenseDetails?fn={pipe_delimited_data}
 ```
 
-**Reports (with Polling Support)**
+**Reports (Web)**
 ```http
 GET /get_all_transaction_data?from_date={date}&to_date={date}&since={timestamp}
-GET /get_all_trip_close_data?from_date={date}&to_date={date}&since={timestamp}
+GET /get_all_trip_data?from_date={date}&to_date={date}&since={timestamp}
+GET /get_all_schedule_data?from_date={date}&to_date={date}&since={timestamp}
+```
+
+**APK Reports**
+```http
+GET /apk/duty-report/
+GET /apk/bus-summary-report/
+GET /apk/payment-type-report/
+GET /apk/farewise-report/
+GET /apk/passenger-info/
+GET /apk/trip-details/
+GET /apk/ticket-details/
+GET /apk/expense-report/
+GET /apk/stage-wise-report/
+GET /apk/dashboard/
+```
+
+**APK File Uploads**
+```http
+POST /apk/upload-odometer-dat/
+POST /apk/upload-expense-dat/
 ```
 
 **Settlements & Payments**
 ```http
 POST /postSettlementDetails/           # Mosambee webhook
+POST /postPayoutCallback/              # Mosambee payout callback
 GET  /get_settlement_data?from_date={}&to_date={}
-POST /verify_settlement/                # Manager action
+GET  /get_payout_data?from_date={}&to_date={}
+POST /verify_settlement/               # Manager action
 GET  /get_settlement_summary?from_date={}&to_date={}
 ```
 
-**Data Import (NEW)**
+**Failed Payloads**
 ```http
-POST /import-mdb/  # MDB file upload & bulk import
+GET  /failed-payloads/
+POST /failed-payloads/{id}/retry/
+```
+
+**Data Import**
+```http
+POST /import-mdb/                      # MDB file upload & bulk import
+POST /import-routes/validate/          # Excel route import validation
+POST /import-routes/confirm/           # Excel route import confirmation
+GET  /import-routes/template/          # Download import template
 ```
 
 ### Device Data Format
@@ -451,31 +539,44 @@ bus-ticketing-system/
 │   │   └── settings.py              # Django config (Timezone: Asia/Kolkata)
 │   ├── TicketAppB/
 │   │   ├── models/
-│   │   │   ├── auth.py              # CustomUser, UserDevice Mapping
-│   │   │   ├── company.py           # Company, Depot, CustomUser
-│   │   │   ├── master_data.py       # Bus Types, Routes, Stages, Fares, Employees, Currency
-│   │   │   ├── operations.py        # Crew Assignments, Expenses
-│   │   │   ├── transactions.py      # TransactionData, TripCloseData
-│   │   │   ├── payments.py          # MosambeeTransaction, Settlement
+│   │   │   ├── auth.py              # CustomUser, UserDeviceMapping
+│   │   │   ├── company.py           # Company, Depot, Dealer, ETMDevice, mappings
+│   │   │   ├── master_data.py       # BusType, Route, Stage, Fare, Vehicle, Employee, Currency, Settings
+│   │   │   ├── operations.py        # CrewAssignment, ExpenseMaster, Expense, InspectorDetails
+│   │   │   ├── transactions.py      # RawDataLog, TransactionData, TripData, ScheduleData, OdometerData, ExpenseData
+│   │   │   ├── payments.py          # MosambeeTransaction, MosambeePayoutCallback
 │   │   │   └── managers.py          # Custom QuerySet managers
 │   │   ├── serializers.py           # DRF serializers
-│   │   ├── signals.py               # Auto-reconciliation logic
-│   │   ├── tasks.py                 # Celery async tasks
+│   │   ├── signals.py               # Auto-reconciliation, cascade deactivation, route sync
+│   │   ├── tasks.py                 # Celery async tasks (payload processing, cleanup)
 │   │   ├── views/
-│   │   │   ├── auth_views.py        # Login, signup, token refresh
-│   │   │   ├── company_views.py     # Company & license management
-│   │   │   ├── user_views.py        # User CRUD
-│   │   │   ├── depot_views.py       # Depot management
-│   │   │   ├── data_views.py        # Device data ingestion + polling
-│   │   │   ├── mosambee_views.py    # Settlement & reconciliation
-│   │   │   ├── transport_views.py   # Bus types, Routes, Stages, Vehicles, Fares
-│   │   │   ├── crew_views.py        # Employee types, Employees, Crew assignments
-│   │   │   ├── dealer_views.py      # Dealer & mapping management
-│   │   │   ├── executive_views.py   # Executive territory management
-│   │   │   ├── device_approval_views.py  # Device security workflow
-│   │   │   ├── mdb_views.py         # MDB file import service
-│   │   │   ├── settings_views.py    # Global settings
-│   │   │   └── utils.py             # Helper functions
+│   │   │   ├── web/
+│   │   │   │   ├── auth.py              # Login, signup, token refresh
+│   │   │   │   ├── company.py           # Company & license management
+│   │   │   │   ├── users.py             # User CRUD
+│   │   │   │   ├── depots.py            # Depot management
+│   │   │   │   ├── dealers.py           # Dealer & mapping management
+│   │   │   │   ├── executives.py        # Executive territory management
+│   │   │   │   ├── device_approvals.py  # Device security workflow
+│   │   │   │   ├── device_registry.py   # Device registration & assignment
+│   │   │   │   ├── ticket_reports.py    # Transaction, trip, schedule reports
+│   │   │   │   ├── settlements.py       # Settlement & payout management
+│   │   │   │   ├── raw_data_logs.py     # Failed payload management & retry
+│   │   │   │   ├── masterdata/
+│   │   │   │   │   ├── transport.py     # Bus types, routes, stages, vehicles, fares
+│   │   │   │   │   ├── crew.py          # Employee types, employees, crew assignments
+│   │   │   │   │   └── settings.py      # Currencies, system settings, device profiles
+│   │   │   │   └── imports/
+│   │   │   │       ├── mdb.py           # MDB file import service
+│   │   │   │       └── routes.py        # Excel route import
+│   │   │   ├── palmtec/
+│   │   │   │   ├── data_post.py         # Device data ingestion (ticket, trip, schedule, odometer, expense)
+│   │   │   │   └── master_send.py       # Device sync file endpoints
+│   │   │   ├── webhooks/
+│   │   │   │   └── mosambee.py          # Mosambee payment & payout webhooks
+│   │   │   └── apk/
+│   │   │       ├── reports.py           # APK report endpoints
+│   │   │       └── apk_upload.py        # DAT file uploads (odometer, expense)
 │   │   ├── migrations/              # Database versioning
 │   │   └── apps.py                  # Signal registration
 │   └── .env
@@ -483,37 +584,51 @@ bus-ticketing-system/
 ├── Frontend/
 │   ├── src/
 │   │   ├── components/
+│   │   │   ├── ui/                  # Button, Card, Input, Dialog, KPI Card, Charts
 │   │   │   ├── ProtectedRoute.jsx   # Auth guard
+│   │   │   ├── Sidebar.jsx          # Navigation sidebar
+│   │   │   ├── RoleBasedHome.jsx    # Role-based route selector
 │   │   │   └── ...
 │   │   ├── pages/
-│   │   │   ├── Login.jsx
-│   │   │   ├── Signup.jsx
-│   │   │   ├── AdminHome.jsx        # Super admin dashboard
-│   │   │   ├── CompanyDashboard.jsx # Company admin dashboard
-│   │   │   ├── DepotDashboard.jsx   # Depot view
-│   │   │   ├── UserHome.jsx         # Regular user dashboard
-│   │   │   ├── DealerDashboard.jsx  # Dealer view
-│   │   │   ├── ExecutiveDashboard.jsx # Executive view
-│   │   │   ├── CompanyListing.jsx
-│   │   │   ├── DepotListing.jsx
-│   │   │   ├── UserListing.jsx
-│   │   │   ├── BusTypeListing.jsx
-│   │   │   ├── VehicleListing.jsx
-│   │   │   ├── RouteListing.jsx
-│   │   │   ├── StageListing.jsx
-│   │   │   ├── FareEditor.jsx       # Dynamic fare table editor
-│   │   │   ├── EmployeeTypeListing.jsx
-│   │   │   ├── EmployeeListing.jsx
-│   │   │   ├── CrewAssignmentListing.jsx
-│   │   │   ├── CurrencyListing.jsx
-│   │   │   ├── DealerManagement.jsx
-│   │   │   ├── DeviceApprovals.jsx  # Device security workflow
-│   │   │   ├── MdbImport.jsx        # Master data import UI
-│   │   │   ├── TicketReport.jsx     # Transaction reports
-│   │   │   ├── TripcloseReport.jsx  # Trip reports
-│   │   │   ├── SettlementPage.jsx   # Payment settlement UI
-│   │   │   ├── SettingsPage.jsx     # Global settings
-│   │   │   └── ...
+│   │   │   ├── auth/
+│   │   │   │   ├── Login.jsx
+│   │   │   │   └── Signup.jsx
+│   │   │   ├── dashboards/
+│   │   │   │   ├── AdminHome.jsx        # Super admin dashboard
+│   │   │   │   ├── CompanyDashboard.jsx # Company admin dashboard
+│   │   │   │   ├── DealerDashboard.jsx  # Dealer view
+│   │   │   │   ├── ExecutiveDashboard.jsx # Executive view
+│   │   │   │   └── UserHome.jsx         # Role-based home router
+│   │   │   ├── listings/
+│   │   │   │   ├── CompanyListing.jsx
+│   │   │   │   ├── DepotListing.jsx
+│   │   │   │   ├── DealerListing.jsx
+│   │   │   │   ├── UserListing.jsx
+│   │   │   │   ├── RouteListing.jsx
+│   │   │   │   ├── CurrencyListing.jsx
+│   │   │   │   ├── EmployeeCombined.jsx
+│   │   │   │   └── VehicleCombined.jsx
+│   │   │   ├── operations/
+│   │   │   │   ├── DealerManagement.jsx
+│   │   │   │   ├── DeviceRegistry.jsx
+│   │   │   │   ├── DeviceApprovals.jsx
+│   │   │   │   ├── CrewAssignmentListing.jsx
+│   │   │   │   ├── FareEditor.jsx       # Dynamic fare table editor
+│   │   │   │   ├── StageEditor.jsx
+│   │   │   │   └── ExpenseMasterPage.jsx
+│   │   │   ├── reports/
+│   │   │   │   ├── TicketDataPage.jsx
+│   │   │   │   ├── TripDataPage.jsx
+│   │   │   │   ├── ScheduleDataPage.jsx
+│   │   │   │   └── settlements/
+│   │   │   │       ├── SettlementsLayout.jsx
+│   │   │   │       ├── TransactionPosting.jsx
+│   │   │   │       └── PayoutPosting.jsx
+│   │   │   └── tools/
+│   │   │       ├── MdbImport.jsx
+│   │   │       ├── DeviceDownload.jsx
+│   │   │       ├── SettingsPage.jsx
+│   │   │       └── FailedPayloadsPage.jsx
 │   │   └── main.jsx                 # Router with 404 handling
 │   └── .env
 │
@@ -524,45 +639,58 @@ bus-ticketing-system/
 
 ## 🗺️ Roadmap
 
-### ✅ Completed (v1.0-v1.1)
+### ✅ Completed (v1.0 - v1.1)
 
 - [x] Depot management
 - [x] Transaction & trip data collection
 - [x] Reports with filters & Excel export
-- [x] **Payment reconciliation (Mosambee)**
-- [x] **Auto-matching with signals**
-- [x] **Settlement verification UI**
-- [x] **Cursor-based polling (since parameter)**
-- [x] **404 handler with auto-redirect**
-- [x] **Master data models** (Bus Types, Routes, Stages, Vehicles, Fares)
-- [x] **Master data CRUD interfaces** (all listings & editors)
-- [x] **Crew management** (Employee Types, Employees, Crew Assignments)
-- [x] **MDB import service** (bulk data import from Access files)
-- [x] **Dealer & Executive mappings** (multi-party role support)
-- [x] **Device approval workflow** (secure device authentication)
-- [x] **Currency management**
-- [x] **Settings management**
-- [x] **Multiple specialized dashboards** (Admin, Company, Dealer, Executive)
+- [x] Payment reconciliation (Mosambee)
+- [x] Auto-matching with signals
+- [x] Settlement verification UI
+- [x] Cursor-based polling (since parameter)
+- [x] 404 handler with auto-redirect
+- [x] Master data models (Bus Types, Routes, Stages, Vehicles, Fares)
+- [x] Master data CRUD interfaces (all listings & editors)
+- [x] Crew management (Employee Types, Employees, Crew Assignments)
+- [x] MDB import service (bulk data import from Access files)
+- [x] Dealer & Executive mappings (multi-party role support)
+- [x] Device approval workflow (secure device authentication)
+- [x] Currency management
+- [x] Settings management
+- [x] Multiple specialized dashboards (Admin, Company, Dealer, Executive)
 
-### ✅ Completed (v1.2 - Current)
+### ✅ Completed (v1.2)
 
-- [x] **Company & Dealer Registration Flow Restructure** - Enhanced registration workflow with improved validation
-- [x] **License Allocation & Management** - Comprehensive license lifecycle management
-- [x] **User Access Control Enhancements** - Granular permission system for multi-role users
-- [x] **APK Report Completion** - Full reporting suite for mobile device data with advanced filtering
-- [x] **Expense Management** - Expense tracking and categorization (pending full documentation)
+- [x] Company & Dealer Registration Flow Restructure
+- [x] License Allocation & Management
+- [x] User Access Control Enhancements
+- [x] APK Report suite (duty, bus summary, payment type, farewise, passenger info, trip details, ticket details, stage-wise, expense, dashboard)
+- [x] Expense Management (ExpenseMaster, Expense records, DAT file uploads, expense reports)
+- [x] Payout callback tracking (MosambeePayoutCallback)
+- [x] Failed payload management & retry
+- [x] Device Registry with bulk assignment
+- [x] Device sync endpoints (routes, crew, vehicles, settings, expenses served to ETM devices)
+- [x] Raw data logging pipeline (RawDataLog → Celery → parsed models)
+- [x] Odometer data capture (API ingestion and DAT file upload)
+- [x] Schedule data tracking (schedule open/close merged into ScheduleData)
+- [x] Route Excel import (validate, confirm, template download)
+- [x] Inspector details tracking
 
-### 🚧 Upcoming (v1.3+)
+### ✅ Completed (v1.2.1 - Current)
 
-- [ ] Advanced expense tracking and reconciliation
+- [x] APK dashboard endpoint
+- [x] Stage-wise and expense APK report endpoints
+
+### 🚧 Pending
+
 - [ ] Real-time GPS tracking integration
 
 ---
 
 ## 📊 Project Status
 
-**Current Version**: 1.2  
-**Status**: Active Development  
+**Current Version**: 1.2.1
+**Status**: Active Development
 **Last Updated**: May 2026
 
 ---
@@ -580,14 +708,9 @@ bus-ticketing-system/
 - **Settings Management**: Global system and company-level configurations
 - **Specialized Dashboards**: Admin, Company, Dealer, Executive views
 
-### Dashboard Enhancements
-- Multiple role-based dashboard views (Admin, Company, Dealer, Executive)
-- Dealer-specific transaction visibility
-- Executive territory management and analytics
-
 ### Technical Updates
 - Modular model structure (auth.py, company.py, master_data.py, operations.py, transactions.py, payments.py)
-- Extended view layer (15+ view modules for different functional areas)
+- Extended view layer organized by functional area
 - Comprehensive API for master data CRUD operations
 - Enhanced device security with approval workflow
 - MDB file parsing and bulk import engine
@@ -597,24 +720,41 @@ bus-ticketing-system/
 ## 🔧 Key Changes in v1.2
 
 ### Restructured Flows
-- **Company Registration**: Enhanced validation, streamlined approval process with improved error handling
-- **Dealer Registration**: Restructured registration workflow with better data consistency and validation rules
-- **License Management**: Complete lifecycle management - allocation, validation, renewal tracking, expiration handling
+- **Company Registration**: Enhanced validation, streamlined approval process
+- **Dealer Registration**: Restructured workflow with better data consistency
+- **License Management**: Complete lifecycle - allocation, validation, renewal, expiration
+
+### New Features
+- **Expense Management**: Full expense pipeline from device to report
+- **APK Reports**: Complete suite of 10 report types for mobile device data
+- **Device Registry**: ETM device registration with company/dealer bulk assignment
+- **Device Sync**: On-demand master data file serving to ETM devices
+- **Raw Data Pipeline**: RawDataLog → Celery task processing → parsed models
+- **Odometer Tracking**: Per-trip odometer data via API and DAT uploads
+- **Schedule Data**: Full schedule open/close lifecycle tracking
+- **Failed Payload Retry**: View and requeue failed device payloads
+- **Route Excel Import**: Validate, preview, and confirm route imports from Excel
+- **Payout Tracking**: Mosambee payout callback ingestion and reporting
+- **Inspector Details**: Inspector check record tracking
 
 ### Enhanced Security & Access Control
 - **Granular User Permissions**: Fine-grained access control for dealer and executive roles
-- **User-Role Mapping**: Improved multi-role user assignment with proper permission inheritance
-- **Access Control Policies**: Better enforcement of company data isolation across user roles
-
-### Reporting Improvements
-- **APK Report Completion**: Comprehensive reporting system for mobile device data
-- **Advanced Filtering**: Multi-criteria filtering for transaction and trip reports
-- **Export Capabilities**: Enhanced Excel export with formatted headers and data validation
+- **Cascade Deactivation**: Company/dealer deactivation propagates to all associated users via signals
+- **Access Control Policies**: Better enforcement of company data isolation
 
 ### Technical Updates
-- Improved middleware for license validation and user access control
-- Enhanced signal handlers for better data reconciliation
-- Optimized query performance for multi-tenant operations
+- Celery tasks for all device payload types (ticket, trip, schedule, odometer, expense)
+- Stale payload cleanup and archive tasks
+- Django signals for cascade logic and fare/route name sync
+- Modular view structure under `views/web/`, `views/palmtec/`, `views/webhooks/`, `views/apk/`
+
+---
+
+## 🔧 Key Changes in v1.2.1
+
+- APK dashboard metrics endpoint
+- Stage-wise revenue report endpoint
+- Expense report endpoint
 
 ---
 
