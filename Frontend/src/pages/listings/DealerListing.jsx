@@ -1,13 +1,34 @@
-import { useState, useEffect, useCallback } from 'react';
-import Modal from '../../components/Modal';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import TableSkeleton from '../../components/TableSkeleton';
 import api, { BASE_URL } from '../../assets/js/axiosConfig';
 import statesDistricts from '../../assets/json/indiaStatesDistricts.json';
 import {
-  Handshake, CheckCircle2, CircleDot,
+  Handshake, CheckCircle2, CircleDot, Search,
   Phone, MapPin, IdCard, ArrowLeft, AlertCircle,
-  Plus, Mail, KeyRound, User, Hash,
+  Plus, Mail, KeyRound, User, Hash, Eye, Edit, X,
 } from 'lucide-react';
+
+// ── ModalWrapper ───────────────────────────────────────────────────────────────
+
+function ModalWrapper({ open, onClose, title, icon: Icon, width = 'max-w-2xl', children }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+      <div className={`bg-white rounded-2xl shadow-2xl w-full ${width} max-h-[88vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
+          <div className="flex items-center gap-2 text-slate-800">
+            {Icon && <Icon size={16} className="text-slate-600" />}
+            <h3 className="font-semibold text-slate-900">{title}</h3>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="px-6 py-5">{children}</div>
+      </div>
+    </div>
+  );
+}
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
@@ -92,7 +113,7 @@ function DealerPreview({ form }) {
           </div>
           <div className="flex items-start gap-2 text-slate-500">
             <MapPin size={11} className="mt-0.5 shrink-0" />
-            <span className="line-clamp-2">{[form.city, form.district, form.state].filter(Boolean).join(', ') || '—'}</span>
+            <span className="line-clamp-2">{[form.address_2, form.city, form.district, form.state].filter(Boolean).join(', ') || '—'}</span>
           </div>
           {form.contact_number && (
             <div className="flex items-center gap-2 text-slate-500">
@@ -140,16 +161,24 @@ function ChecklistCard({ items }) {
   );
 }
 
-function InfoCard() {
+function PoolSummaryCard() {
   return (
     <div className="rounded-2xl bg-slate-900 text-white p-5 relative overflow-hidden">
-      <div className="absolute -right-4 -top-4 opacity-10">
-        <Handshake size={80} color="#fff" />
+      <div className="absolute -right-6 -bottom-6 opacity-10">
+        <KeyRound size={88} color="#fff" />
       </div>
-      <p className="text-[10px] uppercase tracking-widest text-white/50 font-semibold">Note</p>
-      <p className="text-sm mt-1.5 leading-relaxed text-white/90">
-        The dealer admin can sign in immediately and begin onboarding companies in their territory.
-      </p>
+      <p className="text-[10px] uppercase tracking-widest text-white/50 font-semibold">License Pool</p>
+      <p className="text-xs text-white/40 mt-0.5">Allocated by license server on registration</p>
+      <div className="mt-4 pt-4 border-t border-white/10 space-y-1.5 text-xs text-white/60">
+        <div className="flex items-center justify-between">
+          <span className="flex items-center gap-1.5"><Hash size={11} /> ETM Devices</span>
+          <span className="text-white/30 italic text-[10px]">pending</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="flex items-center gap-1.5"><User size={11} /> Android</span>
+          <span className="text-white/30 italic text-[10px]">pending</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -158,7 +187,7 @@ function InfoCard() {
 const EMPTY = {
   dealer_code: '', dealer_name: '', contact_person: '', contact_number: '',
   email: '', gst_number: '', is_active: true,
-  address: '', city: '', state: '', district: '', zip_code: '',
+  address: '', address_2: '', city: '', state: '', district: '', zip_code: '',
   user_username: '', user_email: '', user_password: '',
 };
 
@@ -167,6 +196,7 @@ export default function DealerListing() {
   // ── List state ───────────────────────────────────────────────────────────
   const [dealers, setDealers]   = useState([]);
   const [loading, setLoading]   = useState(true);
+  const [search, setSearch]     = useState('');
 
   // ── Page view: 'list' | 'create' ────────────────────────────────────────
   const [pageView, setPageView] = useState('list');
@@ -213,7 +243,7 @@ export default function DealerListing() {
       const res = await api.post(`${BASE_URL}/create-dealer`, {
         dealer_name: form.dealer_name, email: form.email, dealer_code: form.dealer_code,
         contact_person: form.contact_person, contact_number: form.contact_number,
-        gst_number: form.gst_number, address: form.address, city: form.city,
+        gst_number: form.gst_number, address: form.address, address_2: form.address_2, city: form.city,
         state: form.state, district: form.district, zip_code: form.zip_code,
         is_active: form.is_active,
         user_username: form.user_username, user_email: form.user_email, user_password: form.user_password,
@@ -240,7 +270,7 @@ export default function DealerListing() {
     contact_person: dealer.contact_person || '', contact_number: dealer.contact_number || '',
     email: dealer.email || '', gst_number: dealer.gst_number || '',
     is_active: dealer.is_active ?? true, address: dealer.address || '',
-    city: dealer.city || '', state: dealer.state || '',
+    address_2: dealer.address_2 || '', city: dealer.city || '', state: dealer.state || '',
     district: dealer.district || '', zip_code: dealer.zip_code || '',
     user_username: '', user_email: '', user_password: '',
   });
@@ -265,7 +295,7 @@ export default function DealerListing() {
         dealer_name: modalForm.dealer_name, email: modalForm.email,
         dealer_code: modalForm.dealer_code, contact_person: modalForm.contact_person,
         contact_number: modalForm.contact_number, gst_number: modalForm.gst_number,
-        address: modalForm.address, city: modalForm.city,
+        address: modalForm.address, address_2: modalForm.address_2, city: modalForm.city,
         state: modalForm.state, district: modalForm.district,
         zip_code: modalForm.zip_code, is_active: modalForm.is_active,
       });
@@ -284,62 +314,116 @@ export default function DealerListing() {
     } finally { setModalSubmitting(false); }
   };
 
+  const filteredDealers = useMemo(() => {
+    if (!search.trim()) return dealers;
+    const q = search.toLowerCase();
+    return dealers.filter(d =>
+      d.dealer_name?.toLowerCase().includes(q) ||
+      d.dealer_code?.toLowerCase().includes(q) ||
+      d.email?.toLowerCase().includes(q) ||
+      d.contact_person?.toLowerCase().includes(q)
+    );
+  }, [dealers, search]);
+
   // ══════════════════════════════════════════════════════════════════════════
   // ── LIST VIEW ──────────────────────────────────────────────────────────
   // ══════════════════════════════════════════════════════════════════════════
   if (pageView === 'list') {
     return (
-      <div className="p-6 md:p-10 min-h-screen bg-slate-50">
+      <div className="p-6 md:p-8 min-h-screen bg-slate-50">
 
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-slate-800 tracking-tight">Dealers</h1>
-            <p className="text-slate-500 mt-1">Manage partner dealers and their territories</p>
+        <div className="mb-6">
+          <p className="text-xs text-slate-400 mb-3">Administration <span className="mx-1">›</span> <span className="text-slate-600 font-medium">Dealers</span></p>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-slate-900 text-white flex items-center justify-center shrink-0 shadow-md">
+                <Handshake size={18} color="#fff" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Dealers</h1>
+                <p className="text-sm text-slate-500 mt-0.5">{dealers.length} partner dealers</p>
+              </div>
+            </div>
+            <button
+              onClick={() => { resetCreate(); setPageView('create'); }}
+              className="inline-flex items-center gap-1.5 h-9 px-4 text-sm rounded-lg font-medium bg-slate-900 hover:bg-slate-700 text-white cursor-pointer transition-colors shadow-sm"
+            >
+              <Plus size={14} /> Create Dealer
+            </button>
           </div>
-          <button
-            onClick={() => { resetCreate(); setPageView('create'); }}
-            className="flex items-center gap-2 bg-slate-900 hover:bg-slate-700 text-white px-5 py-2.5 rounded-xl transition-all shadow-sm text-sm font-medium"
-          >
-            <Plus size={15} /> Create Dealer
-          </button>
+        </div>
+
+        {/* Search bar */}
+        <div className="flex items-center gap-3 mb-4">
+          <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm max-w-sm w-full">
+            <Search size={13} className="text-slate-400 shrink-0" />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search by name, code or contact…"
+              className="flex-1 text-sm bg-transparent outline-none text-slate-700 placeholder:text-slate-400"
+            />
+          </div>
+          <span className="text-xs text-slate-400 tabular-nums shrink-0">
+            {filteredDealers.length} result{filteredDealers.length !== 1 ? 's' : ''}
+          </span>
         </div>
 
         {/* Table */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="border border-slate-200 rounded-2xl bg-white shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-slate-50/50 border-b border-slate-200">
-                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Code</th>
-                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Dealer</th>
-                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Contact</th>
-                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Location</th>
-                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Actions</th>
+                <tr className="border-b border-slate-200 bg-slate-50/80">
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Dealer</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Contact</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Location</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
-                  <TableSkeleton columns={['w-16', 'w-36', 'w-24', 'w-32', 'w-16', 'w-16']} />
-                ) : dealers.length === 0 ? (
-                  <tr><td colSpan="6" className="px-6 py-12 text-center text-slate-400">No dealers found.</td></tr>
-                ) : dealers.map(dealer => (
-                  <tr key={dealer.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="px-6 py-4 text-sm font-mono font-semibold text-slate-700">{dealer.dealer_code || '—'}</td>
-                    <td className="px-6 py-4">
-                      <div className="font-semibold text-slate-800">{dealer.dealer_name}</div>
-                      <div className="text-xs text-slate-500">{dealer.email}</div>
+                  <TableSkeleton columns={['w-40', 'w-28', 'w-32', 'w-16', 'w-16']} />
+                ) : filteredDealers.length === 0 ? (
+                  <tr>
+                    <td colSpan="5" className="px-4 py-10 text-center">
+                      <div className="flex flex-col items-center gap-2">
+                        <Handshake size={20} className="text-slate-300" />
+                        <p className="text-sm text-slate-400">{search ? 'No dealers match your search' : 'No dealers found'}</p>
+                      </div>
                     </td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm text-slate-700">{dealer.contact_person}</div>
-                      <div className="text-xs text-slate-500">{dealer.contact_number}</div>
+                  </tr>
+                ) : filteredDealers.map(dealer => (
+                  <tr key={dealer.id} className="group hover:bg-slate-50/60 transition-colors">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shrink-0">
+                          <span className="text-[10px] font-bold text-white leading-none">
+                            {(dealer.dealer_code || 'D').split('-').slice(0, 2).join('-').slice(0, 6)}
+                          </span>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-800 truncate leading-tight">{dealer.dealer_name}</p>
+                          <p className="text-xs text-slate-500 font-mono truncate leading-tight">{dealer.dealer_code || '—'}</p>
+                        </div>
+                      </div>
                     </td>
-                    <td className="px-6 py-4 text-sm text-slate-600">
-                      {[dealer.district, dealer.state].filter(Boolean).join(', ') || '—'}
+                    <td className="px-4 py-3">
+                      <p className="text-sm text-slate-700 leading-tight">{dealer.contact_person}</p>
+                      <p className="text-xs text-slate-500 leading-tight">{dealer.contact_number}</p>
                     </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-xs font-medium border ${
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <MapPin size={11} className="text-slate-400 shrink-0" />
+                        <span className="text-sm text-slate-600 truncate">
+                          {[dealer.district, dealer.state].filter(Boolean).join(', ') || '—'}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium border ${
                         dealer.is_active
                           ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                           : 'bg-slate-50 text-slate-600 border-slate-200'
@@ -348,15 +432,15 @@ export default function DealerListing() {
                         {dealer.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex justify-end gap-1">
-                        <button onClick={() => openView(dealer)}
-                          className="p-2 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors" title="View">
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => openView(dealer)} title="View"
+                          className="p-1.5 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors">
+                          <Eye size={14} />
                         </button>
-                        <button onClick={() => openEdit(dealer)}
-                          className="p-2 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors" title="Edit">
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                        <button onClick={() => openEdit(dealer)} title="Edit"
+                          className="p-1.5 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50 cursor-pointer transition-colors">
+                          <Edit size={14} />
                         </button>
                       </div>
                     </td>
@@ -367,8 +451,80 @@ export default function DealerListing() {
           </div>
         </div>
 
-        {/* View / Edit Modal */}
-        <Modal isOpen={modal !== null} onClose={() => setModal(null)} title={modal === 'view' ? 'Dealer Details' : 'Edit Dealer'}>
+        {/* ── View Modal ─────────────────────────────────────────────── */}
+        <ModalWrapper open={modal === 'view'} onClose={() => setModal(null)} title="Dealer Details" icon={Handshake}>
+          {editingItem && (
+            <div className="space-y-5">
+              {/* Identity card */}
+              <div className="flex items-center gap-4 p-4 rounded-xl bg-slate-50 border border-slate-100">
+                <div className="h-14 w-14 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shrink-0">
+                  <span className="text-sm font-bold text-white">
+                    {(editingItem.dealer_code || 'D').split('-').slice(0, 2).join('-').slice(0, 6)}
+                  </span>
+                </div>
+                <div className="min-w-0">
+                  <p className="font-semibold text-slate-900 text-base leading-tight truncate">{editingItem.dealer_name}</p>
+                  <p className="text-xs text-slate-500 font-mono mt-0.5">{editingItem.dealer_code}</p>
+                  <span className={`inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium border ${
+                    editingItem.is_active
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : 'bg-slate-50 text-slate-500 border-slate-200'
+                  }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${editingItem.is_active ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                    {editingItem.is_active ? 'Active' : 'Inactive'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Info tiles */}
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: 'Contact Person', value: editingItem.contact_person, icon: IdCard },
+                  { label: 'Contact Number', value: editingItem.contact_number ? `+91 ${editingItem.contact_number}` : '—', icon: Phone },
+                  { label: 'Email', value: editingItem.email, icon: Mail },
+                  { label: 'GST Number', value: editingItem.gst_number || '—', icon: Hash },
+                ].map(({ label, value, icon: TileIcon }) => (
+                  <div key={label} className="rounded-xl border border-slate-100 bg-white p-3">
+                    <p className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mb-1">{label}</p>
+                    <div className="flex items-center gap-1.5">
+                      <TileIcon size={12} className="text-slate-400 shrink-0" />
+                      <p className="text-sm text-slate-800 truncate">{value || '—'}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Address */}
+              {(editingItem.address || editingItem.city || editingItem.state) && (
+                <div className="rounded-xl border border-slate-100 bg-white p-3">
+                  <p className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mb-2">Registered Address</p>
+                  <div className="flex items-start gap-2 text-sm text-slate-700">
+                    <MapPin size={13} className="text-slate-400 mt-0.5 shrink-0" />
+                    <span className="leading-relaxed">
+                      {[editingItem.address, editingItem.address_2, editingItem.city, editingItem.district, editingItem.state, editingItem.zip_code]
+                        .filter(Boolean).join(', ')}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Footer */}
+              <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">
+                <button type="button" onClick={() => { openEdit(editingItem); }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">
+                  <Edit size={13} /> Edit
+                </button>
+                <button type="button" onClick={() => setModal(null)}
+                  className="px-4 py-2 text-sm font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-700 transition-colors">
+                  Close
+                </button>
+              </div>
+            </div>
+          )}
+        </ModalWrapper>
+
+        {/* ── Edit Modal ─────────────────────────────────────────────── */}
+        <ModalWrapper open={modal === 'edit'} onClose={() => setModal(null)} title="Edit Dealer" icon={Edit}>
           <form onSubmit={handleEditSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {[
@@ -382,83 +538,78 @@ export default function DealerListing() {
                 <div key={f.name} className="space-y-1">
                   <label className="text-sm font-medium text-slate-700">{f.label}{f.required && <span className="text-red-500 ml-0.5">*</span>}</label>
                   <input type={f.type || 'text'} name={f.name} value={modalForm[f.name] || ''} onChange={handleModalInputChange}
-                    required={f.required} readOnly={modal === 'view'}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 read-only:bg-slate-50" />
+                    required={f.required}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
                 </div>
               ))}
             </div>
 
             <div className="space-y-1">
-              <label className="text-sm font-medium text-slate-700">Address <span className="text-red-500">*</span></label>
+              <label className="text-sm font-medium text-slate-700">Address Line 1 <span className="text-red-500">*</span></label>
               <textarea name="address" value={modalForm.address || ''} onChange={handleModalInputChange}
-                rows={2} required readOnly={modal === 'view'}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 read-only:bg-slate-50" />
+                rows={2} required
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-slate-700">Address Line 2 <span className="text-xs text-slate-400 font-normal ml-1">— Optional</span></label>
+              <textarea name="address_2" value={modalForm.address_2 || ''} onChange={handleModalInputChange}
+                rows={2}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1">
                 <label className="text-sm font-medium text-slate-700">State <span className="text-red-500">*</span></label>
-                {modal === 'view' ? (
-                  <input type="text" value={modalForm.state} readOnly className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50" />
-                ) : (
-                  <select name="state" value={modalForm.state} onChange={handleModalInputChange} required
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white">
-                    <option value="">Select State</option>
-                    {Object.keys(statesDistricts).sort().map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                )}
+                <select name="state" value={modalForm.state} onChange={handleModalInputChange} required
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white">
+                  <option value="">Select State</option>
+                  {Object.keys(statesDistricts).sort().map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
               </div>
               <div className="space-y-1">
                 <label className="text-sm font-medium text-slate-700">District <span className="text-red-500">*</span></label>
-                {modal === 'view' ? (
-                  <input type="text" value={modalForm.district} readOnly className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50" />
-                ) : (
-                  <select name="district" value={modalForm.district} onChange={handleModalInputChange} required
-                    disabled={!modalForm.state}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white disabled:bg-slate-50">
-                    <option value="">Select District</option>
-                    {(statesDistricts[modalForm.state] || []).map(d => <option key={d} value={d}>{d}</option>)}
-                  </select>
-                )}
+                <select name="district" value={modalForm.district} onChange={handleModalInputChange} required
+                  disabled={!modalForm.state}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white disabled:bg-slate-50">
+                  <option value="">Select District</option>
+                  {(statesDistricts[modalForm.state] || []).map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
               </div>
               {[{ label: 'City', name: 'city', required: true }, { label: 'Zip Code', name: 'zip_code', required: true }].map(f => (
                 <div key={f.name} className="space-y-1">
                   <label className="text-sm font-medium text-slate-700">{f.label}{f.required && <span className="text-red-500 ml-0.5">*</span>}</label>
                   <input type="text" name={f.name} value={modalForm[f.name] || ''} onChange={handleModalInputChange}
-                    required={f.required} readOnly={modal === 'view'}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 read-only:bg-slate-50" />
+                    required={f.required}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
                 </div>
               ))}
             </div>
 
-            {modal !== 'view' && (
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input type="checkbox" name="is_active" checked={modalForm.is_active} onChange={handleModalInputChange} className="sr-only" />
-                <div onClick={() => setModalForm(f => ({ ...f, is_active: !f.is_active }))}
-                  className={`relative w-10 h-[22px] rounded-full transition-colors cursor-pointer ${modalForm.is_active ? 'bg-emerald-500' : 'bg-slate-300'}`}>
-                  <span className={`absolute top-0.5 left-0.5 w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${modalForm.is_active ? 'translate-x-[18px]' : ''}`} />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-slate-700">Dealer Status</p>
-                  <p className="text-xs text-slate-500">{modalForm.is_active ? 'Active' : 'Inactive — sign-in disabled'}</p>
-                </div>
-              </label>
-            )}
+            <label className="flex items-center gap-3 cursor-pointer">
+              <div onClick={() => setModalForm(f => ({ ...f, is_active: !f.is_active }))}
+                className={`relative w-10 h-[22px] rounded-full transition-colors cursor-pointer ${modalForm.is_active ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                <span className={`absolute top-0.5 left-0.5 w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${modalForm.is_active ? 'translate-x-[18px]' : ''}`} />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-700">Dealer Status</p>
+                <p className="text-xs text-slate-500">{modalForm.is_active ? 'Active' : 'Inactive — sign-in disabled'}</p>
+              </div>
+            </label>
 
             <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
               <button type="button" onClick={() => setModal(null)}
                 className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">
-                {modal === 'view' ? 'Close' : 'Cancel'}
+                Cancel
               </button>
-              {modal === 'edit' && (
-                <button type="submit" disabled={modalSubmitting}
-                  className="px-4 py-2 text-sm font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-700 disabled:opacity-50 transition-all">
-                  {modalSubmitting ? 'Saving…' : 'Update Dealer'}
-                </button>
-              )}
+              <button type="submit" disabled={modalSubmitting}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-700 disabled:opacity-50 transition-all">
+                {modalSubmitting
+                  ? <><svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Saving…</>
+                  : 'Update Dealer'}
+              </button>
             </div>
           </form>
-        </Modal>
+        </ModalWrapper>
       </div>
     );
   }
@@ -467,28 +618,33 @@ export default function DealerListing() {
   // ── CREATE VIEW ────────────────────────────────────────────────────────
   // ══════════════════════════════════════════════════════════════════════════
   return (
-    <div className="p-6 md:p-10 min-h-screen bg-slate-50">
+    <div className="p-6 md:p-8 min-h-screen bg-slate-50">
 
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-start justify-between mb-6 gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
-            <span>Dealers</span><span>/</span><span className="text-slate-700 font-medium">Create Dealer</span>
+      <div className="mb-6">
+        <p className="text-xs text-slate-400 mb-3">Administration <span className="mx-1">›</span> Dealers <span className="mx-1">›</span> <span className="text-slate-600 font-medium">Create Dealer</span></p>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-slate-900 text-white flex items-center justify-center shrink-0 shadow-md">
+              <Handshake size={18} color="#fff" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Create Dealer</h1>
+              <p className="text-sm text-slate-500 mt-0.5">Onboard a partner who can register and manage companies in their territory</p>
+            </div>
           </div>
-          <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Create Dealer</h1>
-          <p className="text-slate-500 mt-0.5 text-sm">Onboard a partner who can register and manage companies in their territory</p>
-        </div>
-        <div className="flex gap-2 shrink-0">
-          <button onClick={() => { setPageView('list'); resetCreate(); }}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-50 transition-colors">
-            <ArrowLeft size={14} /> Cancel
-          </button>
-          <button onClick={handleCreateSubmit} disabled={!canSubmit || submitting}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-slate-900 rounded-xl hover:bg-slate-700 disabled:opacity-40 transition-all shadow-sm">
-            {submitting
-              ? <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Saving…</>
-              : <>Save Dealer</>}
-          </button>
+          <div className="flex gap-2 shrink-0">
+            <button onClick={() => { setPageView('list'); resetCreate(); }}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-50 transition-colors">
+              <ArrowLeft size={14} /> Cancel
+            </button>
+            <button onClick={handleCreateSubmit} disabled={!canSubmit || submitting}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-slate-900 rounded-xl hover:bg-slate-700 disabled:opacity-40 transition-all shadow-sm">
+              {submitting
+                ? <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Saving…</>
+                : <>Save Dealer</>}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -545,8 +701,12 @@ export default function DealerListing() {
             {/* Step 2: Registered Address */}
             <SectionCard step={2} active={sec1} complete={sec2} title="Registered Address" subtitle="Used on invoices, contracts, and the dealer's certificate.">
               <div className="space-y-4">
-                <Field label="Address" required>
+                <Field label="Address Line 1" required>
                   <textarea value={form.address} onChange={e => set('address', e.target.value)} rows={2} placeholder="Street, area, landmark…"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
+                </Field>
+                <Field label="Address Line 2" hint="Optional">
+                  <textarea value={form.address_2} onChange={e => set('address_2', e.target.value)} rows={2} placeholder="Building, floor, suite…"
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
                 </Field>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -628,7 +788,7 @@ export default function DealerListing() {
               { label: 'Registered address', done: sec2 },
               { label: 'User account', done: sec3 },
             ]} />
-            <InfoCard />
+            <PoolSummaryCard />
           </div>
         </div>
       </div>

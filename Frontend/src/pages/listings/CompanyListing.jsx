@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Modal from '../../components/Modal';
 import TableSkeleton from '../../components/TableSkeleton';
 import api, { BASE_URL } from '../../assets/js/axiosConfig';
@@ -6,7 +6,8 @@ import statesDistricts from '../../assets/json/indiaStatesDistricts.json';
 import {
   Building2, CheckCircle2, CircleDot, Search,
   Phone, MapPin, IdCard, ArrowLeft, AlertCircle,
-  Download, Plus, Mail, KeyRound, User,
+  Download, Plus, Mail, KeyRound, User, Sparkles,
+  Eye, Edit, X,
 } from 'lucide-react';
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
@@ -142,7 +143,7 @@ function TipCard() {
   return (
     <div className="rounded-2xl bg-slate-900 text-white p-5 relative overflow-hidden">
       <div className="absolute -right-4 -top-4 opacity-10">
-        <KeyRound size={80} color="#fff" />
+        <Sparkles size={80} color="#fff" />
       </div>
       <p className="text-[10px] uppercase tracking-widest text-white/50 font-semibold">Tip</p>
       <p className="text-sm mt-1.5 leading-relaxed text-white/90">
@@ -152,11 +153,32 @@ function TipCard() {
   );
 }
 
+function ModalWrapper({ open, onClose, title, icon: Icon, width = 'max-w-2xl', children }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+      <div className={`bg-white rounded-2xl shadow-2xl w-full ${width} max-h-[88vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
+          <div className="flex items-center gap-2 text-slate-800">
+            {Icon && <Icon size={16} className="text-slate-600" />}
+            <h3 className="font-semibold text-slate-900">{title}</h3>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="px-6 py-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 // ── EMPTY form ─────────────────────────────────────────────────────────────────
 const EMPTY = {
   company_name: '', company_email: '', gst_number: '',
   contact_person: '', contact_number: '',
   address: '', address_2: '', city: '', state: '', district: '', zip_code: '',
+  is_active: true,
   user_username: '', user_email: '', user_password: '',
 };
 
@@ -178,6 +200,7 @@ export default function CompanyListing() {
   const [loading, setLoading]         = useState(true);
   const [registeringLicense, setRegisteringLicense] = useState({});
   const [validatingLicense,  setValidatingLicense]  = useState({});
+  const [search, setSearch]           = useState('');
 
   // ── Page view: 'list' | 'create' ────────────────────────────────────────
   const [pageView, setPageView] = useState('list');
@@ -322,7 +345,7 @@ export default function CompanyListing() {
       contact_number: company.contact_number || '', address: company.address || '',
       address_2: company.address_2 || '', city: company.city || '',
       state: company.state || '', district: company.district || '',
-      zip_code: company.zip_code || '',
+      zip_code: company.zip_code || '', is_active: company.is_active ?? true,
     });
     setEditingItem(company);
     setModal('view');
@@ -347,6 +370,7 @@ export default function CompanyListing() {
         contact_person: modalForm.contact_person, contact_number: modalForm.contact_number,
         gst_number: modalForm.gst_number, address: modalForm.address, address_2: modalForm.address_2,
         city: modalForm.city, state: modalForm.state, district: modalForm.district, zip_code: modalForm.zip_code,
+        is_active: modalForm.is_active,
       });
       if (res?.status === 200 || res?.status === 201) {
         window.alert(res.data.message || 'Company updated!');
@@ -365,109 +389,171 @@ export default function CompanyListing() {
 
   const isExpired = (c) => c.product_to_date && new Date() > new Date(c.product_to_date);
 
+  const filteredCompanies = useMemo(() => {
+    if (!search.trim()) return companies;
+    const q = search.toLowerCase();
+    return companies.filter(c =>
+      c.company_name?.toLowerCase().includes(q) ||
+      c.company_email?.toLowerCase().includes(q) ||
+      c.contact_person?.toLowerCase().includes(q)
+    );
+  }, [companies, search]);
+
   // ══════════════════════════════════════════════════════════════════════════
   // ── LIST VIEW ──────────────────────────────────────────────────────────
   // ══════════════════════════════════════════════════════════════════════════
   if (pageView === 'list') {
     return (
-      <div className="p-6 md:p-10 min-h-screen bg-slate-50">
+      <div className="p-6 md:p-8 min-h-screen bg-slate-50">
 
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-slate-800 tracking-tight">Companies</h1>
-            <p className="text-slate-500 mt-1">Manage client companies and license statuses</p>
+        <div className="mb-6">
+          <p className="text-xs text-slate-400 mb-3">Administration <span className="mx-1">›</span> <span className="text-slate-600 font-medium">Companies</span></p>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-slate-900 text-white flex items-center justify-center shrink-0 shadow-md">
+                <Building2 size={18} color="#fff" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Companies</h1>
+                <p className="text-sm text-slate-500 mt-0.5">{companies.length} companies registered</p>
+              </div>
+            </div>
+            <button
+              onClick={() => { resetCreate(); setPageView('create'); }}
+              className="inline-flex items-center gap-1.5 h-9 px-4 text-sm rounded-lg font-medium bg-slate-900 hover:bg-slate-700 text-white cursor-pointer transition-colors shadow-sm"
+            >
+              <Plus size={14} /> Register Company
+            </button>
           </div>
-          <button
-            onClick={() => { resetCreate(); setPageView('create'); }}
-            className="flex items-center gap-2 bg-slate-900 hover:bg-slate-700 text-white px-5 py-2.5 rounded-xl transition-all shadow-sm text-sm font-medium"
-          >
-            <Plus size={15} /> Register Company
-          </button>
+        </div>
+
+        {/* Search bar */}
+        <div className="flex items-center gap-3 mb-4">
+          <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm max-w-sm w-full">
+            <Search size={13} className="text-slate-400 shrink-0" />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search companies…"
+              className="flex-1 text-sm bg-transparent outline-none text-slate-700 placeholder:text-slate-400"
+            />
+          </div>
+          <span className="text-xs text-slate-400 tabular-nums shrink-0">
+            {filteredCompanies.length} result{filteredCompanies.length !== 1 ? 's' : ''}
+          </span>
         </div>
 
         {/* Table */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="border border-slate-200 rounded-2xl bg-white shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-slate-50/50 border-b border-slate-200">
-                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">ID</th>
-                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Company</th>
-                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Contact</th>
-                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Licenses</th>
-                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">License Action</th>
-                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Actions</th>
+                <tr className="border-b border-slate-200 bg-slate-50/80">
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Company</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Contact</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Licenses</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">License Action</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
-                  <TableSkeleton columns={['w-8', 'w-36', 'w-24', 'w-16', 'w-20', 'w-24', 'w-16']} />
-                ) : companies.length === 0 ? (
-                  <tr><td colSpan="7" className="px-6 py-12 text-center text-slate-400">No companies found.</td></tr>
-                ) : companies.map(company => {
-                  const isPending     = company.authentication_status === 'Pending';
-                  const isValidating  = company.authentication_status === 'Validating';
-                  const hasCompanyId  = company.company_id != null;
-                  const registering   = registeringLicense[company.id];
-                  const validating    = validatingLicense[company.id];
-                  const expired       = isExpired(company);
+                  <TableSkeleton columns={['w-40', 'w-28', 'w-16', 'w-20', 'w-24', 'w-16']} />
+                ) : filteredCompanies.length === 0 ? (
+                  <tr>
+                    <td colSpan="6" className="px-4 py-10 text-center">
+                      <div className="flex flex-col items-center gap-2">
+                        <Building2 size={20} className="text-slate-300" />
+                        <p className="text-sm text-slate-400">{search ? 'No companies match your search' : 'No companies found'}</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : filteredCompanies.map(company => {
+                  const isPending    = company.authentication_status === 'Pending';
+                  const isValidating = company.authentication_status === 'Validating';
+                  const hasCompanyId = company.company_id != null;
+                  const registering  = registeringLicense[company.id];
+                  const validating   = validatingLicense[company.id];
+                  const expired      = isExpired(company);
+                  const initials     = (company.company_name || '??').slice(0, 2).toUpperCase();
 
                   return (
-                    <tr key={company.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="px-6 py-4 text-sm text-slate-500 font-mono">#{company.id}</td>
-                      <td className="px-6 py-4">
-                        <div className="font-semibold text-slate-800">{company.company_name}</div>
-                        <div className="text-xs text-slate-500">{company.company_email}</div>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-slate-600">{company.contact_person}</td>
-                      <td className="px-6 py-4">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
-                          {company.number_of_licence || 0} {company.number_of_licence === 1 ? 'License' : 'Licenses'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium border ${getStatusStyle(company.authentication_status)}`}>
-                          {company.authentication_status || 'Pending'}
-                        </span>
-                        {company.authentication_status === 'Approve' && company.product_to_date && (
-                          <div className={`text-xs mt-1 ${expired ? 'text-red-600 font-semibold' : 'text-slate-500'}`}>
-                            {expired ? 'Expired: ' : 'Valid till: '}
-                            {new Date(company.product_to_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    <tr key={company.id} className="group hover:bg-slate-50/60 transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="h-8 w-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
+                            <span className="text-[11px] font-bold text-slate-600">{initials}</span>
                           </div>
-                        )}
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-slate-800 truncate leading-tight">{company.company_name}</p>
+                            <p className="text-xs text-slate-500 truncate leading-tight">{company.company_email}</p>
+                          </div>
+                        </div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1.5">
+                          <IdCard size={12} className="text-slate-400 shrink-0" />
+                          <span className="text-sm text-slate-600 truncate">{company.contact_person}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                          {company.number_of_licence || 0} {company.number_of_licence === 1 ? 'seat' : 'seats'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-col gap-1">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium border w-fit ${
+                            company.is_active
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-slate-50 text-slate-500 border-slate-200'
+                          }`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${company.is_active ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                            {company.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium border w-fit ${getStatusStyle(company.authentication_status)}`}>
+                            {company.authentication_status || 'Pending'}
+                          </span>
+                          {company.authentication_status === 'Approve' && company.product_to_date && (
+                            <p className={`text-[10px] ${expired ? 'text-red-600 font-semibold' : 'text-slate-400'}`}>
+                              {expired ? 'Expired ' : 'Valid till '}
+                              {new Date(company.product_to_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            </p>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
                         {!hasCompanyId ? (
                           <button onClick={() => handleRegisterLicense(company.id)} disabled={registering}
-                            className="text-xs font-medium bg-slate-900 text-white px-3 py-1.5 rounded-lg hover:bg-slate-700 transition disabled:opacity-50">
+                            className="text-[11px] font-medium bg-slate-900 text-white px-2.5 py-1 rounded-md hover:bg-slate-700 transition disabled:opacity-50 cursor-pointer">
                             {registering ? 'Registering…' : 'Register'}
                           </button>
                         ) : isPending || expired ? (
                           <button onClick={() => handleValidateLicense(company.id)} disabled={validating}
-                            className={`text-xs font-medium px-3 py-1.5 rounded-lg transition disabled:opacity-50 ${
+                            className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition disabled:opacity-50 cursor-pointer ${
                               expired ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-slate-900 hover:bg-slate-700 text-white'
                             }`}>
-                            {validating ? 'Starting…' : expired ? 'Revalidate' : 'Validate License'}
+                            {validating ? 'Starting…' : expired ? 'Revalidate' : 'Validate'}
                           </button>
                         ) : isValidating ? (
-                          <span className="text-xs text-slate-500 animate-pulse">Validating…</span>
+                          <span className="text-[11px] text-slate-400 animate-pulse">Validating…</span>
                         ) : (
-                          <span className="flex items-center gap-1 text-xs text-emerald-600 font-medium">
-                            <CheckCircle2 size={14} /> Active
+                          <span className="flex items-center gap-1 text-[11px] text-emerald-600 font-medium">
+                            <CheckCircle2 size={12} /> Active
                           </span>
                         )}
                       </td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex justify-end gap-1">
-                          <button onClick={() => openView(company)}
-                            className="p-2 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors" title="View">
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button onClick={() => openView(company)} title="View"
+                            className="p-1.5 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors">
+                            <Eye size={14} />
                           </button>
-                          <button onClick={() => openEdit(company)} disabled={isValidating}
-                            className="p-2 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-30" title="Edit">
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                          <button onClick={() => openEdit(company)} disabled={isValidating} title="Edit"
+                            className="p-1.5 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50 cursor-pointer transition-colors disabled:opacity-30">
+                            <Edit size={14} />
                           </button>
                         </div>
                       </td>
@@ -479,85 +565,174 @@ export default function CompanyListing() {
           </div>
         </div>
 
-        {/* View / Edit Modal */}
-        <Modal isOpen={modal !== null} onClose={() => setModal(null)} title={modal === 'view' ? 'Company Details' : 'Edit Company'}>
+        {/* View Modal */}
+        <ModalWrapper open={modal === 'view'} onClose={() => setModal(null)} title="Company Details" icon={Building2}>
+          {editingItem && (() => {
+            const c = editingItem;
+            const initials = (c.company_name || '??').slice(0, 2).toUpperCase();
+            const expired = isExpired(c);
+            return (
+              <div className="space-y-5">
+                {/* Identity card */}
+                <div className="flex items-center gap-4 p-4 rounded-xl bg-slate-50 border border-slate-100">
+                  <div className="h-14 w-14 rounded-xl bg-white border border-slate-200 flex items-center justify-center shrink-0 shadow-sm">
+                    <span className="text-xl font-bold text-slate-700">{initials}</span>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-lg font-bold text-slate-900">{c.company_name}</p>
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium border ${
+                        c.is_active
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-slate-50 text-slate-500 border-slate-200'
+                      }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${c.is_active ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                        {c.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border ${getStatusStyle(c.authentication_status)}`}>
+                        {c.authentication_status || 'Pending'}
+                      </span>
+                    </div>
+                    <p className="text-sm text-slate-500 mt-0.5">{c.company_email}</p>
+                  </div>
+                </div>
+
+                {/* Info grid */}
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: 'Contact Person', value: c.contact_person },
+                    { label: 'Contact Number', value: c.contact_number ? `+91 ${c.contact_number}` : '—' },
+                    { label: 'GST Number',      value: c.gst_number || '—' },
+                    { label: 'Licenses',         value: `${c.number_of_licence || 0} seats` },
+                    { label: 'Valid Till',        value: c.product_to_date ? new Date(c.product_to_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—' },
+                    { label: 'Company ID',        value: c.company_id ? `#${c.company_id}` : 'Not registered' },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">{label}</p>
+                      <p className="text-sm font-medium mt-0.5 text-slate-800 break-all">{value ?? '—'}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Address */}
+                {(c.address || c.city || c.state) && (
+                  <div className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 mb-1">Address</p>
+                    <div className="flex items-start gap-1.5 text-sm text-slate-700">
+                      <MapPin size={13} className="text-slate-400 mt-0.5 shrink-0" />
+                      <span>{[c.address, c.address_2, c.city, c.district, c.state, c.zip_code].filter(Boolean).join(', ')}</span>
+                    </div>
+                  </div>
+                )}
+
+                {expired && (
+                  <div className="flex items-start gap-2 rounded-lg bg-red-50 border border-red-100 px-3 py-2.5 text-xs text-red-700">
+                    <AlertCircle size={13} className="mt-0.5 shrink-0" />
+                    License expired on {new Date(c.product_to_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                  <button onClick={() => { setModal(null); setTimeout(() => openEdit(c), 100); }}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 px-4 text-sm rounded-lg font-medium bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer transition-colors">
+                    <Edit size={14} /> Edit
+                  </button>
+                  <button onClick={() => setModal(null)}
+                    className="flex-1 inline-flex items-center justify-center h-9 px-4 text-sm rounded-lg font-medium bg-slate-900 text-white hover:bg-slate-700 cursor-pointer transition-colors">
+                    Close
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+        </ModalWrapper>
+
+        {/* Edit Modal */}
+        <ModalWrapper open={modal === 'edit'} onClose={() => setModal(null)} title="Edit Company" icon={Edit}>
           <form onSubmit={handleEditSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {[
-                { label: 'Company Name', name: 'company_name', required: true },
-                { label: 'Email', name: 'company_email', type: 'email', required: true },
+                { label: 'Company Name',   name: 'company_name',   required: true },
+                { label: 'Email',          name: 'company_email',  type: 'email', required: true },
                 { label: 'Contact Person', name: 'contact_person', required: true },
                 { label: 'Contact Number', name: 'contact_number', required: true },
-                { label: 'GST Number', name: 'gst_number' },
+                { label: 'GST Number',     name: 'gst_number' },
               ].map(f => (
-                <div key={f.name} className="space-y-1">
-                  <label className="text-sm font-medium text-slate-700">{f.label}{f.required && <span className="text-red-500 ml-0.5">*</span>}</label>
+                <div key={f.name} className="space-y-1.5">
+                  <label className="text-sm font-medium text-slate-700">
+                    {f.label}{f.required && <span className="text-red-500 ml-0.5">*</span>}
+                  </label>
                   <input type={f.type || 'text'} name={f.name} value={modalForm[f.name] || ''} onChange={handleModalInputChange}
-                    required={f.required} readOnly={modal === 'view'}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 read-only:bg-slate-50" />
+                    required={f.required}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
                 </div>
               ))}
             </div>
 
-            {[{ label: 'Address', name: 'address', required: true }, { label: 'Address 2 (Optional)', name: 'address_2' }].map(f => (
-              <div key={f.name} className="space-y-1">
-                <label className="text-sm font-medium text-slate-700">{f.label}{f.required && <span className="text-red-500 ml-0.5">*</span>}</label>
+            {[{ label: 'Address Line 1', name: 'address', required: true }, { label: 'Address Line 2', name: 'address_2', hint: 'Optional' }].map(f => (
+              <div key={f.name} className="space-y-1.5">
+                <label className="text-sm font-medium text-slate-700">
+                  {f.label}{f.required && <span className="text-red-500 ml-0.5">*</span>}
+                  {f.hint && <span className="ml-1 text-xs text-slate-400 font-normal">— {f.hint}</span>}
+                </label>
                 <textarea name={f.name} value={modalForm[f.name] || ''} onChange={handleModalInputChange}
-                  rows={2} required={f.required} readOnly={modal === 'view'}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 read-only:bg-slate-50" />
+                  rows={2} required={f.required}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
               </div>
             ))}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 <label className="text-sm font-medium text-slate-700">State <span className="text-red-500">*</span></label>
-                {modal === 'view' ? (
-                  <input type="text" value={modalForm.state} readOnly className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50" />
-                ) : (
-                  <select name="state" value={modalForm.state} onChange={handleModalInputChange} required
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white">
-                    <option value="">Select State</option>
-                    {Object.keys(statesDistricts).sort().map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                )}
+                <select name="state" value={modalForm.state} onChange={handleModalInputChange} required
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white">
+                  <option value="">Select state…</option>
+                  {Object.keys(statesDistricts).sort().map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
               </div>
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 <label className="text-sm font-medium text-slate-700">District <span className="text-red-500">*</span></label>
-                {modal === 'view' ? (
-                  <input type="text" value={modalForm.district} readOnly className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50" />
-                ) : (
-                  <select name="district" value={modalForm.district} onChange={handleModalInputChange} required
-                    disabled={!modalForm.state}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white disabled:bg-slate-50">
-                    <option value="">Select District</option>
-                    {(statesDistricts[modalForm.state] || []).map(d => <option key={d} value={d}>{d}</option>)}
-                  </select>
-                )}
+                <select name="district" value={modalForm.district} onChange={handleModalInputChange} required
+                  disabled={!modalForm.state}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white disabled:bg-slate-50">
+                  <option value="">Select district…</option>
+                  {(statesDistricts[modalForm.state] || []).map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
               </div>
               {[{ label: 'City', name: 'city', required: true }, { label: 'Zip Code', name: 'zip_code', required: true }].map(f => (
-                <div key={f.name} className="space-y-1">
-                  <label className="text-sm font-medium text-slate-700">{f.label}{f.required && <span className="text-red-500 ml-0.5">*</span>}</label>
-                  <input type="text" name={f.name} value={modalForm[f.name] || ''} onChange={handleModalInputChange}
-                    required={f.required} readOnly={modal === 'view'}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 read-only:bg-slate-50" />
+                <div key={f.name} className="space-y-1.5">
+                  <label className="text-sm font-medium text-slate-700">{f.label}<span className="text-red-500 ml-0.5">*</span></label>
+                  <input type="text" name={f.name} value={modalForm[f.name] || ''} onChange={handleModalInputChange} required
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
                 </div>
               ))}
             </div>
 
-            <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <div onClick={() => setModalForm(f => ({ ...f, is_active: !f.is_active }))}
+                className={`relative w-10 h-[22px] rounded-full transition-colors cursor-pointer ${modalForm.is_active ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                <span className={`absolute top-0.5 left-0.5 w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${modalForm.is_active ? 'translate-x-[18px]' : ''}`} />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-700">Company Status</p>
+                <p className="text-xs text-slate-500">{modalForm.is_active ? 'Active — users can log in' : 'Inactive — all company users blocked'}</p>
+              </div>
+            </label>
+
+            <div className="flex items-center gap-2 pt-4 border-t border-slate-100">
               <button type="button" onClick={() => setModal(null)}
-                className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">
-                {modal === 'view' ? 'Close' : 'Cancel'}
+                className="flex-1 inline-flex items-center justify-center h-9 px-4 text-sm rounded-lg font-medium bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer transition-colors">
+                Cancel
               </button>
-              {modal === 'edit' && (
-                <button type="submit" disabled={modalSubmitting}
-                  className="px-4 py-2 text-sm font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-700 disabled:opacity-50 transition-all">
-                  {modalSubmitting ? 'Saving…' : 'Update Company'}
-                </button>
-              )}
+              <button type="submit" disabled={modalSubmitting}
+                className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 px-4 text-sm rounded-lg font-medium bg-slate-900 hover:bg-slate-700 text-white cursor-pointer transition-colors shadow-sm disabled:opacity-50">
+                {modalSubmitting
+                  ? <><svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Saving…</>
+                  : 'Update Company'}
+              </button>
             </div>
           </form>
-        </Modal>
+        </ModalWrapper>
       </div>
     );
   }
@@ -566,28 +741,33 @@ export default function CompanyListing() {
   // ── CREATE VIEW ────────────────────────────────────────────────────────
   // ══════════════════════════════════════════════════════════════════════════
   return (
-    <div className="p-6 md:p-10 min-h-screen bg-slate-50">
+    <div className="p-6 md:p-8 min-h-screen bg-slate-50">
 
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-start justify-between mb-6 gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
-            <span>Companies</span><span>/</span><span className="text-slate-700 font-medium">Register Company</span>
+      <div className="mb-6">
+        <p className="text-xs text-slate-400 mb-3">Administration <span className="mx-1">›</span> Companies <span className="mx-1">›</span> <span className="text-slate-600 font-medium">Register Company</span></p>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-slate-900 text-white flex items-center justify-center shrink-0 shadow-md">
+              <Building2 size={18} color="#fff" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Register Company</h1>
+              <p className="text-sm text-slate-500 mt-0.5">Create a new client company or import one from the license server</p>
+            </div>
           </div>
-          <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Register Company</h1>
-          <p className="text-slate-500 mt-0.5 text-sm">Create a new client company or import one from the license server</p>
-        </div>
-        <div className="flex gap-2 shrink-0">
-          <button onClick={() => { setPageView('list'); resetCreate(); }}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-50 transition-colors">
-            <ArrowLeft size={14} /> Cancel
-          </button>
-          <button onClick={handleCreateSubmit} disabled={!canSubmit || submitting}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-slate-900 rounded-xl hover:bg-slate-700 disabled:opacity-40 transition-all shadow-sm">
-            {submitting
-              ? <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Saving…</>
-              : <>Save Company</>}
-          </button>
+          <div className="flex gap-2 shrink-0">
+            <button onClick={() => { setPageView('list'); resetCreate(); }}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-50 transition-colors">
+              <ArrowLeft size={14} /> Cancel
+            </button>
+            <button onClick={handleCreateSubmit} disabled={!canSubmit || submitting}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-slate-900 rounded-xl hover:bg-slate-700 disabled:opacity-40 transition-all shadow-sm">
+              {submitting
+                ? <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Saving…</>
+                : <>Save Company</>}
+            </button>
+          </div>
         </div>
       </div>
 
