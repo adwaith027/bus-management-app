@@ -511,7 +511,7 @@ export default function UserListing() {
       )}
 
       {/* ── Search + filter bar ─────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm mb-4">
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3.5 shadow-sm mb-4">
         {/* Search input */}
         <div className="relative min-w-[180px] flex-1 max-w-xs">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -532,7 +532,7 @@ export default function UserListing() {
             <button
               key={r}
               onClick={() => setRoleFilter(r)}
-              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${roleFilter === r ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+              className={`px-2.5 py-1 rounded-md text-[13px] font-medium transition-colors cursor-pointer whitespace-nowrap ${roleFilter === r ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
             >
               {r === 'ALL' ? 'All' : ROLE_CONFIG[r]?.label || r}
             </button>
@@ -545,7 +545,7 @@ export default function UserListing() {
         <select
           value={statusFilter}
           onChange={e => setStatusFilter(e.target.value)}
-          className="h-7 rounded-md border border-slate-200 bg-slate-50 px-2 text-[11px] text-slate-600 focus:outline-none focus:ring-1 focus:ring-slate-400 cursor-pointer"
+          className="h-7 rounded-md border border-slate-200 bg-slate-50 px-2 text-[13px] text-slate-600 focus:outline-none focus:ring-1 focus:ring-slate-400 cursor-pointer"
         >
           <option value="ALL">All Status</option>
           <option value="active">Active</option>
