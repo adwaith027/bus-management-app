@@ -25,7 +25,7 @@ _ODOMETER_SIZE = struct.calcsize(_ODOMETER_FMT)  # 64 bytes/record
 
 
 def _parse_expense_dat(file_path, company_instance, palmtec_id=None):
-    from ...models import ExpenseData, Employee, VehicleType
+    from ...models import ExpenseData, Employee, VehicleType, ExpenseMaster
 
     with open(file_path, 'rb') as f:
         data = f.read()
@@ -90,8 +90,9 @@ def _parse_expense_dat(file_path, company_instance, palmtec_id=None):
                 bus_id           = bus_instance,
                 expense_amount   = round(f_expens, 2),
                 diesel_amount    = round(f_diesel, 2),
-                expense_type     = uc_type,
-                expense_name     = expense_name_str or None,
+                expense_type      = uc_type,
+                expense_master_id = ExpenseMaster.objects.filter(company=company_instance, expense_code=str(uc_type)).first() if uc_type else None,
+                expense_name      = expense_name_str or None,
                 source           = ExpenseData.SourceType.DAT,
                 error_reason     = "; ".join(errors) if errors else None,
             )
