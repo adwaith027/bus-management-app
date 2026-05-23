@@ -56,9 +56,9 @@ OPERATIONS_MODELS = ['ExpenseMaster','Expense','CrewAssignment','InspectorDetail
 
 
 # Transaction models
-from .transactions import (TransactionData, TripOpenData, TripCloseData, ScheduleOpenData, ScheduleCloseData, ScheduleData, TripData, OdometerData, ExpenseData, RawDataLog, Direction)
+from .transactions import (TransactionData, ScheduleData, TripData, OdometerData, ExpenseData, RawDataLog, Direction)
 
-TRANSACTION_MODELS = ['TransactionData', 'TripOpenData', 'TripCloseData', 'ScheduleOpenData', 'ScheduleCloseData', 'ScheduleData', 'TripData', 'OdometerData', 'ExpenseData', 'RawDataLog', 'Direction']
+TRANSACTION_MODELS = ['TransactionData', 'ScheduleData', 'TripData', 'OdometerData', 'ExpenseData', 'RawDataLog', 'Direction']
 
 # Payment models
 from .payments import MosambeeTransaction, MosambeePayoutCallback
