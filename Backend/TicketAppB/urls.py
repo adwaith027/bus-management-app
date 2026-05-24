@@ -54,6 +54,7 @@ urlpatterns = [
     path('depots', depot_views.get_all_depots, name='get_all_depots'),
     path('create-depot', depot_views.create_depot, name='create_depot'),
     path('update-depot-details/<int:pk>', depot_views.update_depot_details, name='update_depot_details'),
+    path('delete-depoteva/<int:pk>', depot_views.delete_depot, name='delete_depot'),
 
     # ticket data — device push (ETM → server)
     path('getScheduleOpen', palmtec_ingest.getScheduleOpenDataFromDevice, name='get_schedule_open_data'),
