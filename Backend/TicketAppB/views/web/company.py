@@ -323,8 +323,8 @@ def background_license_polling(company_id):
             if company.authentication_status == Company.AuthStatus.VALIDATING:
                 company.authentication_status = Company.AuthStatus.PENDING
                 company.save()
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Company stuck at VALIDATING couldn't be reverted due to exception: {e}", exc_info=True)
 
 
 @api_view(['POST'])
