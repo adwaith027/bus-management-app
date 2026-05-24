@@ -1,5 +1,7 @@
 from django.apps import AppConfig
+import logging
 
+logger = logging.getLogger(__name__)
 
 class TicketappbConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
@@ -18,5 +20,5 @@ class TicketappbConfig(AppConfig):
             Company.objects.filter(
                 authentication_status=Company.AuthStatus.VALIDATING
             ).update(authentication_status=Company.AuthStatus.PENDING)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Company stuck at VALIDATING couldn't be reverted due to signal registration failure: {e}", exc_info=True)
