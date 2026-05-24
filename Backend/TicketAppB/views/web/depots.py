@@ -3,7 +3,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.decorators import api_view
 
-from ...models import Depot
+from ...models import Depot,RouteDepot
 from ...serializers.company import DepotSerializer
 from .auth import get_user_from_cookie
 
@@ -60,9 +60,9 @@ def update_depot_details(request, pk):
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
 
     try:
-        depot = Depot.objects.get(pk=pk)
+        depot = Depot.objects.get(pk=pk,company=user.company)
     except Depot.DoesNotExist:
-        logger.error(f"Depot not found for update with ID: {pk}")
+        logger.error(f"No Depot found with ID under the user's company: {pk}")
         return Response({"message": "Depot not found"}, status=status.HTTP_404_NOT_FOUND)
 
     serializer = DepotSerializer(depot, data=request.data, partial=True)
@@ -73,3 +73,25 @@ def update_depot_details(request, pk):
 
     logger.warning(f"Depot update failed for ID {pk}: {serializer.errors}")
     return Response({"message": "Validation failed", "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+
+
+@api_view(['DELETE'])
+def delete_depot(request,pk):
+    user = get_user_from_cookie(request)
+    if not user:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    try:
+        depot = Depot.objects.get(pk=pk,company=user.company)
+    except Depot.DoesNotExist:
+        logger.error(f"No Depot found with ID under the user's company: {pk}")
+        return Response({"message": "Depot not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    mapped_routes=RouteDepot.objects.filter(depot=depot).select_related('route')
+    if mapped_routes:
+        get_route_names=[{"id":rd.route.id,"route_code":rd.route.route_code} for rd in mapped_routes]
+        return Response({"message": "Depot is actively mapped to a route. Either update the mapping or skip deletion.","routes":get_route_names}, status=status.HTTP_409_CONFLICT)
+    else:
+        depot.delete()
+        return Response({"message": "Depot successfully deleted"}, status=status.HTTP_200_OK)
