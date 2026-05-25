@@ -1,10 +1,11 @@
 import traceback
 from django.utils import timezone
+from django.db import transaction
 from django.dispatch import receiver
 from decimal import Decimal, ROUND_HALF_UP
 from django.db.models.signals import post_save, pre_save
 from django.contrib.auth import get_user_model
-from .models import MosambeeTransaction, TransactionData, Route, Fare, Company, Dealer
+from .models import MosambeeTransaction, TransactionData, Route, Fare, Company, Dealer, ETMDevice
 
 
 # COMPANY / DEALER ACTIVE STATUS CASCADE
@@ -68,10 +69,25 @@ def auto_reconcile_mosambee_payment(sender, instance, created, **kwargs):
             return
         
         print(f"🔍 Looking for ticket: {instance.invoiceNumber}")
-        
-        # CHECK 2: Find matching bus ticket
-        ticket = TransactionData.objects.filter(ticket_number=instance.invoiceNumber).first()
-        
+
+        # CHECK 2: Resolve company via registered device
+        device = ETMDevice.objects.select_related('company').filter(
+            serial_number=instance.transactionTerminalId
+        ).first()
+        if not device or not device.company:
+            print(f"⚠️ Device not registered: {instance.transactionTerminalId}")
+            instance.reconciliation_status = MosambeeTransaction.ReconciliationStatus.NOT_FOUND
+            instance.reconciliation_error = f"Device not registered or company not found: {instance.transactionTerminalId}"
+            instance.processing_status = MosambeeTransaction.ProcessingStatus.PENDING_VERIFICATION
+            instance.save()
+            return
+
+        # CHECK 3: Find matching bus ticket scoped to company
+        ticket = TransactionData.objects.filter(
+            ticket_number=instance.invoiceNumber,
+            company_code=device.company,
+        ).first()
+
         if not ticket:
             print(f"❌ Ticket not found: {instance.invoiceNumber}")
             instance.reconciliation_status = MosambeeTransaction.ReconciliationStatus.NOT_FOUND
@@ -82,7 +98,7 @@ def auto_reconcile_mosambee_payment(sender, instance, created, **kwargs):
         
         print(f"✅ Ticket found: {instance.invoiceNumber}")
         
-        # CHECK 3: Do amounts match?
+        # CHECK 4: Do amounts match?
         ticket_amount = ticket.ticket_amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         payment_amount = (Decimal(str(instance.transactionAmount)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
@@ -101,11 +117,12 @@ def auto_reconcile_mosambee_payment(sender, instance, created, **kwargs):
 
         print(f"✅ Amounts match: ₹{instance.transactionAmount}")
         
-        # CHECK 4: Is ticket already paid?
-        existing_payment = MosambeeTransaction.objects.filter(
-            related_ticket=ticket
-        ).exclude(id=instance.id).first()
-        
+        # CHECK 5: Is ticket already paid? (atomic + row-lock to prevent concurrent webhook race)
+        with transaction.atomic():
+            existing_payment = MosambeeTransaction.objects.select_for_update().filter(
+                related_ticket=ticket
+            ).exclude(id=instance.id).first()
+
         if existing_payment:
             print(f"⚠️ Duplicate payment detected: TXN-{existing_payment.transactionID}")
             instance.reconciliation_status = MosambeeTransaction.ReconciliationStatus.DUPLICATE
