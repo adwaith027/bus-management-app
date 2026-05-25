@@ -54,23 +54,9 @@ export default function Login() {
       // API CALL
       const response = await api.post(`${BASE_URL}/login`, login_data);
       
-      // TOKEN & USER STORAGE
-      if (response.data.token || response.data.access_token) {
-        const token = response.data.token || response.data.access_token;
-        localStorage.setItem('authToken', token);
-        api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      }
-
-      if (response.data.refresh_token) {
-        localStorage.setItem('refreshToken', response.data.refresh_token);
-      }
-
+      // USER STORAGE (auth runs via HTTP-only cookies set by backend)
       if (response.data.user) {
         localStorage.setItem('user', JSON.stringify(response.data.user));
-      }
-
-      if (response.data.role) {
-        localStorage.setItem('userRole', response.data.role);
       }
 
       navigate('/dashboard');

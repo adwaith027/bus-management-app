@@ -159,7 +159,7 @@ export default function Sidebar() {
     try { await api.post(`${BASE_URL}/logout`, body); } catch {}
     finally {
       cacheManager.invalidateAll();
-      ["user","authToken","refreshToken","userRole","device_uid"]
+      ["user", "device_uid"]
         .forEach(k => localStorage.removeItem(k));
       navigate("/login");
     }

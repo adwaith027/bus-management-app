@@ -38,7 +38,7 @@ api.interceptors.response.use(
         // If 403 — license expired or forbidden, force logout
         if (error.response?.status === 403) {
             const message = error.response?.data?.detail || error.response?.data?.error || "Access forbidden.";
-            ["user", "authToken", "refreshToken", "userRole", "device_uid"]
+            ["user", "device_uid"]
                 .forEach(k => localStorage.removeItem(k));
             window.location.href = `/login?error=${encodeURIComponent(message)}`;
             return Promise.reject(error);
@@ -56,7 +56,7 @@ api.interceptors.response.use(
                 return api(originalRequest);
                 
             } catch (refreshError) {
-                ["user", "authToken", "refreshToken", "userRole", "device_uid"]
+                ["user", "device_uid"]
                     .forEach(k => localStorage.removeItem(k));
                 window.location.href = '/login';
                 return Promise.reject(refreshError);
