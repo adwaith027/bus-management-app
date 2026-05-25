@@ -126,11 +126,15 @@ def process_transaction_data(self, log_id):
                 return parts[i] if len(parts) > i and parts[i].strip() else default
 
             required = {
-                'route_code': _p(3),
-                'trip_no':    _p(4),
-                'from_stage': _p(10),
-                'to_stage':   _p(11),
-                'schedule_no': _p(28),
+                'palmtec_id':    _p(2),
+                'route_code':    _p(3),
+                'trip_no':       _p(4),
+                'ticket_number': _p(5),
+                'ticket_date':   _p(8),
+                'ticket_time':   _p(9),
+                'from_stage':    _p(10),
+                'to_stage':      _p(11),
+                'schedule_no':   _p(28),
             }
             missing = [k for k, v in required.items() if not v]
             if missing:
@@ -172,14 +176,16 @@ def process_transaction_data(self, log_id):
             to_raw   = int(_p(11))
             from_stage_obj = to_stage_obj = None
             if stages:
-                try:
-                    from_stage_obj = stages[from_raw - 1]
-                except IndexError:
-                    pass
-                try:
-                    to_stage_obj = stages[to_raw - 1]
-                except IndexError:
-                    pass
+                if from_raw > 0:
+                    try:
+                        from_stage_obj = stages[from_raw - 1]
+                    except IndexError:
+                        pass
+                if to_raw > 0:
+                    try:
+                        to_stage_obj = stages[to_raw - 1]
+                    except IndexError:
+                        pass
 
             trip_no         = int(_p(4))
             trip_start_date = _parse_date(_p(32))
@@ -1172,7 +1178,7 @@ def scan_pending_raw_logs():
     requeue_records = RawDataLog.objects.filter(
         status=RawDataLog.statusChoices.PENDING,
         received_at__range=(stale_cutoff, requeue_cutoff),
-    )
+    ).order_by('received_at')[:200]
 
     TASK_MAP = {
         RawDataLog.typeChoices.TRANSACTION:            process_transaction_data,
