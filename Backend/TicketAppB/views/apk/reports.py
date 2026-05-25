@@ -677,3 +677,9 @@ def apk_dashboard(request):
         'bus_list': bus_list,
         'weekly_chart': weekly_chart,
     })
+
+
+
+@api_view(["GET"])
+def get_etm_device_version_for_apk(request):
+    return "PVT_GEN_12"
