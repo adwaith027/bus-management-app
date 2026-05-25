@@ -169,7 +169,7 @@ urlpatterns = [
     path('etm-devices/<int:device_id>/deactivate',     device_registry_views.deactivate_device,          name='etm_deactivate'),
 
     # Palmtec device data APIs (server → APK → USB → device)
-    path('device/getEtmVersion', palmtec_views.get_etm_device_version),
+    path('device/getEtmVersion', apk_views.get_etm_device_version_for_apk),
     path('device/routes',      palmtec_views.get_routes_list),
     path('device/settings',    palmtec_views.get_settings_file),
     path('device/crew',        palmtec_views.get_crew_file),
@@ -184,6 +184,8 @@ urlpatterns = [
     path('device/currency',    palmtec_views.get_currency_file),
 
     # android apk data apis
+    path('apk/dashboard', apk_views.apk_dashboard, name='apk_dashboard'),
+    path('apk/get_etm_device_version_for_apk', apk_views.get_etm_device_version_for_apk, name='etm_version_for_apk'),
     path('reports/duty', apk_views.duty_report, name='duty_report'),
     path('reports/bus-summary', apk_views.bus_summary_report, name='bus_summary_report'),
     path('reports/payment-type', apk_views.payment_type_report, name='payment_type_report'),
@@ -193,7 +195,6 @@ urlpatterns = [
     path('reports/ticket-details', apk_views.ticket_details, name='ticket_details'),
     path('reports/expense', apk_views.expense_report, name='expense_report'),
     path('reports/stage-wise', apk_views.stage_wise_report, name='stage_wise_report'),
-    path('apk/dashboard', apk_views.apk_dashboard, name='apk_dashboard'),
 
 
     # APK file uploads
