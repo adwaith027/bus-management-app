@@ -52,7 +52,7 @@ class TransactionData(models.Model):
     # ── Identity ─────────────────────────────────────────────────────────────
     unique_code = models.CharField(max_length=30, null=True, blank=True, db_index=True)
     # later to be implemented as foreign key related to the particular company's etm device
-    palmtec_id  = models.CharField(max_length=20, null=True, blank=True)
+    palmtec_id  = models.CharField(max_length=20)
 
     # ── Route / Trip ─────────────────────────────────────────────────────────
     # route_code = models.CharField(max_length=50, null=True, blank=True)
@@ -60,9 +60,9 @@ class TransactionData(models.Model):
 
     trip_id       = models.ForeignKey('TripData',     on_delete=models.SET_NULL, null=True, blank=True, related_name='transactions')
     schedule_id   = models.ForeignKey('ScheduleData', on_delete=models.SET_NULL, null=True, blank=True, related_name='transactions')
-    ticket_number = models.CharField(max_length=20, null=True, blank=True)
-    ticket_date   = models.DateField(null=True, blank=True)
-    ticket_time   = models.TimeField(null=True, blank=True)
+    ticket_number = models.CharField(max_length=20)
+    ticket_date   = models.DateField()
+    ticket_time   = models.TimeField()
 
     # raw ordinal ints from device (1-based sequence position)
     from_stage = models.IntegerField(null=True, blank=True)
