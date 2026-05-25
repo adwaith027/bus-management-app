@@ -3,6 +3,9 @@ import logging
 from django.http import HttpResponse, JsonResponse
 from ...models import Settings, Route, Employee, VehicleType, ExpenseMaster, Stage, Fare, Currency, RouteStage
 from ..web.auth import get_user_from_cookie
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework.decorators import api_view
+
 
 logger = logging.getLogger(__name__)
 
@@ -608,5 +611,6 @@ def get_currency_file(request):
     return response
 
 
-def get_etm_device_version(request):
-    return "PVT_GEN_12"
+@csrf_exempt
+def get_etm_intial_data(request):
+    pass
