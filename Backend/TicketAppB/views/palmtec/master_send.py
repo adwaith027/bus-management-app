@@ -4,8 +4,6 @@ from django.http import HttpResponse, JsonResponse
 from ...models import Settings, Route, Employee, VehicleType, ExpenseMaster, Stage, Fare, Currency, RouteStage
 from ..web.auth import get_user_from_cookie
 from django.views.decorators.csrf import csrf_exempt
-from rest_framework.decorators import api_view
-
 
 logger = logging.getLogger(__name__)
 
@@ -609,8 +607,3 @@ def get_currency_file(request):
     response = HttpResponse(binary, content_type='application/octet-stream')
     response['Content-Disposition'] = 'attachment; filename="CURRENCY.DAT"'
     return response
-
-
-@csrf_exempt
-def get_etm_intial_data(request):
-    pass
