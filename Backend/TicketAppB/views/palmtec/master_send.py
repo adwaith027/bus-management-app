@@ -1,9 +1,13 @@
 import struct
 import logging
 from django.http import HttpResponse, JsonResponse
-from ...models import Settings, Route, Employee, VehicleType, ExpenseMaster, Stage, Fare, Currency, RouteStage
+from ...models import Settings, Route, Employee, VehicleType, ExpenseMaster, Stage, Fare, Currency, RouteStage, Company
 from ..web.auth import get_user_from_cookie
 from django.views.decorators.csrf import csrf_exempt
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
+import secrets
 
 logger = logging.getLogger(__name__)
 
