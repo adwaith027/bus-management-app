@@ -133,7 +133,9 @@ export default function DeviceRegistry() {
     const formData = new FormData();
     formData.append("file", file);
     try {
-      const res = await api.post(`${BASE_URL}/etm-devices/upload`, formData);
+      const res = await api.post(`${BASE_URL}/etm-devices/upload`, formData, {
+                    headers: { 'Content-Type': 'multipart/form-data' },
+                  });
       setUploadResult({ type: "success", ...res.data });
       fetchAll();
     } catch (err) {
