@@ -22,7 +22,7 @@ const PROTOCOL_FIELDS = {
     'trip_start_date', 'trip_start_time', 'battery', 'passenger_count',
     'full_total', 'half_total', 'phy_total', 'ladies_total',
     'senior_total', 'lugg_total', 'st_total',
-    'transaction_id', 'ticket_status', 'bqr_merchant_id', 'license_code',
+    'transaction_id', 'ticket_status', 'bqr_merchant_id', 'license_code','checksum',
   ],
   trip_open: [
     'fn', 'unique_code', 'palmtec_id', 'license_code', 'schedule_no', 'route_code',
