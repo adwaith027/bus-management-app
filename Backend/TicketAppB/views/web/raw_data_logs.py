@@ -2,6 +2,8 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 from django.db.models import Q
+from django.utils import timezone as tz
+import datetime
 
 from ...models import RawDataLog
 from ...tasks import (
@@ -45,9 +47,20 @@ def get_failed_payloads(request):
     if company_id:
         qs = qs.filter(company_code_id=company_id)
     if from_date:
-        qs = qs.filter(received_at__date__gte=from_date)
+        try:
+            from_dt = tz.make_aware(datetime.datetime.strptime(from_date, '%Y-%m-%d'), tz.get_current_timezone())
+            qs = qs.filter(received_at__gte=from_dt)
+        except ValueError:
+            pass
     if to_date:
-        qs = qs.filter(received_at__date__lte=to_date)
+        try:
+            to_dt = tz.make_aware(
+                datetime.datetime.strptime(to_date, '%Y-%m-%d') + datetime.timedelta(days=1),
+                tz.get_current_timezone()
+            )
+            qs = qs.filter(received_at__lt=to_dt)
+        except ValueError:
+            pass
     if search:
         qs = qs.filter(
             Q(error_message__icontains=search) |
