@@ -187,6 +187,13 @@ def process_transaction_data(self, log_id):
                     except IndexError:
                         pass
 
+            if _p(6) == "0000-00-00":
+                _fail(log, "Invalid schedule date: device sent 0000-00-00")
+                return
+            if _p(32) == "0000-00-00":
+                _fail(log, "Invalid trip start date: device sent 0000-00-00")
+                return
+
             trip_no         = int(_p(4))
             trip_start_date = _parse_date(_p(32))
             schedule_no     = int(_p(28))
