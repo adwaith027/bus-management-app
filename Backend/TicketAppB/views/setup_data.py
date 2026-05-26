@@ -2,13 +2,16 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 import secrets
-from ...models import Company, ETMDevice
+from ..models import ETMDevice
 from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
+from django.http import HttpResponse
 
 import os
 
 # ---- etm initial data send ----
 @csrf_exempt
+@api_view(['GET'])
 def get_etm_intial_data(request):
     # to generate not so obvious(secrets module) random 4-digit value
     uniqueIdentifier = secrets.randbelow(exclusive_upper_bound=8999)
