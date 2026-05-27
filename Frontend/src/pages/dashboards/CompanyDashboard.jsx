@@ -1,43 +1,66 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import api, { BASE_URL } from "../../assets/js/axiosConfig";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
-import { KpiCard } from "@/components/ui/kpi-card";
-import { AreaChart } from "@/components/ui/area-chart";
-import { DonutChart } from "@/components/ui/donut-chart";
 import {
-  Wallet, Banknote, CreditCard, TrendingUp,
-  Bus, Route, MapPin, Users,
-  Receipt, CheckCircle, Clock, XCircle,
-  CalendarDays, AlertCircle, RefreshCw,
+  Wallet, TrendingUp, Users, Route as RouteIcon,
+  Banknote, Bus, Receipt, Sparkles, Activity,
+  BarChart2, CalendarCog, Ticket, Warehouse,
+  Settings, RefreshCw, AlertCircle, Calendar,
+  CheckCircle2, PlayCircle, CircleDot,
 } from "lucide-react";
+import { KpiCard, PageHeader, Btn, DesignCard, fmt } from "@/components/design";
 
+// ── Internal helpers ──────────────────────────────────────────────────────────
+function DashProgress({ label, active, total, color }) {
+  const pct = total > 0 ? Math.round((active / total) * 100) : 0;
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-sm text-slate-600">{label}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-bold text-slate-800">
+            {active}<span className="text-slate-400 font-normal">/{total}</span>
+          </span>
+          <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">{pct}%</span>
+        </div>
+      </div>
+      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: color }} />
+      </div>
+    </div>
+  );
+}
+
+function CardHead({ icon: Ic, color, bg, title, meta }) {
+  return (
+    <div className="flex items-center justify-between mb-5">
+      <div className="flex items-center gap-2.5">
+        <div className={`w-8 h-8 rounded-lg ${bg} flex items-center justify-center`}>
+          <Ic size={15} className={color} />
+        </div>
+        <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
+      </div>
+      {meta && <span className="text-[11px] text-slate-400">{meta}</span>}
+    </div>
+  );
+}
+
+// ── Main Component ────────────────────────────────────────────────────────────
 export default function CompanyDashboard() {
-  // ── Section 1: User info ────────────────────────────────────────────────
-  const storedUser = localStorage.getItem("user")
-    ? JSON.parse(localStorage.getItem("user"))
-    : null;
-  const username = storedUser?.username || "User";
+  const navigate = useNavigate();
+  const storedUser = localStorage.getItem("user") ? JSON.parse(localStorage.getItem("user")) : null;
   const companyName = storedUser?.company_name || "Company";
-  const companyId = storedUser?.company_id;
 
-  // ── Section 2: State ────────────────────────────────────────────────────
   const [metrics, setMetrics] = useState({
-    collections: { daily_cash: 0, daily_upi: 0, monthly_total: 0 },
-    operations: {
-      buses_active: 0, buses_total: 0,
-      trips_completed: 0, trips_scheduled: 0,
-      routes_active: 0, routes_total: 0,
-      total_passengers: 0,
-    },
+    collections: { daily_cash: 0, daily_upi: 0, monthly_total: 0, prev_month_total: 0 },
+    operations:  { buses_active: 0, buses_total: 0, trips_completed: 0, trips_scheduled: 0, routes_active: 0, routes_total: 0, total_passengers: 0 },
     settlements: { total_transactions: 0, verified: 0, pending_verification: 0, failed: 0 },
+    recent_activity: [],
   });
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split("T")[0]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // ── Section 3: Fetch ────────────────────────────────────────────────────
   useEffect(() => { fetchDashboardData(); }, [selectedDate]);
 
   const fetchDashboardData = async () => {
@@ -45,422 +68,309 @@ export default function CompanyDashboard() {
     setError(null);
     try {
       const res = await api.get(`${BASE_URL}/get_company_dashboard_metrics?date=${selectedDate}`);
-      if (res.data?.data) {
-        setMetrics(res.data.data);
-      } else {
-        setError("Unexpected response format from server");
-      }
+      if (res.data?.data) setMetrics(res.data.data);
+      else setError("Unexpected response format");
     } catch (err) {
-      if (err.response?.status === 401) {
-        setError("Authentication expired. Please log in again.");
-      } else if (err.response?.status === 400) {
-        setError("Invalid date selected. Please choose a valid date.");
-      } else if (!err.response) {
-        setError("Cannot connect to server. Please check your connection.");
-      } else {
-        setError("Failed to load dashboard data. Please try again.");
-      }
+      if (err.response?.status === 401) setError("Authentication expired. Please log in again.");
+      else if (!err.response) setError("Cannot connect to server.");
+      else setError("Failed to load dashboard data.");
     } finally {
       setLoading(false);
     }
   };
 
-  // ── Section 4: Formatters ───────────────────────────────────────────────
-  const formatCurrency = (val) =>
-    val === null || val === undefined
-      ? "—"
-      : `₹${val.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
-
-  const formatNumber = (val) =>
-    val === null || val === undefined ? "—" : val.toLocaleString("en-IN");
-
-  const formatActiveTotal = (active, total) =>
-    active == null || total == null ? "—" : `${formatNumber(active)}/${formatNumber(total)}`;
-
-  const formatPercentage = (part, total) => {
-    if (!total || total === 0) return "0%";
-    return `${Math.round((part / total) * 100)}%`;
-  };
-
-  const shortCurrency = (val) => {
-    if (val == null) return "—";
-    if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
-    if (val >= 1000) return `₹${(val / 1000).toFixed(1)}K`;
-    return `₹${val}`;
-  };
-
-  // ── Derived values ──────────────────────────────────────────────────────
-  const totalDailyCollection =
-    (metrics.collections.daily_cash || 0) + (metrics.collections.daily_upi || 0);
+  const d = metrics;
+  const totalDaily = (d.collections.daily_cash || 0) + (d.collections.daily_upi || 0);
+  const cashPct    = totalDaily > 0 ? Math.round((d.collections.daily_cash / totalDaily) * 100) : 0;
+  const upiPct     = 100 - cashPct;
+  const monthChange = d.collections.prev_month_total > 0
+    ? ((d.collections.monthly_total - d.collections.prev_month_total) / d.collections.prev_month_total * 100).toFixed(1)
+    : '0';
+  const tripPct   = d.operations.trips_scheduled > 0 ? Math.round((d.operations.trips_completed / d.operations.trips_scheduled) * 100) : 0;
+  const avgPerTrip = d.operations.trips_completed > 0 ? Math.round(d.operations.total_passengers / d.operations.trips_completed) : 0;
 
   const selectedDateLabel = selectedDate
-    ? new Date(`${selectedDate}T00:00:00`).toLocaleDateString("en-IN", {
-        day: "2-digit", month: "short", year: "numeric",
-      })
+    ? new Date(`${selectedDate}T00:00:00`).toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short", year: "numeric" })
     : "";
 
-  // Chart data for Collections AreaChart (single-day split visualised as two points)
-  const collectionChartData = [
-    { name: "Cash", Cash: metrics.collections.daily_cash || 0, UPI: 0 },
-    { name: "UPI", Cash: 0, UPI: metrics.collections.daily_upi || 0 },
-    { name: "Monthly", Cash: 0, UPI: 0 },
+  const QUICK_ACTIONS = [
+    { icon: BarChart2,   label: 'Trip Reports',  path: '/dashboard/trip-data',          color: '#3b82f6' },
+    { icon: CalendarCog, label: 'Schedules',      path: '/dashboard/schedule-data',       color: '#14b8a6' },
+    { icon: Ticket,      label: 'Ticket Data',    path: '/dashboard/ticket-data',         color: '#8b5cf6' },
+    { icon: Warehouse,   label: 'Depots',         path: '/dashboard/depots',              color: '#f59e0b' },
+    { icon: Users,       label: 'Users',          path: '/dashboard/users',               color: '#6366f1' },
+    { icon: Settings,    label: 'Settings',       path: '/dashboard/master-data/settings', color: '#64748b' },
   ];
 
-  // Chart data for Settlements DonutChart
-  const settlementChartData = [
-    { name: "Verified", value: metrics.settlements.verified || 0, color: "#22c55e" },
-    { name: "Pending", value: metrics.settlements.pending_verification || 0, color: "#f59e0b" },
-    { name: "Failed", value: metrics.settlements.failed || 0, color: "#ef4444" },
-  ];
+  const ACTIVITY_ICONS = { trip_close: CheckCircle2, trip_open: PlayCircle, settlement: CheckCircle2 };
+  const ACTIVITY_COLORS = { trip_close: '#10b981', trip_open: '#3b82f6', settlement: '#8b5cf6' };
 
-  // Progress bar helper
-  const pct = (active, total) =>
-    total > 0 ? Math.min(100, Math.round((active / total) * 100)) : 0;
-
-  // ── Section 5: UI ───────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-slate-50 animate-fade-in">
-      {/* Background gradient decoration */}
-      <div className="pointer-events-none fixed -top-24 left-1/2 h-72 w-[720px] -translate-x-1/2 rounded-full bg-gradient-to-r from-amber-100 via-sky-100 to-emerald-100 blur-3xl opacity-60" />
+    <div className="p-5 lg:p-6 min-h-full bg-slate-50">
 
-      <div className="relative max-w-[1400px] mx-auto p-3 sm:p-4 lg:p-6">
+      {/* ═══ HEADER ══════════════════════════════════════════════════════ */}
+      <PageHeader
+        icon={RouteIcon}
+        title="Company Dashboard"
+        subtitle={`${companyName}`}
+        livePill={{ live: !loading, text: loading ? 'Loading…' : 'Live' }}
+        actions={
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-2 text-sm text-slate-600 bg-white border border-slate-200 px-3 py-2 rounded-lg shadow-sm cursor-pointer hover:bg-slate-50 transition-colors">
+              <Calendar size={14} className="text-slate-400" />
+              <input
+                type="date"
+                value={selectedDate}
+                max={new Date().toISOString().split("T")[0]}
+                onChange={e => setSelectedDate(e.target.value)}
+                className="bg-transparent outline-none text-slate-700 cursor-pointer text-sm"
+              />
+            </label>
+            <Btn variant="secondary" size="md" icon={RefreshCw} onClick={fetchDashboardData}>Refresh</Btn>
+          </div>
+        }
+      />
 
-        {/* ═══════ HEADER ═══════════════════════════════════════════════ */}
-        <Card className="mb-6 overflow-hidden border-slate-200/80 bg-white/90 backdrop-blur shadow-sm rounded-2xl">
-          <div className="absolute inset-0 bg-gradient-to-r from-white via-white to-slate-50 pointer-events-none" />
-          <CardContent className="relative p-4 sm:p-5 lg:p-6">
+      {/* Error banner */}
+      {error && (
+        <div className="mb-5 flex items-center gap-2.5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          <AlertCircle size={15} className="shrink-0" />
+          <span>{error}</span>
+          <button onClick={fetchDashboardData} className="ml-auto text-xs font-medium underline">Retry</button>
+        </div>
+      )}
 
-            {/* Title row */}
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-5">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                  {companyName} Dashboard
-                  {companyId && (
-                    <span className="ml-2 normal-case font-normal text-slate-400">
-                      (ID: {companyId})
-                    </span>
-                  )}
-                </p>
-                <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">
-                  Company Overview
-                </h1>
-                <p className="text-slate-500 text-sm mt-1">
-                  Welcome back, <span className="font-semibold text-slate-700">{username}</span>.
-                  Operational pulse for{" "}
-                  <span className="font-semibold text-slate-700">{selectedDateLabel}</span>.
-                </p>
-              </div>
+      {/* Date label */}
+      {!error && (
+        <p className="text-xs text-slate-400 mb-5 -mt-2">{selectedDateLabel}</p>
+      )}
 
-              {/* Date picker */}
-              <label className="flex items-center gap-2 text-sm text-slate-600 bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg shadow-sm w-fit hover:bg-slate-100 transition-colors cursor-pointer shrink-0">
-                <CalendarDays size={15} className="text-slate-500" />
-                <input
-                  aria-label="Select date"
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  max={new Date().toISOString().split("T")[0]}
-                  className="bg-transparent outline-none text-slate-700 cursor-pointer"
-                />
-              </label>
+      {/* ═══ HERO KPIs ═══════════════════════════════════════════════════ */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
+        <KpiCard
+          title="Today's Revenue"
+          value={loading ? '—' : fmt.inr(totalDaily)}
+          subtitle={loading ? '' : `Cash ${cashPct}% · UPI ${upiPct}%`}
+          icon={Wallet}
+          color="#3b82f6"
+          loading={loading}
+        />
+        <KpiCard
+          title="Month to Date"
+          value={loading ? '—' : fmt.inrK(d.collections.monthly_total)}
+          subtitle={loading ? '' : `vs ${fmt.inrK(d.collections.prev_month_total)} last month`}
+          icon={TrendingUp}
+          color="#8b5cf6"
+          loading={loading}
+          trend={!loading && d.collections.prev_month_total > 0 ? {
+            dir: parseFloat(monthChange) >= 0 ? 'up' : 'down',
+            value: `${Math.abs(parseFloat(monthChange))}%`,
+          } : undefined}
+        />
+        <KpiCard
+          title="Passengers Today"
+          value={loading ? '—' : d.operations.total_passengers.toLocaleString('en-IN')}
+          subtitle={loading ? '' : `~${avgPerTrip} avg per trip`}
+          icon={Users}
+          color="#14b8a6"
+          loading={loading}
+        />
+        <KpiCard
+          title="Trip Completion"
+          value={loading ? '—' : `${tripPct}%`}
+          subtitle={loading ? '' : `${d.operations.trips_completed} of ${d.operations.trips_scheduled} scheduled`}
+          icon={RouteIcon}
+          color="#f59e0b"
+          loading={loading}
+        />
+      </div>
+
+      {/* ═══ ROW 1 — Revenue + Operations ═══════════════════════════════ */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+
+        {/* Revenue Breakdown */}
+        <DesignCard>
+          <div className="p-5">
+            <CardHead icon={Banknote} bg="bg-blue-50" color="text-blue-600" title="Revenue Breakdown" meta="Today's split" />
+
+            {/* Stacked bar */}
+            <div className="h-3.5 rounded-full overflow-hidden flex mb-5">
+              {totalDaily > 0 ? (
+                <>
+                  <div className="h-full bg-emerald-500 transition-all duration-500" style={{ width: `${cashPct}%` }} />
+                  <div className="h-full bg-violet-500 transition-all duration-500" style={{ width: `${upiPct}%` }} />
+                </>
+              ) : (
+                <div className="h-full bg-slate-100 w-full" />
+              )}
             </div>
 
-            {/* Error banner */}
-            {error && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
-                <AlertCircle size={16} className="text-red-500 mt-0.5 shrink-0" />
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-red-800">Error loading dashboard</p>
-                  <p className="text-xs text-red-600 mt-0.5">{error}</p>
-                </div>
-                <button
-                  onClick={fetchDashboardData}
-                  className="flex items-center gap-1 text-xs text-red-700 hover:text-red-900 font-medium"
-                >
-                  <RefreshCw size={12} /> Retry
-                </button>
+            {/* Cash */}
+            <div className="flex items-center justify-between py-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <span className="w-3 h-3 rounded bg-emerald-500" />
+                <span className="text-sm font-medium text-slate-700">Cash Collection</span>
               </div>
-            )}
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-bold text-slate-800">{fmt.inr(d.collections.daily_cash)}</span>
+                <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">{cashPct}%</span>
+              </div>
+            </div>
 
-            {/* Quick stat cards */}
-            <div className="grid gap-3 sm:grid-cols-3">
+            {/* UPI */}
+            <div className="flex items-center justify-between py-3">
+              <div className="flex items-center gap-2.5">
+                <span className="w-3 h-3 rounded bg-violet-500" />
+                <span className="text-sm font-medium text-slate-700">UPI Collection</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-bold text-slate-800">{fmt.inr(d.collections.daily_upi)}</span>
+                <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-100">{upiPct}%</span>
+              </div>
+            </div>
+
+            {/* Monthly footer */}
+            <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between">
+              <span className="text-xs text-slate-500">
+                Monthly total ({new Date(`${selectedDate}T00:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })})
+              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-slate-800">{fmt.inrK(d.collections.monthly_total)}</span>
+                {parseFloat(monthChange) !== 0 && (
+                  <span className={`text-xs font-semibold flex items-center gap-0.5 ${parseFloat(monthChange) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                    <TrendingUp size={11} />
+                    {parseFloat(monthChange) >= 0 ? '+' : ''}{monthChange}%
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </DesignCard>
+
+        {/* Operations */}
+        <DesignCard>
+          <div className="p-5">
+            <CardHead icon={Bus} bg="bg-teal-50" color="text-teal-600" title="Operations" meta="Fleet & routes" />
+            <div className="space-y-4">
+              <DashProgress label="Fleet Utilization"  active={d.operations.buses_active}      total={d.operations.buses_total}      color="#14b8a6" />
+              <DashProgress label="Trip Completion"    active={d.operations.trips_completed}   total={d.operations.trips_scheduled}  color="#3b82f6" />
+              <DashProgress label="Active Routes"      active={d.operations.routes_active}     total={d.operations.routes_total}     color="#f59e0b" />
+            </div>
+            <div className="mt-5 pt-4 border-t border-slate-100 grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-[11px] text-slate-400 font-semibold uppercase tracking-widest">Passengers</p>
+                <p className="text-xl font-bold text-slate-800 mt-0.5">{d.operations.total_passengers.toLocaleString('en-IN')}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-[11px] text-slate-400 font-semibold uppercase tracking-widest">Avg / Trip</p>
+                <p className="text-xl font-bold text-slate-800 mt-0.5">~{avgPerTrip}</p>
+              </div>
+            </div>
+          </div>
+        </DesignCard>
+      </div>
+
+      {/* ═══ ROW 2 — Settlements + Quick Actions + Activity ══════════════ */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+        {/* Settlements */}
+        <DesignCard>
+          <div className="p-5">
+            <CardHead icon={Receipt} bg="bg-amber-50" color="text-amber-600" title="Settlements" meta={`${d.settlements.total_transactions} txns`} />
+            <div className="space-y-4">
               {[
-                {
-                  label: "Daily Collection",
-                  value: loading ? null : formatCurrency(totalDailyCollection),
-                  sub: `Cash: ${formatCurrency(metrics.collections.daily_cash)} · UPI: ${formatCurrency(metrics.collections.daily_upi)}`,
-                },
-                {
-                  label: "Monthly Till Date",
-                  value: loading ? null : formatCurrency(metrics.collections.monthly_total),
-                  sub: new Date(`${selectedDate}T00:00:00`).toLocaleDateString("en-IN", { month: "long", year: "numeric" }) + " revenue",
-                },
-                {
-                  label: "Total Passengers",
-                  value: loading ? null : formatNumber(metrics.operations.total_passengers),
-                  sub: `Across ${formatNumber(metrics.operations.trips_completed)} trips`,
-                },
-              ].map(({ label, value, sub }) => (
-                <div key={label} className="rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm hover:shadow-md transition-shadow">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">{label}</p>
-                  {loading
-                    ? <Skeleton className="mt-2 h-7 w-28" />
-                    : <p className="text-xl font-bold text-slate-900 mt-2">{value}</p>
-                  }
-                  {loading
-                    ? <Skeleton className="mt-1.5 h-3 w-36" />
-                    : <p className="text-xs text-slate-500 mt-1">{sub}</p>
-                  }
+                { label: 'Verified', value: d.settlements.verified,              color: '#10b981', pill: 'bg-emerald-50 text-emerald-700 border-emerald-100' },
+                { label: 'Pending',  value: d.settlements.pending_verification,  color: '#f59e0b', pill: 'bg-amber-50 text-amber-700 border-amber-100' },
+                { label: 'Failed',   value: d.settlements.failed,                color: '#ef4444', pill: 'bg-rose-50 text-rose-700 border-rose-100' },
+              ].map(({ label, value, color, pill }) => {
+                const pct = d.settlements.total_transactions > 0 ? Math.round((value / d.settlements.total_transactions) * 100) : 0;
+                return (
+                  <div key={label}>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
+                        <span className="text-sm text-slate-600">{label}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-slate-800">{value}</span>
+                        <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded border ${pill}`}>{pct}%</span>
+                      </div>
+                    </div>
+                    <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.max(pct, pct > 0 ? 2 : 0)}%`, backgroundColor: color }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </DesignCard>
+
+        {/* Quick Actions */}
+        <DesignCard>
+          <div className="p-5">
+            <CardHead icon={Sparkles} bg="bg-indigo-50" color="text-indigo-600" title="Quick Actions" />
+            <div className="grid grid-cols-2 gap-2">
+              {QUICK_ACTIONS.map(({ icon: Ic, label, path, color }) => (
+                <div
+                  key={label}
+                  onClick={() => navigate(path)}
+                  className="flex items-center gap-2 px-2.5 py-2.5 rounded-xl border border-slate-100 hover:border-slate-200 hover:bg-slate-50 cursor-pointer transition-all"
+                >
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: `${color}18` }}>
+                    <Ic size={14} style={{ color }} />
+                  </div>
+                  <span className="text-xs font-medium text-slate-700">{label}</span>
                 </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </DesignCard>
 
-        {/* ═══════ COLLECTIONS ══════════════════════════════════════════ */}
-        <Card className="mb-6 border-slate-200/80 bg-white/90 shadow-sm rounded-2xl">
-          <CardHeader className="p-4 sm:p-5 pb-0">
-            <div className="flex items-center gap-2.5">
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-md">
-                <Wallet size={16} />
-              </span>
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900">Collection Overview</h2>
-                <p className="text-xs text-slate-500">Daily and month-to-date revenue distribution</p>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="p-4 sm:p-5">
-            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-              <KpiCard
-                title="Total Daily Collection"
-                value={loading ? "..." : formatCurrency(totalDailyCollection)}
-                icon={Wallet}
-                color="#3b82f6"
-                loading={loading}
-              />
-              <KpiCard
-                title="Daily Cash"
-                value={loading ? "..." : formatCurrency(metrics.collections.daily_cash)}
-                subtitle={totalDailyCollection > 0 ? formatPercentage(metrics.collections.daily_cash, totalDailyCollection) + " of total" : ""}
-                icon={Banknote}
-                color="#10b981"
-                loading={loading}
-              />
-              <KpiCard
-                title="Daily UPI"
-                value={loading ? "..." : formatCurrency(metrics.collections.daily_upi)}
-                subtitle={totalDailyCollection > 0 ? formatPercentage(metrics.collections.daily_upi, totalDailyCollection) + " of total" : ""}
-                icon={CreditCard}
-                color="#8b5cf6"
-                loading={loading}
-              />
-              <KpiCard
-                title="Monthly Till Date"
-                value={loading ? "..." : formatCurrency(metrics.collections.monthly_total)}
-                icon={TrendingUp}
-                color="#f59e0b"
-                loading={loading}
-              />
-            </div>
-
-            {/* Area Chart */}
-            {!loading && totalDailyCollection > 0 && (
-              <div>
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
-                  Cash vs UPI Breakdown
-                </p>
-                <AreaChart
-                  className="h-40"
-                  data={[
-                    { name: "Cash", Cash: metrics.collections.daily_cash || 0, UPI: 0 },
-                    { name: "UPI", Cash: 0, UPI: metrics.collections.daily_upi || 0 },
-                  ]}
-                  areas={[
-                    { key: "Cash", name: "Daily Cash", color: "#10b981" },
-                    { key: "UPI", name: "Daily UPI", color: "#8b5cf6" },
-                  ]}
-                  formatter={shortCurrency}
-                />
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* ═══════ OPERATIONS ═══════════════════════════════════════════ */}
-        <Card className="mb-6 border-slate-200/80 bg-white/90 shadow-sm rounded-2xl">
-          <CardHeader className="p-4 sm:p-5 pb-0">
-            <div className="flex items-center gap-2.5">
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-md">
-                <Bus size={16} />
-              </span>
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900">Operations Overview</h2>
-                <p className="text-xs text-slate-500">Fleet activity and route performance</p>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="p-4 sm:p-5">
-            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-              <KpiCard
-                title="Buses (Active/Total)"
-                value={loading ? "..." : formatActiveTotal(metrics.operations.buses_active, metrics.operations.buses_total)}
-                subtitle={metrics.operations.buses_total > 0 ? formatPercentage(metrics.operations.buses_active, metrics.operations.buses_total) + " active" : ""}
-                icon={Bus}
-                color="#14b8a6"
-                loading={loading}
-              />
-              <KpiCard
-                title="Trips (Done/Scheduled)"
-                value={loading ? "..." : formatActiveTotal(metrics.operations.trips_completed, metrics.operations.trips_scheduled)}
-                subtitle={metrics.operations.trips_scheduled > 0 ? formatPercentage(metrics.operations.trips_completed, metrics.operations.trips_scheduled) + " completed" : ""}
-                icon={Route}
-                color="#22c55e"
-                loading={loading}
-              />
-              <KpiCard
-                title="Routes (Active/Total)"
-                value={loading ? "..." : formatActiveTotal(metrics.operations.routes_active, metrics.operations.routes_total)}
-                subtitle={metrics.operations.routes_total > 0 ? formatPercentage(metrics.operations.routes_active, metrics.operations.routes_total) + " active" : ""}
-                icon={MapPin}
-                color="#a855f7"
-                loading={loading}
-              />
-              <KpiCard
-                title="Total Passengers"
-                value={loading ? "..." : formatNumber(metrics.operations.total_passengers)}
-                subtitle={metrics.operations.trips_completed > 0 ? `Avg ${Math.round(metrics.operations.total_passengers / metrics.operations.trips_completed)} per trip` : ""}
-                icon={Users}
-                color="#3b82f6"
-                loading={loading}
-              />
-            </div>
-
-            {/* Utilization progress bars */}
-            {!loading && (
+        {/* Recent Activity */}
+        <DesignCard>
+          <div className="p-5">
+            <CardHead icon={Activity} bg="bg-slate-100" color="text-slate-600" title="Recent Activity" />
+            {loading ? (
               <div className="space-y-3">
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
-                  Utilization
-                </p>
-                {[
-                  { label: "Buses", active: metrics.operations.buses_active, total: metrics.operations.buses_total, color: "#14b8a6" },
-                  { label: "Trips", active: metrics.operations.trips_completed, total: metrics.operations.trips_scheduled, color: "#22c55e" },
-                  { label: "Routes", active: metrics.operations.routes_active, total: metrics.operations.routes_total, color: "#a855f7" },
-                ].map(({ label, active, total, color }) => {
-                  const p = pct(active, total);
+                {[1, 2, 3, 4].map(i => (
+                  <div key={i} className="flex gap-2">
+                    <div className="w-3 h-3 rounded-full bg-slate-100 animate-pulse shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <div className="h-3 bg-slate-100 rounded animate-pulse w-3/4 mb-1" />
+                      <div className="h-2.5 bg-slate-100 rounded animate-pulse w-1/2" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : d.recent_activity && d.recent_activity.length > 0 ? (
+              <div>
+                {d.recent_activity.map((a, i) => {
+                  const Ic = ACTIVITY_ICONS[a.type] || CircleDot;
+                  const col = ACTIVITY_COLORS[a.type] || '#64748b';
                   return (
-                    <div key={label} className="flex items-center gap-3">
-                      <span className="w-14 text-xs text-slate-500 shrink-0">{label}</span>
-                      <div className="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all duration-500"
-                          style={{ width: `${p}%`, backgroundColor: color }}
-                        />
+                    <div key={i} className="flex items-center gap-2.5 py-2.5 border-b border-slate-50 last:border-0 last:pb-0 first:pt-0">
+                      <Ic size={13} style={{ color: col }} className="shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-slate-700 truncate">{a.label}</p>
+                        {a.route && <p className="text-[11px] text-slate-400 truncate">{a.route}</p>}
                       </div>
-                      <span className="w-16 text-right text-xs font-medium text-slate-600 shrink-0">
-                        {formatActiveTotal(active, total)}
-                      </span>
-                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0 w-10 justify-center">
-                        {p}%
-                      </Badge>
+                      <div className="text-right shrink-0">
+                        {a.amount != null && <p className="text-[11px] font-semibold text-emerald-600">{fmt.inrK(a.amount)}</p>}
+                        <p className="text-[11px] text-slate-400 tabular-nums">{a.time}</p>
+                      </div>
                     </div>
                   );
                 })}
               </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* ═══════ SETTLEMENTS ══════════════════════════════════════════ */}
-        <Card className="mb-6 border-slate-200/80 bg-white/90 shadow-sm rounded-2xl">
-          <CardHeader className="p-4 sm:p-5 pb-0">
-            <div className="flex items-center gap-2.5">
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-amber-600 text-white shadow-md">
-                <Receipt size={16} />
-              </span>
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900">Settlements & Verification</h2>
-                <p className="text-xs text-slate-500">UPI transaction status and reconciliation</p>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="p-4 sm:p-5">
-            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-              <KpiCard
-                title="Total Transactions"
-                value={loading ? "..." : formatNumber(metrics.settlements.total_transactions)}
-                subtitle="UPI payments received"
-                icon={Receipt}
-                color="#475569"
-                loading={loading}
-              />
-              <KpiCard
-                title="Verified"
-                value={loading ? "..." : formatNumber(metrics.settlements.verified)}
-                subtitle={metrics.settlements.total_transactions > 0 ? formatPercentage(metrics.settlements.verified, metrics.settlements.total_transactions) + " of total" : ""}
-                icon={CheckCircle}
-                color="#22c55e"
-                loading={loading}
-              />
-              <KpiCard
-                title="Pending"
-                value={loading ? "..." : formatNumber(metrics.settlements.pending_verification)}
-                subtitle={metrics.settlements.total_transactions > 0 ? formatPercentage(metrics.settlements.pending_verification, metrics.settlements.total_transactions) + " of total" : ""}
-                icon={Clock}
-                color="#f59e0b"
-                loading={loading}
-              />
-              <KpiCard
-                title="Failed"
-                value={loading ? "..." : formatNumber(metrics.settlements.failed)}
-                subtitle={metrics.settlements.total_transactions > 0 ? formatPercentage(metrics.settlements.failed, metrics.settlements.total_transactions) + " of total" : ""}
-                icon={XCircle}
-                color="#ef4444"
-                loading={loading}
-              />
-            </div>
-
-            {/* Donut chart */}
-            {!loading && metrics.settlements.total_transactions > 0 && (
-              <div className="flex flex-col sm:flex-row items-center gap-6">
-                <DonutChart
-                  className="h-44 w-full sm:w-64 shrink-0"
-                  data={settlementChartData}
-                />
-                <div className="space-y-2 w-full">
-                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
-                    Breakdown
-                  </p>
-                  {settlementChartData.map(({ name, value, color }) => {
-                    const p = pct(value, metrics.settlements.total_transactions);
-                    return (
-                      <div key={name} className="flex items-center gap-3">
-                        <span className="inline-block h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
-                        <span className="text-xs text-slate-600 w-16 shrink-0">{name}</span>
-                        <div className="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden">
-                          <div className="h-full rounded-full" style={{ width: `${p}%`, backgroundColor: color }} />
-                        </div>
-                        <span className="text-xs font-semibold text-slate-700 w-10 text-right shrink-0">
-                          {formatNumber(value)}
-                        </span>
-                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 w-10 justify-center shrink-0">
-                          {p}%
-                        </Badge>
-                      </div>
-                    );
-                  })}
-                </div>
+            ) : (
+              <div className="text-center py-6">
+                <Activity size={20} className="text-slate-200 mx-auto mb-2" />
+                <p className="text-xs text-slate-400">No activity for this date</p>
               </div>
             )}
-          </CardContent>
-        </Card>
-
-        {/* Footer */}
-        {!loading && !error && (
-          <p className="text-center text-xs text-slate-400 pb-4">
-            Last updated: {new Date().toLocaleTimeString("en-IN")}
-          </p>
-        )}
+          </div>
+        </DesignCard>
       </div>
     </div>
   );
