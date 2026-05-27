@@ -754,7 +754,6 @@ bus-ticketing-system/
 
 - APK dashboard metrics endpoint
 - Stage-wise revenue report endpoint
-- Expense report endpoint
 
 ---
 
