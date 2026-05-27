@@ -36,6 +36,9 @@ class RawDataLog(models.Model):
     error_message = models.TextField(null=True, blank=True)
     received_at   = models.DateTimeField(auto_now_add=True)
     processed_at  = models.DateTimeField(null=True, blank=True)
+    # Incremented each time a superadmin manually retries this row.
+    # Capped at MAX_MANUAL_RETRIES (3) in the retry view.
+    retry_count   = models.PositiveSmallIntegerField(default=0)
 
     class Meta:
         db_table = 'raw_data_log'
