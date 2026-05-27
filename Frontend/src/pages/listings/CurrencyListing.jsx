@@ -1,48 +1,27 @@
 import { useState, useEffect } from 'react';
-import { Coins, Plus, Eye, Pencil, Search } from 'lucide-react';
-import { useFilteredList } from '../../assets/js/useFilteredList';
-import api, { BASE_URL } from '../../assets/js/axiosConfig';
-import { Button }   from '@/components/ui/button';
-import { Input }    from '@/components/ui/input';
-import { Label }    from '@/components/ui/label';
+import { Coins, Plus, Eye, Pencil, Search, X } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import api, { BASE_URL } from '../../assets/js/axiosConfig';
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
-} from '@/components/ui/dialog';
+  PageHeader, Btn, DesignCard, DesignModal,
+  FieldBlock, FieldGroup, FormField, DesignInput, Pagination, fmt,
+} from '@/components/design';
 
 export default function CurrencyListing() {
-
-  // ── State ────────────────────────────────────────────────────────────────────
-  const [currencies, setCurrencies]   = useState([]);
-  const [loading, setLoading]         = useState(true);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalMode, setModalMode]     = useState('create');
-  const [submitting, setSubmitting]   = useState(false);
-  const [editingItem, setEditingItem] = useState(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+  const [currencies, setCurrencies] = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [search, setSearch]         = useState('');
+  const [page, setPage]             = useState(1);
+  const [modalOpen, setModalOpen]   = useState(false);
+  const [modalMode, setModalMode]   = useState('view');
+  const [selected, setSelected]     = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const PER_PAGE = 10;
 
   const emptyForm = { currency: '', country: '' };
-  const [formData, setFormData] = useState(emptyForm);
+  const [form, setForm] = useState(emptyForm);
 
-  // ── Search ───────────────────────────────────────────────────────────────────
-  const { filteredItems, searchTerm, setSearchTerm } = useFilteredList(
-    currencies, ['currency', 'country']
-  );
-
-  // ── Pagination ───────────────────────────────────────────────────────────────
-  const indexOfLast  = currentPage * itemsPerPage;
-  const indexOfFirst = indexOfLast - itemsPerPage;
-  const currentItems = filteredItems.slice(indexOfFirst, indexOfLast);
-  const totalPages   = Math.ceil(filteredItems.length / itemsPerPage);
-  const getPageNumbers = () => {
-    let s = Math.max(1, currentPage - 1);
-    let e = Math.min(totalPages, s + 2);
-    if (e - s < 2) s = Math.max(1, e - 2);
-    return Array.from({ length: e - s + 1 }, (_, i) => s + i);
-  };
-
-  // ── Data ─────────────────────────────────────────────────────────────────────
+  // ── Fetch ──────────────────────────────────────────────────────────────────
   useEffect(() => { fetchCurrencies(); }, []);
 
   const fetchCurrencies = async () => {
@@ -50,7 +29,7 @@ export default function CurrencyListing() {
     try {
       const res = await api.get(`${BASE_URL}/masterdata/currencies`);
       setCurrencies(res.data?.data || []);
-      setCurrentPage(1);
+      setPage(1);
     } catch (err) {
       console.error('Error fetching currencies:', err);
       setCurrencies([]);
@@ -59,19 +38,37 @@ export default function CurrencyListing() {
     }
   };
 
+  // ── Filter + paginate ──────────────────────────────────────────────────────
+  const q = search.toLowerCase();
+  const filtered   = currencies.filter(c =>
+    c.currency?.toLowerCase().includes(q) ||
+    c.country?.toLowerCase().includes(q)
+  );
+  const totalPages = Math.ceil(filtered.length / PER_PAGE);
+  const paged      = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+
+  useEffect(() => { setPage(1); }, [search]);
+
+  // ── Modal helpers ──────────────────────────────────────────────────────────
+  const openView   = (c) => { setSelected(c); setModalMode('view');   setModalOpen(true); };
+  const openEdit   = (c) => { setSelected(c); setForm({ currency: c.currency, country: c.country }); setModalMode('edit');   setModalOpen(true); };
+  const openCreate = ()  => { setSelected(null); setForm(emptyForm);  setModalMode('create'); setModalOpen(true); };
+  const closeModal = ()  => { setModalOpen(false); };
+
+  // ── Submit ─────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
-      let response;
+      let res;
       if (modalMode === 'edit') {
-        response = await api.put(`${BASE_URL}/masterdata/currencies/update/${editingItem.id}`, formData);
+        res = await api.put(`${BASE_URL}/masterdata/currencies/update/${selected.id}`, form);
       } else {
-        response = await api.post(`${BASE_URL}/masterdata/currencies/create`, formData);
+        res = await api.post(`${BASE_URL}/masterdata/currencies/create`, form);
       }
-      if (response?.status === 200 || response?.status === 201) {
-        window.alert(response.data.message || 'Success');
-        setIsModalOpen(false);
-        setFormData(emptyForm);
+      if (res?.status === 200 || res?.status === 201) {
+        window.alert(res.data.message || 'Success');
+        closeModal();
+        setForm(emptyForm);
         fetchCurrencies();
       }
     } catch (err) {
@@ -83,61 +80,49 @@ export default function CurrencyListing() {
     }
   };
 
-  // ── Modal helpers ─────────────────────────────────────────────────────────────
-  const openCreateModal = () => { setFormData(emptyForm); setEditingItem(null); setModalMode('create'); setIsModalOpen(true); };
-  const openViewModal   = (item) => { setFormData(item); setEditingItem(item); setModalMode('view');   setIsModalOpen(true); };
-  const openEditModal   = (item) => { setFormData(item); setEditingItem(item); setModalMode('edit');   setIsModalOpen(true); };
-  const handleInputChange = (e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
-  const isReadOnly    = modalMode === 'view';
-  const getModalTitle = () => ({ view: 'Currency Details', edit: 'Edit Currency', create: 'Create Currency' }[modalMode]);
-
-  // ── Render ───────────────────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="p-3 sm:p-5 lg:p-7 min-h-screen bg-slate-50">
+    <div className="p-5 lg:p-6 min-h-full bg-slate-50">
 
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-3">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-slate-900">
-            <Coins size={20} className="text-white" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Currencies</h1>
-            <p className="text-slate-500 text-sm mt-0.5">Manage currency master data</p>
-          </div>
-        </div>
-        <Button onClick={openCreateModal} className="bg-slate-900 hover:bg-slate-700 text-white gap-2 shadow-sm">
-          <Plus size={16} /> Create Currency
-        </Button>
-      </div>
+      <PageHeader
+        icon={Coins}
+        title="Currencies"
+        subtitle="Manage currency master data"
+        actions={<Btn icon={Plus} onClick={openCreate}>Create Currency</Btn>}
+      />
 
       {/* Total chip */}
       <div className="flex gap-2 mb-5">
-        <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm shadow-xs">
+        <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm">
           <span className="text-slate-500">Total</span>
           <span className="font-bold text-slate-800">{currencies.length}</span>
         </div>
       </div>
 
       {/* Table card */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-
+      <DesignCard>
         {/* Search */}
         <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2">
           <Search size={15} className="text-slate-400 shrink-0" />
-          <Input
-            placeholder="Search by currency code or country..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="border-0 shadow-none focus-visible:ring-0 text-sm h-8 px-0"
+          <input
+            type="text"
+            placeholder="Search by currency code or country…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="flex-1 text-sm text-slate-700 placeholder:text-slate-400 outline-none bg-transparent"
           />
+          {search && (
+            <button onClick={() => setSearch('')} className="text-slate-400 hover:text-slate-600 cursor-pointer">
+              <X size={14} />
+            </button>
+          )}
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
-                {['ID', 'Currency Code', 'Country', ''].map(h => (
+                {['ID', 'Currency Code', 'Country', 'Created', ''].map(h => (
                   <th key={h} className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">{h}</th>
                 ))}
               </tr>
@@ -145,21 +130,38 @@ export default function CurrencyListing() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i}>{[60, 80, 140, 60].map((w, j) => (
-                    <td key={j} className="px-5 py-3"><Skeleton className="h-4 rounded" style={{ width: w }} /></td>
-                  ))}</tr>
+                  <tr key={i}>
+                    {[40, 80, 140, 100, 70].map((w, j) => (
+                      <td key={j} className="px-5 py-3.5"><Skeleton className="h-4 rounded" style={{ width: w }} /></td>
+                    ))}
+                  </tr>
                 ))
-              ) : currentItems.length === 0 ? (
-                <tr><td colSpan={4} className="px-5 py-10 text-center text-slate-400 text-sm">No currencies found.</td></tr>
-              ) : currentItems.map(item => (
-                <tr key={item.id} className="hover:bg-slate-50/60 transition-colors">
-                  <td className="px-5 py-3.5"><span className="font-mono text-slate-500 text-xs font-semibold">#{item.id}</span></td>
-                  <td className="px-5 py-3.5"><span className="font-bold text-slate-800 uppercase text-sm tracking-wide">{item.currency}</span></td>
-                  <td className="px-5 py-3.5"><span className="text-slate-700 text-sm">{item.country}</span></td>
+              ) : paged.length === 0 ? (
+                <tr><td colSpan={5} className="px-5 py-10 text-center text-slate-400 text-sm">No currencies found.</td></tr>
+              ) : paged.map(c => (
+                <tr key={c.id} className="hover:bg-slate-50/60 transition-colors">
+                  <td className="px-5 py-3.5">
+                    <span className="font-mono text-slate-500 text-xs font-semibold">#{c.id}</span>
+                  </td>
+                  <td className="px-5 py-3.5">
+                    <span className="text-sm font-bold text-slate-800 uppercase tracking-wide">{c.currency}</span>
+                  </td>
+                  <td className="px-5 py-3.5">
+                    <span className="text-sm text-slate-700">{c.country}</span>
+                  </td>
+                  <td className="px-5 py-3.5">
+                    <span className="text-xs text-slate-400">{c.created_at ? fmt.date(c.created_at) : '—'}</span>
+                  </td>
                   <td className="px-5 py-3.5">
                     <div className="flex items-center justify-end gap-1.5">
-                      <button onClick={() => openViewModal(item)} className="p-2 rounded-md bg-slate-900 text-white hover:bg-slate-700 transition-colors" title="View"><Eye size={16} /></button>
-                      <button onClick={() => openEditModal(item)} className="p-2 rounded-md bg-slate-900 text-white hover:bg-slate-700 transition-colors" title="Edit"><Pencil size={16} /></button>
+                      <button onClick={() => openView(c)} title="View"
+                        className="p-2 rounded-md bg-slate-900 text-white hover:bg-slate-700 transition-colors cursor-pointer">
+                        <Eye size={14} />
+                      </button>
+                      <button onClick={() => openEdit(c)} title="Edit"
+                        className="p-2 rounded-md bg-slate-900 text-white hover:bg-slate-700 transition-colors cursor-pointer">
+                        <Pencil size={14} />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -168,62 +170,60 @@ export default function CurrencyListing() {
           </table>
         </div>
 
-        {/* Pagination */}
-        {!loading && filteredItems.length > 0 && totalPages > 1 && (
+        {/* Pagination footer */}
+        {!loading && filtered.length > 0 && (
           <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between">
             <p className="text-xs text-slate-400">
-              Showing {indexOfFirst + 1}–{Math.min(indexOfLast, currencies.length)} of {currencies.length}
+              Showing {(page - 1) * PER_PAGE + 1}–{Math.min(page * PER_PAGE, filtered.length)} of {filtered.length}
             </p>
-            <div className="flex items-center gap-1.5">
-              <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 1} className="h-7 px-2.5 text-xs">Prev</Button>
-              {getPageNumbers().map(n => (
-                <Button key={n} size="sm" onClick={() => setCurrentPage(n)}
-                  className={`h-7 w-7 p-0 text-xs ${currentPage === n ? 'bg-slate-900 hover:bg-slate-700 text-white' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
-                  {n}
-                </Button>
-              ))}
-              <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage === totalPages} className="h-7 px-2.5 text-xs">Next</Button>
+            <Pagination currentPage={page} totalPages={totalPages} onChange={setPage} />
+          </div>
+        )}
+      </DesignCard>
+
+      {/* Modal */}
+      <DesignModal
+        open={modalOpen}
+        onClose={closeModal}
+        title={modalMode === 'view' ? 'Currency Details' : modalMode === 'edit' ? 'Edit Currency' : 'Create Currency'}
+        icon={Coins}
+        width="sm:max-w-md"
+      >
+        {modalMode === 'view' && selected ? (
+          <div className="space-y-5">
+            <FieldGroup columns={2}>
+              <FieldBlock label="Currency Code" value={selected.currency} accent="blue" />
+              <FieldBlock label="Country"       value={selected.country}  accent="emerald" />
+            </FieldGroup>
+            <FieldGroup columns={2}>
+              <FieldBlock label="Record ID" value={`#${selected.id}`} />
+              <FieldBlock label="Created"   value={selected.created_at ? fmt.date(selected.created_at) : '—'} />
+            </FieldGroup>
+            <div className="flex justify-end pt-3 border-t border-slate-100">
+              <Btn variant="secondary" onClick={closeModal}>Close</Btn>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <FormField label="Currency Code" required hint="3-letter ISO code (e.g. INR, USD)">
+              <DesignInput
+                value={form.currency}
+                onChange={v => setForm(f => ({ ...f, currency: v.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) }))}
+                placeholder="e.g. INR"
+              />
+            </FormField>
+            <FormField label="Country" required>
+              <DesignInput value={form.country} onChange={v => setForm(f => ({ ...f, country: v }))} placeholder="e.g. India" />
+            </FormField>
+            <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
+              <Btn variant="secondary" onClick={closeModal}>Cancel</Btn>
+              <Btn onClick={handleSubmit} disabled={submitting}>
+                {submitting ? 'Saving…' : modalMode === 'edit' ? 'Update' : 'Save'}
+              </Btn>
             </div>
           </div>
         )}
-      </div>
-
-      {/* Dialog */}
-      <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-slate-800">
-              <span className="p-1.5 rounded-lg bg-slate-900"><Coins size={14} className="text-white" /></span>
-              {getModalTitle()}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 mt-2">
-            <div className="space-y-1.5">
-              <Label className="text-slate-700">Currency Code *</Label>
-              <Input name="currency" value={formData.currency} onChange={handleInputChange} readOnly={isReadOnly}
-                placeholder="e.g. INR" maxLength={3}
-                className={`uppercase ${isReadOnly ? 'bg-slate-50 text-slate-600' : ''}`} />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-slate-700">Country *</Label>
-              <Input name="country" value={formData.country} onChange={handleInputChange} readOnly={isReadOnly}
-                placeholder="e.g. India"
-                className={isReadOnly ? 'bg-slate-50 text-slate-600' : ''} />
-            </div>
-            <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
-              <Button variant="outline" onClick={() => setIsModalOpen(false)} className="text-slate-600">
-                {isReadOnly ? 'Close' : 'Cancel'}
-              </Button>
-              {!isReadOnly && (
-                <Button onClick={handleSubmit} disabled={submitting} className="bg-slate-900 hover:bg-slate-700 text-white">
-                  {submitting ? 'Saving...' : modalMode === 'edit' ? 'Update' : 'Save'}
-                </Button>
-              )}
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
+      </DesignModal>
     </div>
   );
 }
