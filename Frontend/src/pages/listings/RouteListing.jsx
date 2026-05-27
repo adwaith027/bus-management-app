@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import { Route, Plus, Eye, Pencil, Search, X, ChevronUp, ChevronDown, Trash2, Upload,
-         AlertCircle, AlertTriangle, CheckCircle2, Download, FileSpreadsheet } from 'lucide-react';
+         AlertCircle, AlertTriangle, CheckCircle2, Download, FileSpreadsheet, MapPinned,
+         Info, IndianRupee, Warehouse } from 'lucide-react';
 import { useFilteredList } from '../../assets/js/useFilteredList';
 import api, { BASE_URL } from '../../assets/js/axiosConfig';
 import { Button }   from '@/components/ui/button';
 import { Badge }    from '@/components/ui/badge';
 import { Input }    from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
+import { PageHeader, Btn, FieldBlock, FieldGroup } from '@/components/design';
 
 const FARE_TYPES = [
   { value: '1', label: 'TABLE' },
@@ -1142,29 +1144,18 @@ export default function RouteListing() {
       {/* ═══════════════════════════════════════════════════════════════════ */}
 
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-3">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-slate-900">
-            <Route size={20} className="text-white" />
+      <input ref={importFileInputRef} type="file" accept=".xlsx" onChange={handleImportFileSelect} className="hidden" />
+      <PageHeader
+        icon={Route}
+        title="Route Management"
+        subtitle="Configure routes, stages, and fare structures"
+        actions={
+          <div className="flex items-center gap-2">
+            <Btn variant="secondary" icon={Upload} onClick={openImportModal}>Import Excel</Btn>
+            <Btn icon={Plus} onClick={openWizard}>Create Route</Btn>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Routes</h1>
-            <p className="text-slate-500 text-sm mt-0.5">Manage bus routes for your company</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <input ref={importFileInputRef} type="file" accept=".xlsx" onChange={handleImportFileSelect} className="hidden" />
-          <Button
-            onClick={openImportModal}
-            className="bg-emerald-700 hover:bg-emerald-800 text-white gap-2 shadow-sm"
-          >
-            <Upload size={16} /> Import Excel
-          </Button>
-          <Button onClick={openWizard} className="bg-slate-900 hover:bg-slate-700 text-white gap-2 shadow-sm">
-            <Plus size={16} /> Create Route
-          </Button>
-        </div>
-      </div>
+        }
+      />
 
       {/* Stats bar */}
       <div className="flex flex-wrap gap-2 mb-5">
@@ -1273,19 +1264,22 @@ export default function RouteListing() {
             {/* ── Tab bar ── */}
             <div className="flex border-b border-slate-200 bg-slate-50 rounded-none px-6 gap-1 pt-3">
               {[
-                { key: 'info',  label: 'Route Info' },
-                { key: 'stops', label: `Stops (${formData.route_stages.length})` },
-                { key: 'fare',  label: 'Fare Table' },
-              ].map(tab => (
-                <button key={tab.key} type="button"
-                  onClick={() => setActiveTab(tab.key)}
-                  className={`px-5 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors -mb-px
-                    ${activeTab === tab.key
-                      ? 'border-slate-900 text-slate-900 bg-white'
-                      : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-100'}`}>
-                  {tab.label}
-                </button>
-              ))}
+                { key: 'info',  label: 'Route Info',  icon: Info },
+                { key: 'stops', label: `Stops (${formData.route_stages.length})`, icon: MapPinned },
+                { key: 'fare',  label: 'Fare Table',  icon: IndianRupee },
+              ].map(tab => {
+                const Ic = tab.icon;
+                return (
+                  <button key={tab.key} type="button"
+                    onClick={() => setActiveTab(tab.key)}
+                    className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors -mb-px
+                      ${activeTab === tab.key
+                        ? 'border-slate-900 text-slate-900 bg-white'
+                        : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-100'}`}>
+                    <Ic size={13} />{tab.label}
+                  </button>
+                );
+              })}
             </div>
 
             {/* ── Tab panels ── */}
@@ -1293,70 +1287,104 @@ export default function RouteListing() {
 
               {/* ════ TAB: Route Info ════ */}
               {activeTab === 'info' && (
-                <div className="space-y-5">
+                isReadOnly ? (
+                  /* ─ View mode: FieldBlocks ─────────────────────────────── */
+                  <div className="space-y-5">
+                    <FieldGroup columns={3}>
+                      <FieldBlock label="Route Code" value={formData.route_code} accent="blue" />
+                      <FieldBlock label="Route Name" value={formData.route_name} accent="slate" />
+                      <FieldBlock label="Min Fare"   value={`₹${formData.min_fare}`} accent="emerald" />
+                    </FieldGroup>
+                    <FieldGroup title="Configuration" columns={3}>
+                      <FieldBlock label="Bus Type"  value={formData.bus_type_name || '—'} />
+                      <FieldBlock label="Fare Type" value={FARE_TYPES.find(f => f.value === String(formData.fare_type))?.label || `Type ${formData.fare_type}`} />
+                      <FieldBlock label="Stages"    value={formData.route_stages.length} />
+                    </FieldGroup>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium text-slate-700">Route Code</label>
-                      <input type="text" name="route_code" value={formData.route_code}
-                        onChange={handleInputChange} readOnly={isReadOnly}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 read-only:bg-slate-50 text-sm" />
+                    {/* Allowables */}
+                    <div>
+                      <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-2">Allowables</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {ROUTE_FLAGS.map(flag => (
+                          <span key={flag.name} className={`text-xs px-2.5 py-1 rounded-lg border font-medium ${
+                            formData[flag.name]
+                              ? 'bg-slate-800 text-white border-slate-800'
+                              : 'bg-slate-50 text-slate-400 border-slate-200 line-through'
+                          }`}>{flag.label}</span>
+                        ))}
+                      </div>
                     </div>
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium text-slate-700">Route Name</label>
-                      <input type="text" name="route_name" value={formData.route_name}
-                        onChange={handleInputChange} readOnly={isReadOnly}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 read-only:bg-slate-50 text-sm" />
-                    </div>
+
+                    {/* Depot Mapping */}
+                    {formData.depot_ids && formData.depot_ids.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-2">
+                          Depot Mapping ({formData.depot_ids.length})
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {depots.filter(d => formData.depot_ids.includes(d.id)).map(d => (
+                            <span key={d.id} className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-100">
+                              <Warehouse size={11} />{d.depot_name}
+                              <span className="text-blue-400 text-[10px]">{d.depot_code}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium text-slate-700">Min Fare (₹)</label>
-                      <input type="text" inputMode="numeric" name="min_fare" value={formData.min_fare}
-                        onChange={handleInputChange} readOnly={isReadOnly}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 read-only:bg-slate-50 text-sm" />
+                ) : (
+                  /* ─ Edit mode: form inputs ──────────────────────────────── */
+                  <div className="space-y-5">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-slate-700">Route Code</label>
+                        <input type="text" name="route_code" value={formData.route_code}
+                          onChange={handleInputChange}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 text-sm" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-slate-700">Route Name</label>
+                        <input type="text" name="route_name" value={formData.route_name}
+                          onChange={handleInputChange}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 text-sm" />
+                      </div>
                     </div>
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium text-slate-700">Fare Type</label>
-                      {isReadOnly ? (
-                        <input type="text" readOnly
-                          value={FARE_TYPES.find(f => f.value === String(formData.fare_type))?.label || `Type ${formData.fare_type}`}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-slate-50 text-sm" />
-                      ) : (
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-slate-700">Min Fare (₹)</label>
+                        <input type="text" inputMode="numeric" name="min_fare" value={formData.min_fare}
+                          onChange={handleInputChange}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 text-sm" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-slate-700">Fare Type</label>
                         <select name="fare_type" value={formData.fare_type} onChange={handleInputChange}
                           className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white text-sm">
                           <option value="">-- Select --</option>
                           {FARE_TYPES.map(ft => <option key={ft.value} value={ft.value}>{ft.label}</option>)}
                         </select>
-                      )}
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium text-slate-700">Start From</label>
-                      <input type="number" name="start_from" value={formData.start_from}
-                        onChange={handleInputChange} readOnly={isReadOnly} min="0"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 read-only:bg-slate-50 text-sm" />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium text-slate-700">Bus Type</label>
-                      {isReadOnly ? (
-                        <input type="text" value={formData.bus_type_name || '—'} readOnly
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-slate-50 text-sm" />
-                      ) : (
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-slate-700">Start From</label>
+                        <input type="number" name="start_from" value={formData.start_from}
+                          onChange={handleInputChange} min="0"
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 text-sm" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-slate-700">Bus Type</label>
                         <select name="bus_type" value={formData.bus_type} onChange={handleInputChange}
                           className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white text-sm">
                           <option value="">-- Select --</option>
                           {busTypes.map(bt => <option key={bt.id} value={bt.id}>{bt.name}</option>)}
                         </select>
-                      )}
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Allowables */}
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-sm font-medium text-slate-700">Select Allowables</p>
-                      {!isReadOnly && (
+                    {/* Allowables */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-sm font-medium text-slate-700">Select Allowables</p>
                         <button type="button" onClick={() => {
                           const allSelected = ROUTE_FLAGS.every(f => formData[f.name]);
                           setFormData(prev => {
@@ -1367,53 +1395,49 @@ export default function RouteListing() {
                         }} className="text-xs px-3 py-1 rounded-md border border-slate-300 text-slate-600 hover:bg-slate-50">
                           {ROUTE_FLAGS.every(f => formData[f.name]) ? 'Deselect All' : 'Select All'}
                         </button>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                      {ROUTE_FLAGS.map(flag => (
-                        <label key={flag.name} className={`flex items-center gap-2 text-sm p-2 rounded-lg border transition-colors
-                          ${formData[flag.name] ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200'}
-                          ${isReadOnly ? 'cursor-default' : 'cursor-pointer'}`}>
-                          <input type="checkbox" name={flag.name} checked={formData[flag.name] || false}
-                            onChange={handleInputChange} disabled={isReadOnly} className="sr-only" />
-                          {flag.label}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Depot Mapping */}
-                  {depots.length > 0 && (
-                    <div>
-                      <p className="text-sm font-medium text-slate-700 mb-2">Depot Mapping</p>
+                      </div>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                        {depots.map(depot => {
-                          const selected = formData.depot_ids.includes(depot.id);
-                          return (
-                            <label key={depot.id} className={`flex items-center gap-2 text-sm p-2 rounded-lg border transition-colors
-                              ${selected ? 'bg-indigo-700 text-white border-indigo-700' : 'bg-white text-slate-600 border-slate-200'}
-                              ${isReadOnly ? 'cursor-default' : 'cursor-pointer'}`}>
-                              <input type="checkbox" checked={selected}
-                                onChange={() => !isReadOnly && toggleFormDepot(depot.id)} disabled={isReadOnly} className="sr-only" />
-                              <span className="truncate">{depot.depot_name}</span>
-                              <span className={`text-xs ml-auto ${selected ? 'text-indigo-200' : 'text-slate-400'}`}>{depot.depot_code}</span>
-                            </label>
-                          );
-                        })}
+                        {ROUTE_FLAGS.map(flag => (
+                          <label key={flag.name} className={`flex items-center gap-2 text-sm p-2 rounded-lg border cursor-pointer transition-colors
+                            ${formData[flag.name] ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200'}`}>
+                            <input type="checkbox" name={flag.name} checked={formData[flag.name] || false}
+                              onChange={handleInputChange} className="sr-only" />
+                            {flag.label}
+                          </label>
+                        ))}
                       </div>
                     </div>
-                  )}
 
-                  {/* Soft delete — edit only */}
-                  {modalMode === 'edit' && (
+                    {/* Depot Mapping */}
+                    {depots.length > 0 && (
+                      <div>
+                        <p className="text-sm font-medium text-slate-700 mb-2">Depot Mapping</p>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                          {depots.map(depot => {
+                            const sel = formData.depot_ids.includes(depot.id);
+                            return (
+                              <label key={depot.id} className={`flex items-center gap-2 text-sm p-2 rounded-lg border cursor-pointer transition-colors
+                                ${sel ? 'bg-indigo-700 text-white border-indigo-700' : 'bg-white text-slate-600 border-slate-200'}`}>
+                                <input type="checkbox" checked={sel}
+                                  onChange={() => toggleFormDepot(depot.id)} className="sr-only" />
+                                <span className="truncate">{depot.depot_name}</span>
+                                <span className={`text-xs ml-auto ${sel ? 'text-indigo-200' : 'text-slate-400'}`}>{depot.depot_code}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Soft delete */}
                     <div className="flex items-center gap-3 p-3 bg-red-50 rounded-lg border border-red-100">
                       <input type="checkbox" name="is_deleted" id="route_is_deleted"
                         checked={formData.is_deleted || false} onChange={handleInputChange}
                         className="w-4 h-4 rounded border-slate-300" />
                       <label htmlFor="route_is_deleted" className="text-sm font-medium text-red-700">Mark as deleted</label>
                     </div>
-                  )}
-                </div>
+                  </div>
+                )
               )}
 
               {/* ════ TAB: Stops ════ */}
@@ -1434,47 +1458,65 @@ export default function RouteListing() {
 
                   {formData.route_stages.length === 0 ? (
                     <p className="text-sm text-slate-400 text-center py-10">No stops added yet</p>
+                  ) : isReadOnly ? (
+                    /* ── Visual timeline (view mode) ── */
+                    <div className="py-1">
+                      {formData.route_stages.map((stop, idx) => {
+                        const isFirst = idx === 0;
+                        const isLast  = idx === formData.route_stages.length - 1;
+                        return (
+                          <div key={idx} className="flex gap-3.5">
+                            <div className="flex flex-col items-center w-4 shrink-0">
+                              <div className={`w-3 h-3 rounded-full border-2 shrink-0 ${
+                                isFirst ? 'bg-blue-500 border-blue-500'
+                                : isLast  ? 'bg-emerald-500 border-emerald-500'
+                                : 'bg-white border-slate-300'
+                              }`} />
+                              {!isLast && <div className="w-0.5 flex-1 bg-slate-200 min-h-[24px]" />}
+                            </div>
+                            <div className={`flex items-center justify-between flex-1 ${isLast ? 'pb-0' : 'pb-3'}`}>
+                              <span className="text-sm font-medium text-slate-800">{stop.stage_name || '—'}</span>
+                              <span className="text-xs font-medium text-slate-500 tabular-nums">
+                                {stop.distance ? `${stop.distance} km` : '—'}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   ) : (
+                    /* ── Editable rows (edit mode) ── */
                     <div className="space-y-2">
                       {formData.route_stages.map((stop, idx) => (
                         <div key={idx} className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg border border-slate-200">
                           <div className="w-9 h-9 flex items-center justify-center bg-slate-800 text-white rounded-lg font-semibold text-sm shrink-0">{stop.sequence_no}</div>
                           <div className="flex-1 min-w-0">
-                            {isReadOnly ? (
-                              <input type="text" value={stop.stage_name || '—'} readOnly
-                                className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white text-sm" />
-                            ) : (
-                              <select value={stop.stage} onChange={e => updateStage(idx, 'stage', e.target.value)}
-                                className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white text-sm">
-                                <option value="">-- Select Stage --</option>
-                                {stages.map(s => <option key={s.id} value={s.id}>{s.stage_name} ({s.stage_code})</option>)}
-                              </select>
-                            )}
+                            <select value={stop.stage} onChange={e => updateStage(idx, 'stage', e.target.value)}
+                              className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white text-sm">
+                              <option value="">-- Select Stage --</option>
+                              {stages.map(s => <option key={s.id} value={s.id}>{s.stage_name} ({s.stage_code})</option>)}
+                            </select>
                           </div>
                           <div className="w-24 shrink-0">
                             <input type="number" placeholder="km" value={stop.distance}
                               onChange={e => updateStage(idx, 'distance', e.target.value)}
-                              readOnly={isReadOnly} step="0.1"
-                              className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm read-only:bg-white" />
+                              step="0.1"
+                              className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm" />
                           </div>
-                          {!isReadOnly && (
-                            <>
-                              <div className="flex flex-col gap-0.5">
-                                <button type="button" onClick={() => moveStage(idx, 'up')} disabled={idx === 0}
-                                  className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30">
-                                  <ChevronUp size={14} />
-                                </button>
-                                <button type="button" onClick={() => moveStage(idx, 'down')} disabled={idx === formData.route_stages.length - 1}
-                                  className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30">
-                                  <ChevronDown size={14} />
-                                </button>
-                              </div>
-                              <button type="button" onClick={() => removeStage(idx)}
-                                className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors">
-                                <Trash2 size={14} />
-                              </button>
-                            </>
-                          )}
+                          <div className="flex flex-col gap-0.5">
+                            <button type="button" onClick={() => moveStage(idx, 'up')} disabled={idx === 0}
+                              className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30">
+                              <ChevronUp size={14} />
+                            </button>
+                            <button type="button" onClick={() => moveStage(idx, 'down')} disabled={idx === formData.route_stages.length - 1}
+                              className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30">
+                              <ChevronDown size={14} />
+                            </button>
+                          </div>
+                          <button type="button" onClick={() => removeStage(idx)}
+                            className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors">
+                            <Trash2 size={14} />
+                          </button>
                         </div>
                       ))}
                     </div>
