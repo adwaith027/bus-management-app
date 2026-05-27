@@ -4,6 +4,7 @@ import logging
 import requests
 import threading
 from datetime import datetime
+from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from rest_framework import status
 from django.db import transaction
@@ -936,6 +937,7 @@ def get_company_dashboard_metrics(request):
                     "daily_cash": 0,
                     "daily_upi": 0,
                     "monthly_total": 0,
+                    "prev_month_total": 0,
                 },
                 "operations": {
                     "buses_active": 0,
@@ -951,7 +953,8 @@ def get_company_dashboard_metrics(request):
                     "verified": 0,
                     "pending_verification": 0,
                     "failed": 0,
-                }
+                },
+                "recent_activity": [],
             }
         }, status=status.HTTP_200_OK)
     
@@ -1001,10 +1004,19 @@ def get_company_dashboard_metrics(request):
             ticket_date__month=selected_date.month
         ).aggregate(total=Sum('ticket_amount'))['total'] or 0
         
+        # Previous month total (for month-over-month comparison)
+        prev_month_date = selected_date - relativedelta(months=1)
+        prev_month_total = TransactionData.objects.filter(
+            company_code=company,
+            ticket_date__year=prev_month_date.year,
+            ticket_date__month=prev_month_date.month
+        ).aggregate(total=Sum('ticket_amount'))['total'] or 0
+
         collections = {
             "daily_cash": float(daily_cash),
             "daily_upi": float(daily_upi),
             "monthly_total": float(monthly_total),
+            "prev_month_total": float(prev_month_total),
         }
         
         # Total passengers (from ticket counts)
@@ -1117,6 +1129,50 @@ def get_company_dashboard_metrics(request):
     except Exception as e:
         logger.exception(f"Settlement metrics error: {str(e)}")
     
+    #  Section 4: Recent Activity (last 8 closed trips + recent settlements) ─
+    recent_activity = []
+    try:
+        # Recent closed trips for this date
+        closed_trips = TripData.objects.filter(
+            company_code=company,
+            start_date=selected_date,
+            is_closed=True,
+            end_datetime__isnull=False,
+        ).select_related('route_id').order_by('-end_datetime')[:6]
+
+        for trip in closed_trips:
+            route_code = trip.route_id.route_code if trip.route_id else f"Sch {trip.schedule_no}"
+            recent_activity.append({
+                "type": "trip_close",
+                "label": f"Trip #{trip.trip_no} closed — {trip.palmtec_id}",
+                "route": route_code,
+                "time": trip.end_datetime.strftime("%H:%M") if trip.end_datetime else "",
+                "amount": float(trip.total_collection) if trip.total_collection else None,
+            })
+
+        # Recent verified settlements for this date
+        recent_settlements = MosambeeTransaction.objects.filter(
+            transaction_date=selected_date,
+            related_ticket__company_code=company,
+            verification_status=MosambeeTransaction.VerificationStatus.VERIFIED,
+        ).order_by('-created_at')[:2]
+
+        for s in recent_settlements:
+            recent_activity.append({
+                "type": "settlement",
+                "label": f"Payment verified — {s.transaction_id or 'UPI'}",
+                "route": None,
+                "time": s.created_at.strftime("%H:%M") if s.created_at else "",
+                "amount": float(s.amount) if hasattr(s, 'amount') and s.amount else None,
+            })
+
+        # Sort combined list by time desc, keep top 8
+        recent_activity = sorted(recent_activity, key=lambda x: x["time"], reverse=True)[:8]
+
+    except Exception as e:
+        logger.exception(f"Recent activity error: {str(e)}")
+        recent_activity = []
+
     #  Return response ─
     return Response(
         {
@@ -1125,6 +1181,7 @@ def get_company_dashboard_metrics(request):
                 "collections": collections,
                 "operations": operations,
                 "settlements": settlements,
+                "recent_activity": recent_activity,
             }
         },
         status=status.HTTP_200_OK
