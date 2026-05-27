@@ -365,7 +365,7 @@ function ScheduleDetailModal({ schedule: s, onClose }) {
           </FieldGroup>
 
           {/* UPI Passenger breakdown */}
-          {(s.upi_full_count || s.upi_half_count || s.upi_physical_count || s.upi_ladies_count || s.upi_senior_count || s.upi_luggage_count || s.upi_st_count) && (
+          {!!(s.upi_full_count || s.upi_half_count || s.upi_physical_count || s.upi_ladies_count || s.upi_senior_count || s.upi_luggage_count || s.upi_st_count) && (
             <FieldGroup title="Passenger Breakdown (UPI)" columns={4}>
               <FieldBlock label="Full"     value={s.upi_full_count} />
               <FieldBlock label="Half"     value={s.upi_half_count} />
