@@ -15,6 +15,7 @@ class CompanySerializer(serializers.ModelSerializer):
     is_validated = serializers.ReadOnlyField()
     needs_validation = serializers.ReadOnlyField()
     created_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    dealer = serializers.PrimaryKeyRelatedField(read_only=True)
 
     class Meta:
         model = Company
@@ -32,22 +33,27 @@ class CompanySerializer(serializers.ModelSerializer):
             'state',
             'district',
             'zip_code',
-            'number_of_licence',
+            'client_type',
+            'dealer',
+            # License / registration
             'authentication_status',
             'product_registration_id',
             'unique_identifier',
             'product_from_date',
             'product_to_date',
-            'device_count',
-            'depot_count',
-            'mobile_device_count',
-            'created_at',
-            'updated_at',
+            # Counts (from license server or dealer pool)
+            'palmtec_count',
+            'total_user_count',
+            'premium_user_count',
+            'intermediate_user_count',
+            # Status
+            'is_active',
             'is_validated',
             'needs_validation',
-            'is_active',
-            'client_type',
+            # Audit
             'created_by',
+            'created_at',
+            'updated_at',
         ]
         read_only_fields = [
             'id',
@@ -57,9 +63,10 @@ class CompanySerializer(serializers.ModelSerializer):
             'unique_identifier',
             'product_from_date',
             'product_to_date',
+            'created_by',
+            'dealer',
             'created_at',
             'updated_at',
-            'created_by',
         ]
 
     def validate_company_email(self, value):
@@ -69,11 +76,6 @@ class CompanySerializer(serializers.ModelSerializer):
         else:
             if Company.objects.filter(company_email=value).exists():
                 raise serializers.ValidationError("A company with this email already exists.")
-        return value
-
-    def validate_number_of_licence(self, value):
-        if value < 0:
-            raise serializers.ValidationError("Number of licenses cannot be negative.")
         return value
 
     def validate_contact_number(self, value):
