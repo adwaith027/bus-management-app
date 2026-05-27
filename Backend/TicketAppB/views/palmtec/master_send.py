@@ -2,7 +2,7 @@ import struct
 import logging
 from django.http import HttpResponse, JsonResponse
 from ...models import Settings, Route, Employee, VehicleType, ExpenseMaster, Stage, Fare, Currency, RouteStage, Company
-from ..web.auth import get_user_from_cookie
+from ..web.auth import get_user_from_request as get_user_from_cookie  # device/APK: Bearer header
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view
 from rest_framework.response import Response

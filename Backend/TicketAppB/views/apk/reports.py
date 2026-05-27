@@ -3,7 +3,7 @@ from django.db.models import Sum, Count, Max
 from django.utils import timezone
 from rest_framework.decorators import api_view
 from ...models import TransactionData, TripData, ScheduleData, Stage, ExpenseData
-from ..web.auth import get_user_from_cookie
+from ..web.auth import get_user_from_request as get_user_from_cookie  # APK: Bearer header
 
 PAYMENT_LABELS = {'Cash': 'Cash', 'UPI': 'UPI', 'Card': 'Card'}
 

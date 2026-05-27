@@ -79,15 +79,17 @@ def get_failed_payloads(request):
     records = qs[start:start + page_size]
 
     data = [{
-        'id':           r.id,
-        'source':       r.source,
-        'status':       r.status,
-        'company_name': r.company_code.company_name if r.company_code else None,
-        'company_id':   r.company_code_id,
-        'error_message': r.error_message,
-        'raw_payload':  r.raw_payload,
-        'received_at':  r.received_at.isoformat() if r.received_at else None,
-        'processed_at': r.processed_at.isoformat() if r.processed_at else None,
+        'id':               r.id,
+        'source':           r.source,
+        'status':           r.status,
+        'company_name':     r.company_code.company_name if r.company_code else None,
+        'company_id':       r.company_code_id,
+        'error_message':    r.error_message,
+        'raw_payload':      r.raw_payload,
+        'received_at':      r.received_at.isoformat() if r.received_at else None,
+        'processed_at':     r.processed_at.isoformat() if r.processed_at else None,
+        'retry_count':      r.retry_count,
+        'retries_remaining': max(0, _MAX_MANUAL_RETRIES - r.retry_count),
     } for r in records]
 
     return Response({
@@ -98,6 +100,9 @@ def get_failed_payloads(request):
         'page_size':   page_size,
         'total_pages': (total + page_size - 1) // page_size,
     })
+
+
+_MAX_MANUAL_RETRIES = 3
 
 
 @api_view(['POST'])
@@ -116,6 +121,17 @@ def retry_failed_payload(request, log_id):
             status=status.HTTP_404_NOT_FOUND,
         )
 
+    if log.retry_count >= _MAX_MANUAL_RETRIES:
+        return Response(
+            {
+                'error': (
+                    f'Maximum manual retries ({_MAX_MANUAL_RETRIES}) reached for this payload. '
+                    'Inspect the raw_payload and error_message to resolve the underlying issue.'
+                )
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     task = _TASK_MAP.get(log.source)
     if not task:
         return Response(
@@ -126,8 +142,14 @@ def retry_failed_payload(request, log_id):
     log.status        = RawDataLog.statusChoices.PENDING
     log.error_message = None
     log.processed_at  = None
-    log.save(update_fields=['status', 'error_message', 'processed_at'])
+    log.retry_count  += 1
+    log.save(update_fields=['status', 'error_message', 'processed_at', 'retry_count'])
 
     task.delay(log.id)
 
-    return Response({'message': 'success', 'log_id': log_id})
+    return Response({
+        'message': 'success',
+        'log_id': log_id,
+        'retry_count': log.retry_count,
+        'retries_remaining': _MAX_MANUAL_RETRIES - log.retry_count,
+    })

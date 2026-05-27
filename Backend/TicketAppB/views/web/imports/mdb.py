@@ -33,6 +33,7 @@ from ....models.master_data import (
 from ....models.operations import ExpenseMaster, Expense, CrewAssignment, InspectorDetails
 from ....models.company import Company
 from ..auth import get_user_from_cookie
+from ...utils import _is_superadmin
 
 
 # ================================================================
@@ -70,6 +71,8 @@ class MdbImportView(APIView):
         user = get_user_from_cookie(request)
         if not user:
             return Response({'message': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+        if not _is_superadmin(user):
+            return Response({'message': 'Superadmin only.'}, status=status.HTTP_403_FORBIDDEN)
 
         mdb_file   = request.FILES.get('mdb_file')
         company_id = request.data.get('company_id')
@@ -113,9 +116,9 @@ class MdbImportView(APIView):
                 yield f"data: {json.dumps({'type': 'error', 'message': f'Failed to read MDB: {str(e)}'})}\n\n"
             except Exception as e:
                 yield f"data: {json.dumps({'type': 'error', 'message': f'Unexpected error: {str(e)}'})}\n\n"
-            finally:
-                if tmp_path and os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
+            # NOTE: tmp_path is intentionally NOT deleted here.
+            # The file was saved as a permanent backup at the start of the request.
+            # Path: MEDIA_ROOT/<company_code>/mdb/<YYYY-MM-DD>/<HH-MM-SS>.mdb
 
         response = StreamingHttpResponse(sse_stream(), content_type='text/event-stream')
         response['Cache-Control'] = 'no-cache'
@@ -242,6 +245,27 @@ class MdbImportService:
                 'skipped':  skipped,
                 'errors':   errors,
             }
+
+        # ── Audit log — written before the final yield so it's always recorded
+        # even if the SSE connection drops after the last event.
+        try:
+            from ....models.audit import AuditLog
+            from ..audit_logs import log_action
+            log_action(
+                actor          = user,
+                action         = AuditLog.ActionType.MDB_IMPORT,
+                target_model   = 'Company',
+                target_id      = company.id,
+                target_display = company.company_name,
+                details        = {
+                    'total_imported': total_imported,
+                    'total_existing': total_existing,
+                    'total_skipped':  total_skipped,
+                    'error_count':    len(all_errors),
+                },
+            )
+        except Exception:
+            pass  # audit failure must never break the import stream
 
         # Final summary event — frontend transitions to results view on this
         yield {
