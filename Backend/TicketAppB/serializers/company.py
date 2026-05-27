@@ -1,7 +1,7 @@
 import json
 import os
 from rest_framework import serializers
-from ..models import Company, Depot
+from ..models import Company, Depot, RouteDepot
 
 def _load_states_districts():
     json_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'utils', 'indiaStatesDistricts.json')
@@ -102,6 +102,7 @@ class CompanySerializer(serializers.ModelSerializer):
 class DepotSerializer(serializers.ModelSerializer):
     company = serializers.PrimaryKeyRelatedField(read_only=True)
     created_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    routes = serializers.SerializerMethodField()
 
     class Meta:
         model = Depot
@@ -116,10 +117,20 @@ class DepotSerializer(serializers.ModelSerializer):
             'zip_code',
             'is_active',
             'created_by',
+            'routes',
         ]
         read_only_fields = [
             'id',
             'company',
             'is_active',
             'created_by',
+            'routes',
+        ]
+
+    def get_routes(self, obj):
+        route_depots = RouteDepot.objects.filter(depot=obj).select_related('route')
+        return [
+            {'route_code': rd.route.route_code, 'route_name': rd.route.route_name}
+            for rd in route_depots
+            if rd.route
         ]
