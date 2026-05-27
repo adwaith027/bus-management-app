@@ -5,6 +5,7 @@ import {
   BookMarked, Plus, Trash2, Pencil, X,
 } from 'lucide-react';
 import api, { BASE_URL } from '../../assets/js/axiosConfig';
+import { PageHeader, SectionCard, SettToggle } from '@/components/design';
 
 // ── Reusable Field Components ─────────────────────────────────────────────────
 
@@ -81,36 +82,7 @@ const SelectField = ({ label, name, value, onChange, options, loading = false })
   </div>
 );
 
-const Toggle = ({ label, name, value, onChange, loading = false }) => (
-  <label className={`flex items-center justify-between p-3 rounded-xl border-2 transition-all duration-150 ${
-    loading
-      ? 'border-slate-200 bg-slate-50 animate-pulse cursor-not-allowed'
-      : 'border-slate-200 cursor-pointer hover:border-slate-300 hover:bg-slate-50'
-  }`}>
-    <span className="text-sm text-slate-700 font-medium">{label}</span>
-    {loading ? (
-      <div className="w-10 h-5 bg-slate-200 rounded-full" />
-    ) : (
-      <div className={`relative w-10 h-5 rounded-full transition-colors ${value ? 'bg-slate-800' : 'bg-slate-300'}`}>
-        <input type="checkbox" name={name} checked={!!value} onChange={onChange} className="sr-only" />
-        <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${value ? 'translate-x-5' : ''}`} />
-      </div>
-    )}
-  </label>
-);
-
-const Section = ({ title, icon: Icon, children, loading = false }) => (
-  <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-    <h2 className="text-base font-bold text-slate-800 mb-5 pb-3 border-b border-slate-100 flex items-center gap-2">
-      {loading
-        ? <div className="w-4 h-4 border-2 border-slate-300 border-t-slate-800 rounded-full animate-spin shrink-0" />
-        : Icon && <Icon size={16} className="text-slate-600 shrink-0" />
-      }
-      {title}
-    </h2>
-    {children}
-  </div>
-);
+// Toggle and Section replaced by shared design components (SettToggle, SectionCard)
 
 // ── Save Button ───────────────────────────────────────────────────────────────
 
@@ -172,26 +144,31 @@ const EMPTY_COMPANY_FORM = {
 // Used by CompanySettingsTab, DeviceSettingsTab form, and profile editor.
 
 function SettingsFormFields({ formData, onChange, loading = false, isDevice = true }) {
+  // Helper to adapt SettToggle (no-arg callback) to the standard event-based onChange
+  const tog = (name) => () =>
+    onChange({ target: { name, type: 'checkbox', checked: !formData[name] } });
+
   return (
-    <div className="space-y-6">
-      <Section title="Passwords" icon={Smartphone} loading={loading}>
+    <div className="space-y-4">
+
+      <SectionCard title="Passwords" icon={Smartphone}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <TextField label="User Password"   name="user_pwd"   value={formData.user_pwd}   onChange={onChange} loading={loading} />
           <TextField label="Master Password" name="master_pwd" value={formData.master_pwd} onChange={onChange} loading={loading} />
         </div>
-      </Section>
+      </SectionCard>
 
-      <Section title="Fare Percentages & Amounts" icon={BadgeDollarSign} loading={loading}>
+      <SectionCard title="Fare Percentages & Amounts" icon={BadgeDollarSign}>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <ConstrainedField label="Half Fare (%)"     name="half_per"          value={formData.half_per}          onChange={onChange} maxLen={5} allowDecimal loading={loading} />
-          <ConstrainedField label="Concession (%)"    name="con_per"           value={formData.con_per}           onChange={onChange} maxLen={5} allowDecimal loading={loading} />
-          <ConstrainedField label="PH Concession (%)" name="phy_per"           value={formData.phy_per}           onChange={onChange} maxLen={5} allowDecimal loading={loading} />
-          <ConstrainedField label="Rounding Amount"   name="round_amt"         value={formData.round_amt}         onChange={onChange} maxLen={6} allowDecimal loading={loading} />
+          <ConstrainedField label="Half Fare (%)"      name="half_per"          value={formData.half_per}          onChange={onChange} maxLen={5} allowDecimal loading={loading} />
+          <ConstrainedField label="Concession (%)"     name="con_per"           value={formData.con_per}           onChange={onChange} maxLen={5} allowDecimal loading={loading} />
+          <ConstrainedField label="PH Concession (%)"  name="phy_per"           value={formData.phy_per}           onChange={onChange} maxLen={5} allowDecimal loading={loading} />
+          <ConstrainedField label="Rounding Amount"    name="round_amt"         value={formData.round_amt}         onChange={onChange} maxLen={6} allowDecimal loading={loading} />
           <ConstrainedField label="Luggage Unit Rate"  name="luggage_unit_rate" value={formData.luggage_unit_rate} onChange={onChange} maxLen={7} allowDecimal loading={loading} />
         </div>
-      </Section>
+      </SectionCard>
 
-      <Section title="Ticket Display — Headers & Footers" icon={Ticket} loading={loading}>
+      <SectionCard title="Ticket Display — Headers & Footers" icon={Ticket}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <TextField label="Main Display Line 1" name="main_display"  value={formData.main_display}  onChange={onChange} loading={loading} />
           <TextField label="Main Display Line 2" name="main_display2" value={formData.main_display2} onChange={onChange} loading={loading} />
@@ -201,24 +178,24 @@ function SettingsFormFields({ formData, onChange, loading = false, isDevice = tr
           <TextField label="Footer Line 1"       name="footer1"       value={formData.footer1}       onChange={onChange} loading={loading} />
           <TextField label="Footer Line 2"       name="footer2"       value={formData.footer2}       onChange={onChange} loading={loading} />
         </div>
-      </Section>
+      </SectionCard>
 
-      <Section title="Language & Font" icon={Settings} loading={loading}>
+      <SectionCard title="Language & Font" icon={Settings}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <SelectField label="Language"    name="language_option" value={formData.language_option} onChange={onChange} options={LANGUAGE_OPTIONS} loading={loading} />
           <SelectField label="Report Font" name="report_font"     value={formData.report_font}     onChange={onChange} options={FONT_OPTIONS}     loading={loading} />
         </div>
-      </Section>
+      </SectionCard>
 
-      <Section title="Student Fare & Roundoff" icon={BadgeDollarSign} loading={loading}>
+      <SectionCard title="Student Fare & Roundoff" icon={BadgeDollarSign}>
         <div className="space-y-4">
-          <Toggle label="ST Fare Edit" name="st_fare_edit" value={formData.st_fare_edit} onChange={onChange} loading={loading} />
+          <SettToggle label="ST Fare Edit" checked={!!formData.st_fare_edit} onChange={tog('st_fare_edit')} />
           {!formData.st_fare_edit && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pl-1 pt-1 border-l-2 border-slate-200">
               <ConstrainedField label="ST Max Amount" name="st_max_amt" value={formData.st_max_amt} onChange={onChange} maxLen={isDevice ? 5 : 10} allowDecimal loading={loading} />
               {isDevice ? (
                 <>
-                  <ConstrainedField label="ST Ratio"      name="st_ratio"  value={formData.st_ratio}  onChange={onChange} maxLen={2} loading={loading} />
+                  <ConstrainedField label="ST Ratio"      name="st_ratio"   value={formData.st_ratio}   onChange={onChange} maxLen={2} loading={loading} />
                   <ConstrainedField label="ST Min Amount" name="st_min_amt" value={formData.st_min_amt} onChange={onChange} maxLen={6} allowDecimal loading={loading} />
                 </>
               ) : (
@@ -226,43 +203,44 @@ function SettingsFormFields({ formData, onChange, loading = false, isDevice = tr
               )}
             </div>
           )}
-          <Toggle label="ST Roundoff" name="st_roundoff_enable" value={formData.st_roundoff_enable} onChange={onChange} loading={loading} />
+          <SettToggle label="ST Roundoff" checked={!!formData.st_roundoff_enable} onChange={tog('st_roundoff_enable')} />
           {formData.st_roundoff_enable && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pl-1 pt-1 border-l-2 border-slate-200">
               <ConstrainedField label="Roundoff Amount (paise)" name="st_roundoff_amt" value={formData.st_roundoff_amt} onChange={onChange} maxLen={3} allowDecimal loading={loading} />
             </div>
           )}
         </div>
-      </Section>
+      </SectionCard>
 
-      <Section title="Feature Toggles" icon={ToggleRight} loading={loading}>
+      <SectionCard title="Feature Toggles" icon={ToggleRight}>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          <Toggle label="Round Off"            name="roundoff"           value={formData.roundoff}           onChange={onChange} loading={loading} />
-          <Toggle label="Round Up"             name="round_up"           value={formData.round_up}           onChange={onChange} loading={loading} />
-          <Toggle label="Remove Ticket Flag"   name="remove_ticket_flag" value={formData.remove_ticket_flag} onChange={onChange} loading={loading} />
-          <Toggle label="Stage Font Flag"      name="stage_font_flag"    value={formData.stage_font_flag}    onChange={onChange} loading={loading} />
-          <Toggle label="Next Fare Flag"       name="next_fare_flag"     value={formData.next_fare_flag}     onChange={onChange} loading={loading} />
-          <Toggle label="Odometer Entry"       name="odometer_entry"     value={formData.odometer_entry}     onChange={onChange} loading={loading} />
-          <Toggle label="Ticket No Big Font"   name="ticket_no_big_font" value={formData.ticket_no_big_font} onChange={onChange} loading={loading} />
-          <Toggle label="Crew Check"           name="crew_check"         value={formData.crew_check}         onChange={onChange} loading={loading} />
-          <Toggle label="Trip Send"            name="tripsend_enable"    value={formData.tripsend_enable}    onChange={onChange} loading={loading} />
-          <Toggle label="Schedule Send"        name="schedulesend_enable" value={formData.schedulesend_enable} onChange={onChange} loading={loading} />
-          <Toggle label="Inspector Report"     name="inspect_rpt"        value={formData.inspect_rpt}        onChange={onChange} loading={loading} />
-          <Toggle label="Multiple Pass"        name="multiple_pass"      value={formData.multiple_pass}      onChange={onChange} loading={loading} />
-          <Toggle label="Simple Report"        name="simple_report"      value={formData.simple_report}      onChange={onChange} loading={loading} />
-          <Toggle label="Inspector SMS"        name="inspector_sms"      value={formData.inspector_sms}      onChange={onChange} loading={loading} />
-          <Toggle label="Auto Shutdown"        name="auto_shut_down"     value={formData.auto_shut_down}     onChange={onChange} loading={loading} />
-          <Toggle label="User Password Enable" name="userpswd_enable"    value={formData.userpswd_enable}    onChange={onChange} loading={loading} />
-          {isDevice && <Toggle label="Expense Enable" name="exp_enable" value={formData.exp_enable} onChange={onChange} loading={loading} />}
+          <SettToggle label="Round Off"            checked={!!formData.roundoff}            onChange={tog('roundoff')} />
+          <SettToggle label="Round Up"             checked={!!formData.round_up}            onChange={tog('round_up')} />
+          <SettToggle label="Remove Ticket Flag"   checked={!!formData.remove_ticket_flag}  onChange={tog('remove_ticket_flag')} />
+          <SettToggle label="Stage Font Flag"      checked={!!formData.stage_font_flag}     onChange={tog('stage_font_flag')} />
+          <SettToggle label="Next Fare Flag"       checked={!!formData.next_fare_flag}      onChange={tog('next_fare_flag')} />
+          <SettToggle label="Odometer Entry"       checked={!!formData.odometer_entry}      onChange={tog('odometer_entry')} />
+          <SettToggle label="Ticket No Big Font"   checked={!!formData.ticket_no_big_font}  onChange={tog('ticket_no_big_font')} />
+          <SettToggle label="Crew Check"           checked={!!formData.crew_check}          onChange={tog('crew_check')} />
+          <SettToggle label="Trip Send"            checked={!!formData.tripsend_enable}     onChange={tog('tripsend_enable')} />
+          <SettToggle label="Schedule Send"        checked={!!formData.schedulesend_enable} onChange={tog('schedulesend_enable')} />
+          <SettToggle label="Inspector Report"     checked={!!formData.inspect_rpt}         onChange={tog('inspect_rpt')} />
+          <SettToggle label="Multiple Pass"        checked={!!formData.multiple_pass}       onChange={tog('multiple_pass')} />
+          <SettToggle label="Simple Report"        checked={!!formData.simple_report}       onChange={tog('simple_report')} />
+          <SettToggle label="Inspector SMS"        checked={!!formData.inspector_sms}       onChange={tog('inspector_sms')} />
+          <SettToggle label="Auto Shutdown"        checked={!!formData.auto_shut_down}      onChange={tog('auto_shut_down')} />
+          <SettToggle label="User Password Enable" checked={!!formData.userpswd_enable}     onChange={tog('userpswd_enable')} />
+          {isDevice && <SettToggle label="Expense Enable" checked={!!formData.exp_enable} onChange={tog('exp_enable')} />}
         </div>
-      </Section>
+      </SectionCard>
 
-      <Section title="Other Settings" icon={Settings} loading={loading}>
+      <SectionCard title="Other Settings" icon={Settings}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <ConstrainedField label="Stage Updation Msg" name="stage_updation_msg" value={formData.stage_updation_msg} onChange={onChange} maxLen={3} loading={loading} />
           <ConstrainedField label="Default Stage"      name="default_stage"      value={formData.default_stage}      onChange={onChange} maxLen={4} loading={loading} />
         </div>
-      </Section>
+      </SectionCard>
+
     </div>
   );
 }
@@ -665,17 +643,13 @@ export default function SettingsPage() {
   ];
 
   return (
-    <div className="p-3 sm:p-5 lg:p-7 min-h-screen bg-slate-50">
+    <div className="p-5 lg:p-6 min-h-full bg-slate-50">
 
-      <div className="flex items-center gap-3 mb-6">
-        <div className="p-2.5 rounded-xl bg-slate-900">
-          <Settings size={20} className="text-white" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Settings</h1>
-          <p className="text-slate-500 text-sm mt-0.5">Manage company defaults, profiles, and per-device ETM settings</p>
-        </div>
-      </div>
+      <PageHeader
+        icon={Settings}
+        title="Settings"
+        subtitle="Manage company defaults, profiles, and per-device ETM settings"
+      />
 
       <div className="flex gap-1 bg-white border border-slate-200 rounded-xl p-1 mb-6 w-fit">
         {tabs.map(tab => {
