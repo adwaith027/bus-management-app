@@ -211,6 +211,9 @@ export default function DealerListing() {
   const [modalForm,       setModalForm]       = useState(EMPTY);
   const [modalSubmitting, setModalSubmitting] = useState(false);
 
+  // ── License action state ─────────────────────────────────────────────────
+  const [licenseAction, setLicenseAction] = useState({ busy: false, msg: '', err: '' });
+
   // ── Fetch ────────────────────────────────────────────────────────────────
   const fetchDealers = useCallback(async () => {
     setLoading(true);
@@ -275,7 +278,7 @@ export default function DealerListing() {
     user_username: '', user_email: '', user_password: '',
   });
 
-  const openView = (dealer) => { setModalForm(populateModal(dealer)); setEditingItem(dealer); setModal('view'); };
+  const openView = (dealer) => { setModalForm(populateModal(dealer)); setEditingItem(dealer); setModal('view'); setLicenseAction({ busy: false, msg: '', err: '' }); };
   const openEdit = (dealer) => { setModalForm(populateModal(dealer)); setEditingItem(dealer); setModal('edit'); };
 
   const handleModalInputChange = (e) => {
@@ -312,6 +315,28 @@ export default function DealerListing() {
         window.alert(data?.message || 'Something went wrong.');
       }
     } finally { setModalSubmitting(false); }
+  };
+
+  const handleRegisterLicense = async () => {
+    setLicenseAction({ busy: true, msg: '', err: '' });
+    try {
+      const res = await api.post(`${BASE_URL}/register-dealer-license/${editingItem.id}`);
+      setLicenseAction({ busy: false, msg: res.data.message || 'Registered.', err: '' });
+      fetchDealers();
+    } catch (err) {
+      setLicenseAction({ busy: false, msg: '', err: err?.response?.data?.error || 'Registration failed.' });
+    }
+  };
+
+  const handleValidateLicense = async () => {
+    setLicenseAction({ busy: true, msg: '', err: '' });
+    try {
+      const res = await api.post(`${BASE_URL}/validate-dealer-license/${editingItem.id}`);
+      setLicenseAction({ busy: false, msg: res.data.message || 'Validation started.', err: '' });
+      fetchDealers();
+    } catch (err) {
+      setLicenseAction({ busy: false, msg: '', err: err?.response?.data?.error || 'Validation failed.' });
+    }
   };
 
   const filteredDealers = useMemo(() => {
@@ -423,14 +448,27 @@ export default function DealerListing() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium border ${
-                        dealer.is_active
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : 'bg-slate-50 text-slate-600 border-slate-200'
-                      }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${dealer.is_active ? 'bg-emerald-500' : 'bg-slate-400'}`} />
-                        {dealer.is_active ? 'Active' : 'Inactive'}
-                      </span>
+                      <div className="flex flex-col gap-1">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium border ${
+                          dealer.is_active
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-slate-50 text-slate-600 border-slate-200'
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${dealer.is_active ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                          {dealer.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                        {dealer.authentication_status && (
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium border ${
+                            dealer.authentication_status === 'Registered'
+                              ? 'bg-blue-50 text-blue-700 border-blue-200'
+                              : dealer.authentication_status === 'Validated'
+                              ? 'bg-green-50 text-green-700 border-green-200'
+                              : 'bg-amber-50 text-amber-700 border-amber-200'
+                          }`}>
+                            {dealer.authentication_status}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -507,6 +545,63 @@ export default function DealerListing() {
                   </div>
                 </div>
               )}
+
+              {/* License section */}
+              <div className="rounded-xl border border-slate-100 bg-white p-3">
+                <p className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mb-3">License</p>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-xs text-slate-500">Status:</span>
+                  {editingItem.authentication_status ? (
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium border ${
+                      editingItem.authentication_status === 'Registered'
+                        ? 'bg-blue-50 text-blue-700 border-blue-200'
+                        : editingItem.authentication_status === 'Validated'
+                        ? 'bg-green-50 text-green-700 border-green-200'
+                        : 'bg-amber-50 text-amber-700 border-amber-200'
+                    }`}>
+                      {editingItem.authentication_status}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-400 italic">Not registered</span>
+                  )}
+                </div>
+
+                {licenseAction.msg && (
+                  <div className="mb-2 flex items-start gap-1.5 rounded-lg bg-green-50 border border-green-200 px-3 py-2 text-xs text-green-700">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                    {licenseAction.msg}
+                  </div>
+                )}
+                {licenseAction.err && (
+                  <div className="mb-2 flex items-start gap-1.5 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    {licenseAction.err}
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  {(!editingItem.authentication_status || editingItem.authentication_status === 'Pending') && (
+                    <button
+                      type="button"
+                      onClick={handleRegisterLicense}
+                      disabled={licenseAction.busy}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-slate-800 rounded-lg hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                    >
+                      {licenseAction.busy ? 'Processing…' : 'Register with License Server'}
+                    </button>
+                  )}
+                  {editingItem.company_id && (
+                    <button
+                      type="button"
+                      onClick={handleValidateLicense}
+                      disabled={licenseAction.busy}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                    >
+                      {licenseAction.busy ? 'Processing…' : 'Validate License'}
+                    </button>
+                  )}
+                </div>
+              </div>
 
               {/* Footer */}
               <div className="flex justify-end gap-3 pt-2 border-t border-slate-100">

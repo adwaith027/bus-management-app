@@ -160,6 +160,7 @@ export default function UserListing() {
   const [modalMode, setModalMode] = useState('create');
   const [selectedUser, setSelectedUser] = useState(null);
   const [pwModalOpen, setPwModalOpen] = useState(false);
+  const [togglingId, setTogglingId] = useState(null);
 
   // ── Form state ───────────────────────────────────────────────────────────────
   const [formData, setFormData] = useState({ username: '', email: '', role: defaultRole, company_id: '', password: '' });
@@ -347,6 +348,20 @@ export default function UserListing() {
       window.alert(err.response?.data?.message || err.response?.data?.error || 'Password change failed');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleToggleActive = async (user) => {
+    setTogglingId(user.id);
+    try {
+      const res = await api.post(`${BASE_URL}/users/${user.id}/toggle-active`);
+      window.alert(res.data.message || (user.is_active ? 'User deactivated.' : 'User activated.'));
+      setModalOpen(false);
+      fetchUsers();
+    } catch (err) {
+      window.alert(err.response?.data?.error || err.response?.data?.message || 'Action failed.');
+    } finally {
+      setTogglingId(null);
     }
   };
 
@@ -736,15 +751,26 @@ export default function UserListing() {
             <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
               <button
                 onClick={() => { closeModal(); setTimeout(() => openEdit(selectedUser), 100); }}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 px-4 text-sm rounded-lg font-medium bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer transition-colors"
+                className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 px-3 text-sm rounded-lg font-medium bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer transition-colors"
               >
-                <Edit size={14} />Edit User
+                <Edit size={14} />Edit
               </button>
               <button
                 onClick={() => { closeModal(); setTimeout(() => openPw(selectedUser), 100); }}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 px-4 text-sm rounded-lg font-medium bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer transition-colors"
+                className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 px-3 text-sm rounded-lg font-medium bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer transition-colors"
               >
-                <KeyRound size={14} />Change Password
+                <KeyRound size={14} />Password
+              </button>
+              <button
+                onClick={() => handleToggleActive(selectedUser)}
+                disabled={togglingId === selectedUser?.id}
+                className={`flex-1 inline-flex items-center justify-center gap-1.5 h-9 px-3 text-sm rounded-lg font-medium border cursor-pointer transition-colors disabled:opacity-50 ${
+                  selectedUser?.is_active
+                    ? 'bg-red-50 border-red-200 text-red-600 hover:bg-red-100'
+                    : 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+                }`}
+              >
+                {togglingId === selectedUser?.id ? '…' : selectedUser?.is_active ? 'Deactivate' : 'Activate'}
               </button>
             </div>
           </div>

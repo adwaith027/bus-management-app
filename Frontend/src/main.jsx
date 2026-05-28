@@ -6,7 +6,6 @@ import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom'
 import './index.css'
 
 import Login from './pages/auth/Login'
-import Signup from './pages/auth/Signup'
 import Dashboard from './layouts/Dashboard'
 import RoleBasedHome from './components/RoleBasedHome'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -21,7 +20,6 @@ import RouteListing from './pages/listings/RouteListing'
 import EmployeeCombined from './pages/listings/EmployeeCombined'
 
 import CrewAssignmentListing from './pages/operations/CrewAssignmentListing'
-import DeviceApprovals from './pages/operations/DeviceApprovals'
 import DeviceRegistry from './pages/operations/DeviceRegistry'
 import FareEditor from './pages/operations/FareEditor'
 import StageEditor from './pages/operations/StageEditor'
@@ -39,6 +37,12 @@ import MdbImport from './pages/tools/MdbImport'
 import SettingsPage from './pages/tools/SettingsPage'
 import DeviceDownload from './pages/tools/DeviceDownload'
 import FailedPayloadsPage from './pages/tools/FailedPayloadsPage'
+import AuditLogPage from './pages/tools/AuditLogPage'
+import AboutPage from './pages/tools/AboutPage'
+import GlobalSettingsPage from './pages/tools/GlobalSettingsPage'
+
+import ForgotPassword from './pages/auth/ForgotPassword'
+import ResetPassword from './pages/auth/ResetPassword'
 
 // Catch-all: hard-redirect based on auth state
 function SmartRedirect() {
@@ -66,12 +70,16 @@ const router = createBrowserRouter([
     element: <Navigate to="/login" replace />
   },
   {
-    path: '/signup',
-    element: <Signup />
-  },
-  {
     path: '/login',
     element: <Login />
+  },
+  {
+    path: '/forgot-password',
+    element: <ForgotPassword />
+  },
+  {
+    path: '/reset-password',
+    element: <ResetPassword />
   },
   {
     element: <ProtectedRoute />,
@@ -120,10 +128,6 @@ const router = createBrowserRouter([
           {
             path: 'dealers',
             element: <DealerListing />
-          },
-          {
-            path: 'device-approvals',
-            element: <DeviceApprovals />
           },
           {
             path: 'device-registry',
@@ -176,6 +180,18 @@ const router = createBrowserRouter([
           {
             path: 'failed-payloads',
             element: <FailedPayloadsPage />
+          },
+          {
+            path: 'audit-logs',
+            element: <AuditLogPage />
+          },
+          {
+            path: 'about',
+            element: <AboutPage />
+          },
+          {
+            path: 'global-settings',
+            element: <GlobalSettingsPage />
           },
         ]
       }

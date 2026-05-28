@@ -12,6 +12,7 @@ class BusType(models.Model):
     name = models.CharField(max_length=100,help_text="Bus type name")
     company = models.ForeignKey('Company',on_delete=models.CASCADE,related_name='bus_types')
     is_active = models.BooleanField(default=True)
+    is_deleted = models.BooleanField(default=False, help_text="Soft delete flag")
     
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(
@@ -48,6 +49,7 @@ class EmployeeType(models.Model):
     emp_type_code = models.CharField(max_length=50, null=True, blank=True, help_text="Employee type code (set by MDB import only)")
     emp_type_name = models.CharField(max_length=100,help_text="Driver, Conductor, Cleaner, etc.")
     company = models.ForeignKey('Company',on_delete=models.CASCADE,related_name='employee_types')
+    is_deleted = models.BooleanField(default=False, help_text="Soft delete flag")
     
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(
@@ -124,6 +126,7 @@ class Currency(models.Model):
     currency = models.CharField(max_length=3,help_text="Currency code (e.g., INR, USD)")
     country = models.CharField(max_length=50,help_text="Country name")
     company = models.ForeignKey('Company',on_delete=models.CASCADE,related_name='currencies')
+    is_deleted = models.BooleanField(default=False, help_text="Soft delete flag")
     
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(

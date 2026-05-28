@@ -10,7 +10,7 @@ from django.http import JsonResponse
 from django.utils import timezone
 from rest_framework.decorators import api_view
 
-from ..web.auth import get_user_from_cookie
+from ..web.auth import get_user_from_request as get_user_from_cookie  # APK: Bearer header
 
 logger = logging.getLogger('ticket.palmtec')
 

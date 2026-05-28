@@ -1,4 +1,5 @@
 import json
+import os
 import time
 import logging
 import requests
@@ -17,8 +18,10 @@ from django.contrib.auth import get_user_model
 from rest_framework.decorators import api_view
 from django.db.utils import OperationalError, ProgrammingError
 from django.db.models import Sum, Q, Count, Case, When, IntegerField
-from ...models import Company,TransactionData,TripData,Route,VehicleType,MosambeeTransaction,Dealer,DealerCustomerMapping
+from ...models import Company,TransactionData,TripData,Route,VehicleType,MosambeeTransaction,Dealer
 from ..utils import _is_superadmin, _is_executive, _is_dealer_admin, _is_company_admin
+from .audit_logs import log_action
+from ...models import AuditLog
 
 
 # Setup logger  
@@ -281,31 +284,33 @@ def background_license_polling(company_id):
             company.product_from_date = check_datetime(product_from_date).date() if product_from_date else None
             company.product_to_date = check_datetime(product_to_date).date() if product_to_date else None
 
-            # NumberOfLicence → number_of_licence
-            number_of_licence = auth_data.get('NumberOfLicence')
-            if number_of_licence:
-                try:
-                    company.number_of_licence = int(number_of_licence)
-                except (ValueError, TypeError):
-                    pass
-
-            # NoOfUPIDevice → device_count (default 0)
+            # PalmtecCount → palmtec_count (max ETM/Palmtec devices)
+            # TODO: license server field rename from NumberOfLicence → PalmtecCount
+            # (keep NumberOfLicence fallback for backward compat until server is updated)
             try:
-                company.device_count = int(auth_data.get('NoOfUPIDevice', 0))
+                company.palmtec_count = int(
+                    auth_data.get('PalmtecCount') or auth_data.get('NumberOfLicence', 0)
+                )
             except (ValueError, TypeError):
-                company.device_count = 0
+                company.palmtec_count = 0
 
-            # NoOfBranch → depot_count (default 0)
+            # TotalUserCount → total_user_count
             try:
-                company.depot_count = int(auth_data.get('NoOfBranch', 0))
+                company.total_user_count = int(auth_data.get('TotalUserCount', 0))
             except (ValueError, TypeError):
-                company.depot_count = 0
+                company.total_user_count = 0
 
-            # NoOfMobileDevice → mobile_device_count (default 2)
+            # PremiumUserCount → premium_user_count
             try:
-                company.mobile_device_count = int(auth_data.get('NoOfMobileDevice', 2))
+                company.premium_user_count = int(auth_data.get('PremiumUserCount', 0))
             except (ValueError, TypeError):
-                company.mobile_device_count = 2
+                company.premium_user_count = 0
+
+            # IntermediateUserCount → intermediate_user_count
+            try:
+                company.intermediate_user_count = int(auth_data.get('IntermediateUserCount', 0))
+            except (ValueError, TypeError):
+                company.intermediate_user_count = 0
 
             logger.info(f"[BACKGROUND] Updated license details for company: {company.company_name}")
         
@@ -568,6 +573,7 @@ def get_company_by_company_id(request, company_id):
     # License server does not return company details (name, address, etc.)
     # Only license/config fields are available — returned for the confirm banner.
     # The user fills in company details manually in the confirm step form.
+    # TODO: update these keys when license server is updated to new field names
     return Response(
         {
             'message': 'Success',
@@ -576,7 +582,10 @@ def get_company_by_company_id(request, company_id):
                 'authentication_status': auth_status,
                 'product_from_date':     product_from_date,
                 'product_to_date':       product_to_date,
-                'number_of_licence':     auth_data.get('NumberOfLicence', 1),
+                'palmtec_count':         int(auth_data.get('PalmtecCount') or auth_data.get('NumberOfLicence', 0)),
+                'total_user_count':      int(auth_data.get('TotalUserCount', 0)),
+                'premium_user_count':    int(auth_data.get('PremiumUserCount', 0)),
+                'intermediate_user_count': int(auth_data.get('IntermediateUserCount', 0)),
                 'is_expired':            expired,
             }
         },
@@ -682,14 +691,13 @@ def import_company(request):
         'city':            request.data.get('city', '').strip(),
         'state':           request.data.get('state', '').strip(),
         'zip_code':        request.data.get('zip_code', '').strip(),
-        # number_of_licence comes from the license server (authoritative)
-        'number_of_licence': safe_int(auth_data.get('NumberOfLicence'), safe_int(request.data.get('number_of_licence'), 1)),
     }
 
     if not form_data['company_name']:
         return Response({'message': 'Company name is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
     # ── Create Company record ────────────────────────────────────────────────
+    # TODO: update license server field names from NumberOfLicence → PalmtecCount etc.
     company = Company.objects.create(
         **form_data,
         authentication_status   = mapped_status,
@@ -697,10 +705,11 @@ def import_company(request):
         unique_identifier       = auth_data.get('UniqueIDentifier', ''),
         product_from_date       = product_from_date,
         product_to_date         = product_to_date,
-        device_count            = safe_int(auth_data.get('NoOfUPIDevice'), 0),
-        depot_count             = safe_int(auth_data.get('NoOfBranch'), 0),
-        mobile_device_count     = safe_int(auth_data.get('NoOfMobileDevice'), 2),
-        client_type             = 'company',
+        palmtec_count           = safe_int(auth_data.get('PalmtecCount') or auth_data.get('NumberOfLicence'), 0),
+        total_user_count        = safe_int(auth_data.get('TotalUserCount'), 0),
+        premium_user_count      = safe_int(auth_data.get('PremiumUserCount'), 0),
+        intermediate_user_count = safe_int(auth_data.get('IntermediateUserCount'), 0),
+        client_type             = 'direct',
         created_by              = user,
     )
 
@@ -714,6 +723,14 @@ def import_company(request):
         is_verified=True,
     )
     logger.info(f"Imported existing company '{company.company_name}' (company_id={company_id}) by user {user}")
+
+    log_action(
+        actor=user, action=AuditLog.ActionType.CREATE,
+        target_model='Company', target_id=company.pk,
+        target_display=company.company_name,
+        details={'client_type': 'direct', 'imported': True},
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
 
     serializer = CompanySerializer(company)
     return Response(
@@ -731,9 +748,9 @@ def all_company_data(request):
     Retrieve companies based on the requesting user's role.
 
     Visibility rules:
-      - superadmin   → all companies
-      - executive    → only companies in their ExecutiveCompanyMapping
-      - dealer_admin → only companies in their DealerCustomerMapping
+      - superadmin   → all direct companies (client_type='direct')
+      - executive    → companies they personally created (created_by=user)
+      - dealer_admin → companies under their dealer (Company.dealer FK)
       - company_admin→ only their own company
     """
     user = get_user_from_cookie(request)
@@ -744,24 +761,19 @@ def all_company_data(request):
         )
 
     if _is_superadmin(user):
-        # Superadmin sees only direct companies they created (not dealer sub-companies).
-        companies = Company.objects.filter(created_by=user, client_type='company').order_by('-id')
+        # Superadmin sees all direct companies (not dealer-created sub-companies).
+        companies = Company.objects.filter(client_type='direct').order_by('-id')
 
     elif _is_executive(user):
-        # Executive sees only companies they are explicitly mapped to.
-        from ...models import ExecutiveCompanyMapping  # avoid circular at module level
-        company_ids = ExecutiveCompanyMapping.objects.filter(
-            executive_user_id=user.id, is_active=True
-        ).values_list('company_id', flat=True)
-        companies = Company.objects.filter(id__in=company_ids).order_by('-id')
+        # Executive sees companies they personally created.
+        # TODO Phase 4: also filter by executive's state (CustomUser.state) if set.
+        companies = Company.objects.filter(created_by=user, is_active=True).order_by('-id')
 
     elif _is_dealer_admin(user):
         if not user.dealer_id:
             return Response({'message': 'No dealer linked to this user'}, status=status.HTTP_400_BAD_REQUEST)
-        company_ids = DealerCustomerMapping.objects.filter(
-            dealer_id=user.dealer_id, is_active=True
-        ).values_list('company_id', flat=True)
-        companies = Company.objects.filter(id__in=company_ids).order_by('-id')
+        # Company.dealer FK replaced DealerCustomerMapping join table.
+        companies = Company.objects.filter(dealer_id=user.dealer_id, is_active=True).order_by('-id')
 
     elif _is_company_admin(user):
         if not user.company:
@@ -776,17 +788,29 @@ def all_company_data(request):
     return Response({"message": "Success", "data": serializer.data}, status=status.HTTP_200_OK)
 
 
+def _safe_int(val, default=0):
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return default
+
+
 @api_view(['POST'])
 @transaction.atomic
 def create_company(request):
     """
-    Create a new company.
+    Create a new company — two paths:
 
-    Allowed roles:
-      - superadmin   : creates company for themselves; no dealer involvement.
-      - dealer_admin : creates company under their dealer; auto-creates
-                       DealerCustomerMapping and validates against dealer's
-                       licence pool.
+    Path A  superadmin / executive → client_type='direct'.
+            No pool involved. Company starts Pending; register + validate via
+            separate endpoints (/register-company-license, /validate-company-license).
+
+    Path B  dealer_admin → client_type='dealer_company'.
+            Requires { palmtec_count, total_user_count, premium_user_count,
+                       intermediate_user_count } in the request body.
+            Validates dealer pool (select_for_update to prevent races).
+            On success: deducts counts from dealer.remaining_*, sets company
+            authentication_status = Approved, inherits dealer product dates.
     """
     user = get_user_from_cookie(request)
     if not user:
@@ -798,10 +822,10 @@ def create_company(request):
     if not request.data:
         return Response({"message": "No input received"}, status=status.HTTP_400_BAD_REQUEST)
 
-    # ── User account validation (required for both superadmin and dealer_admin) ─
-    user_username = request.data.get('user_username', '').strip()
-    user_email_field = request.data.get('user_email', '').strip()
-    user_password = request.data.get('user_password', '').strip()
+    # ── Company admin user credentials (required for both paths) ─────────────
+    user_username    = request.data.get('user_username', '').strip()
+    user_email_field = request.data.get('user_email',    '').strip()
+    user_password    = request.data.get('user_password', '').strip()
 
     if not user_username or not user_email_field or not user_password:
         return Response({'error': 'User account details (username, email, password) are required.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -810,47 +834,283 @@ def create_company(request):
     if User.objects.filter(email=user_email_field).exists():
         return Response({'message': 'User email already exists'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # ── Fetch dealer for mapping (dealer_admin only) ──────────────────────────
-    dealer = None
+    serializer = CompanySerializer(data=request.data)
+    if not serializer.is_valid():
+        logger.warning(f"Company creation validation failed: {serializer.errors}")
+        return Response({"message": "Validation failed", "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+    # ── Path B: dealer_admin ──────────────────────────────────────────────────
     if _is_dealer_admin(user):
         if not user.dealer_id:
             return Response({'error': 'No dealer linked to this account.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Parse requested allocation from body
+        alloc_palmtec = _safe_int(request.data.get('palmtec_count', 0))
+        alloc_total   = _safe_int(request.data.get('total_user_count', 0))
+        alloc_premium = _safe_int(request.data.get('premium_user_count', 0))
+        alloc_inter   = _safe_int(request.data.get('intermediate_user_count', 0))
+
+        if alloc_total <= 0:
+            return Response({'error': 'total_user_count must be greater than 0.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Row-level lock on dealer to serialise concurrent company creations
         try:
-            dealer = Dealer.objects.get(pk=user.dealer_id)
+            dealer = Dealer.objects.select_for_update().get(pk=user.dealer_id)
         except Dealer.DoesNotExist:
             return Response({'error': 'Dealer not found.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    serializer = CompanySerializer(data=request.data)
-    if not serializer.is_valid():
-        logger.warning(f"Company creation failed: {serializer.errors}")
-        return Response({"message": "Validation failed", "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        if dealer.authentication_status != Dealer.AuthStatus.APPROVED:
+            return Response({'error': 'Dealer license is not approved. Cannot create companies.'}, status=status.HTTP_403_FORBIDDEN)
 
-    client_type_val = 'dealer_company' if _is_dealer_admin(user) else 'company'
-    company = serializer.save(created_by=user, client_type=client_type_val)
-    logger.info(f"Created new company: {company.company_name} (ID: {company.id}) by {user.role} {user.username}")
+        # Pool validation
+        errors = []
+        if dealer.remaining_palmtec_count < alloc_palmtec:
+            errors.append(f"Palmtec: requested {alloc_palmtec}, available {dealer.remaining_palmtec_count}")
+        if dealer.remaining_total_user_count < alloc_total:
+            errors.append(f"Total users: requested {alloc_total}, available {dealer.remaining_total_user_count}")
+        if dealer.remaining_premium_user_count < alloc_premium:
+            errors.append(f"Premium users: requested {alloc_premium}, available {dealer.remaining_premium_user_count}")
+        if dealer.remaining_intermediate_user_count < alloc_inter:
+            errors.append(f"Intermediate users: requested {alloc_inter}, available {dealer.remaining_intermediate_user_count}")
+        if errors:
+            return Response({
+                'error': 'Insufficient dealer pool capacity.',
+                'details': errors,
+            }, status=status.HTTP_400_BAD_REQUEST)
 
-    # ── Create company_admin user ─────────────────────────────────────────────
+        # Save company — authenticated automatically via dealer pool
+        company = serializer.save(
+            created_by=user,
+            client_type='dealer_company',
+            dealer=dealer,
+            palmtec_count=alloc_palmtec,
+            total_user_count=alloc_total,
+            premium_user_count=alloc_premium,
+            intermediate_user_count=alloc_inter,
+            authentication_status=Company.AuthStatus.APPROVED,
+            product_from_date=dealer.product_from_date,
+            product_to_date=dealer.product_to_date,
+        )
+
+        # Deduct from dealer pool (within the same atomic transaction)
+        dealer.remaining_palmtec_count           -= alloc_palmtec
+        dealer.remaining_total_user_count        -= alloc_total
+        dealer.remaining_premium_user_count      -= alloc_premium
+        dealer.remaining_intermediate_user_count -= alloc_inter
+        dealer.save(update_fields=[
+            'remaining_palmtec_count',
+            'remaining_total_user_count',
+            'remaining_premium_user_count',
+            'remaining_intermediate_user_count',
+        ])
+
+        logger.info(
+            f"Dealer company '{company.company_name}' created by {user.username}. "
+            f"Allocated: palmtec={alloc_palmtec}, users={alloc_total}"
+        )
+
+    # ── Path A: superadmin ────────────────────────────────────────────────────
+    else:
+        company = serializer.save(
+            created_by=user,
+            client_type='direct',
+            dealer=None,
+        )
+        logger.info(f"Direct company '{company.company_name}' created by {user.username}.")
+
+    # ── Create company_admin user (shared for both paths) ─────────────────────
     User.objects.create_user(
         username=user_username,
         email=user_email_field,
         password=user_password,
         role='company_admin',
+        tier='basic',
         company=company,
         is_verified=True,
+        created_by=user,
     )
-    logger.info(f"Created company_admin user '{user_username}' for company: {company.company_name}")
+    logger.info(f"Company admin '{user_username}' created for '{company.company_name}'.")
 
-    # ── Auto-create DealerCustomerMapping for dealer_admin ────────────────────
-    if dealer:
-        DealerCustomerMapping.objects.create(
-            dealer=dealer,
-            company=company,
-            created_by=user,
-            is_active=True,
-        )
-        logger.info(f"Auto-created DealerCustomerMapping: dealer={dealer.id} → company={company.id}")
+    log_action(
+        actor=user, action=AuditLog.ActionType.CREATE,
+        target_model='Company', target_id=company.pk,
+        target_display=company.company_name,
+        details={'client_type': company.client_type},
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
 
     return Response({"message": "Company created successfully", "data": serializer.data}, status=status.HTTP_201_CREATED)
+
+
+def _backup_company_data(company):
+    """
+    Serialize all company-related management data to a timestamped JSON file.
+
+    Backup path:
+        MEDIA_ROOT/backups/<company_id_or_pk>/<YYYY-MM-DD_HH-MM-SS>.json
+
+    Includes: Company record, users, all masterdata (routes, stages, vehicles,
+    employees, fares, etc.), operations records, and ETM device allocations.
+    Transactional data (TransactionData, TripData, ScheduleData) is excluded
+    from the file — it remains in the DB under the company_code FK.
+
+    Returns the backup file path on success, or None on failure.
+    Failure is logged but MUST NOT block the caller's deletion.
+    """
+    import json as _json
+    from django.core import serializers as _dj_serializers
+    from django.utils import timezone as _tz
+    from django.contrib.auth import get_user_model as _get_user_model
+    from ...models import (
+        BusType, EmployeeType, Employee, Currency,
+        Stage, Route, RouteStage, Fare, RouteBusType, RouteDepot,
+        VehicleType, Settings, SettingsProfile,
+        ExpenseMaster, Expense, CrewAssignment, InspectorDetails,
+        ETMDevice,
+    )
+
+    try:
+        _User = _get_user_model()
+        now   = _tz.now()
+        slug  = company.company_id or str(company.pk)
+
+        bak_dir  = os.path.join(settings.MEDIA_ROOT, 'backups', slug)
+        os.makedirs(bak_dir, exist_ok=True)
+        bak_path = os.path.join(bak_dir, f"{now.strftime('%Y-%m-%d_%H-%M-%S')}.json")
+
+        # Tables to snapshot (order doesn't matter — it's read-only here)
+        tables = {
+            'company':          Company.objects.filter(pk=company.pk),
+            'users':            _User.objects.filter(company=company),
+            'bus_types':        BusType.objects.filter(company=company),
+            'employee_types':   EmployeeType.objects.filter(company=company),
+            'employees':        Employee.objects.filter(company=company),
+            'currencies':       Currency.objects.filter(company=company),
+            'stages':           Stage.objects.filter(company=company),
+            'routes':           Route.objects.filter(company=company),
+            'route_stages':     RouteStage.objects.filter(company=company),
+            'fares':            Fare.objects.filter(company=company),
+            'route_bus_types':  RouteBusType.objects.filter(company=company),
+            'route_depots':     RouteDepot.objects.filter(company=company),
+            'vehicles':         VehicleType.objects.filter(company=company),
+            'settings':         Settings.objects.filter(company=company),
+            'settings_profiles':SettingsProfile.objects.filter(company=company),
+            'expense_masters':  ExpenseMaster.objects.filter(company=company),
+            'expenses':         Expense.objects.filter(company=company),
+            'crew_assignments': CrewAssignment.objects.filter(company=company),
+            'inspector_details':InspectorDetails.objects.filter(company=company),
+            'etm_devices':      ETMDevice.objects.filter(company=company),
+        }
+
+        snapshot = {
+            'meta': {
+                'timestamp':    now.isoformat(),
+                'company_id':   company.company_id,
+                'company_pk':   company.pk,
+                'company_name': company.company_name,
+                'note':         (
+                    'Transactional records (TransactionData, TripData, ScheduleData) '
+                    'are not included here — they remain in the DB under company_code FK.'
+                ),
+            },
+            'tables': {},
+        }
+
+        for table_name, qs in tables.items():
+            try:
+                snapshot['tables'][table_name] = _json.loads(
+                    _dj_serializers.serialize('json', qs)
+                )
+            except Exception as exc:
+                snapshot['tables'][table_name] = {'_error': str(exc)}
+                logger.warning(
+                    f"[backup] Could not serialize '{table_name}' for company "
+                    f"'{company.company_name}': {exc}"
+                )
+
+        with open(bak_path, 'w', encoding='utf-8') as f:
+            _json.dump(snapshot, f, ensure_ascii=False, indent=2)
+
+        logger.info(f"[backup] Snapshot for '{company.company_name}' saved → {bak_path}")
+        return bak_path
+
+    except Exception as exc:
+        logger.error(
+            f"[backup] Snapshot failed for '{company.company_name}': {exc}",
+            exc_info=True,
+        )
+        return None
+
+
+@api_view(['DELETE'])
+@transaction.atomic
+def delete_company(request, pk):
+    """
+    Hard-delete a company (superadmin only).
+    Restores dealer pool counts if the company was dealer-created.
+
+    Before deletion a full JSON snapshot of all management/masterdata records
+    is saved to MEDIA_ROOT/backups/<company_id>/<timestamp>.json.
+    Transactional data (tickets, trips, schedules) is not included in the file
+    but remains in the DB with a now-orphaned company_code FK.
+    """
+    user = get_user_from_cookie(request)
+    if not user:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    if user.role != 'superadmin':
+        return Response({'error': 'Superadmin only'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        company = Company.objects.select_for_update().get(pk=pk)
+    except Company.DoesNotExist:
+        return Response({'error': 'Company not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    company_name = company.company_name
+
+    # Restore dealer pool if this was a dealer-created company
+    if company.client_type == 'dealer_company' and company.dealer_id:
+        try:
+            dealer = Dealer.objects.select_for_update().get(pk=company.dealer_id)
+            dealer.remaining_palmtec_count           += company.palmtec_count
+            dealer.remaining_total_user_count        += company.total_user_count
+            dealer.remaining_premium_user_count      += company.premium_user_count
+            dealer.remaining_intermediate_user_count += company.intermediate_user_count
+            dealer.save(update_fields=[
+                'remaining_palmtec_count',
+                'remaining_total_user_count',
+                'remaining_premium_user_count',
+                'remaining_intermediate_user_count',
+            ])
+            logger.info(f"Restored dealer pool for dealer_id={dealer.id} after deleting '{company_name}'.")
+        except Dealer.DoesNotExist:
+            logger.warning(f"Dealer not found when restoring pool for company '{company_name}'.")
+
+    # Soft-deactivate all company users before deletion to avoid orphaned logins
+    from django.contrib.auth import get_user_model as _get_user_model
+    _User = _get_user_model()
+    deactivated = _User.objects.filter(company=company, is_active=True).update(is_active=False)
+    logger.info(f"Deactivated {deactivated} users for company '{company_name}' before deletion.")
+
+    # ── Snapshot backup ──────────────────────────────────────────────────────
+    # Serialise all management/masterdata records to JSON before the hard-delete.
+    # Failure is logged but must never block the deletion itself.
+    bak_path = _backup_company_data(company)
+    if bak_path:
+        logger.info(f"[delete_company] Backup written: {bak_path}")
+    else:
+        logger.warning(f"[delete_company] Backup FAILED for '{company_name}' — proceeding with deletion anyway.")
+
+    company.delete()
+    logger.warning(f"Company '{company_name}' (pk={pk}) HARD-DELETED by {user.username}.")
+
+    log_action(
+        actor=user, action=AuditLog.ActionType.DELETE,
+        target_model='Company', target_id=pk,
+        target_display=company_name,
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
+
+    return Response({'message': f'"{company_name}" deleted successfully.'}, status=status.HTTP_200_OK)
 
 
 @api_view(['PUT'])
@@ -880,9 +1140,15 @@ def update_company_details(request, pk):
     if serializer.is_valid():
         serializer.save()
         logger.info(f"Updated company: {company.company_name} (ID: {pk})")
+        log_action(
+            actor=user, action=AuditLog.ActionType.UPDATE,
+            target_model='Company', target_id=company.pk,
+            target_display=company.company_name,
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
         return Response(
             {
-                "message": "Company updated successfully", 
+                "message": "Company updated successfully",
                 "data": serializer.data
             },
             status=status.HTTP_200_OK

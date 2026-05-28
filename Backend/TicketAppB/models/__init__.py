@@ -1,13 +1,19 @@
 # Auth models
-from .auth import CustomUser, UserDeviceMapping
+from .auth import CustomUser, UserRole, UserTier, UserSession
 
-AUTH_MODELS = ['CustomUser', 'UserDeviceMapping']
+AUTH_MODELS = ['CustomUser', 'UserRole', 'UserTier', 'UserSession']
 
 
 # Company models
-from .company import Company, Depot, Dealer, DealerCustomerMapping, ExecutiveCompanyMapping, ETMDevice
+from .company import Company, Depot, Dealer, ETMDevice
 
-COMPANY_MODELS = ['Company','Depot','Dealer','DealerCustomerMapping','ExecutiveCompanyMapping','ETMDevice',]
+COMPANY_MODELS = ['Company', 'Depot', 'Dealer', 'ETMDevice']
+
+
+# Audit / System models
+from .audit import GlobalSettings, AuditLog
+
+AUDIT_MODELS = ['GlobalSettings', 'AuditLog']
 
 
 # Master data models
@@ -52,24 +58,36 @@ from .operations import (
     InspectorDetails,
 )
 
-OPERATIONS_MODELS = ['ExpenseMaster','Expense','CrewAssignment','InspectorDetails',]
+OPERATIONS_MODELS = ['ExpenseMaster', 'Expense', 'CrewAssignment', 'InspectorDetails']
 
 
 # Transaction models
-from .transactions import (TransactionData, ScheduleData, TripData, OdometerData, ExpenseData, RawDataLog, Direction)
+from .transactions import (
+    TransactionData,
+    ScheduleData,
+    TripData,
+    OdometerData,
+    ExpenseData,
+    RawDataLog,
+    Direction,
+)
 
-TRANSACTION_MODELS = ['TransactionData', 'ScheduleData', 'TripData', 'OdometerData', 'ExpenseData', 'RawDataLog', 'Direction']
+TRANSACTION_MODELS = [
+    'TransactionData', 'ScheduleData', 'TripData',
+    'OdometerData', 'ExpenseData', 'RawDataLog', 'Direction',
+]
 
 # Payment models
 from .payments import MosambeeTransaction, MosambeePayoutCallback
 
-PAYMENT_MODELS = ['MosambeeTransaction', 'MosambeePayoutCallback',]
+PAYMENT_MODELS = ['MosambeeTransaction', 'MosambeePayoutCallback']
 
 
 # Public export surface
 __all__ = (
     AUTH_MODELS
     + COMPANY_MODELS
+    + AUDIT_MODELS
     + MASTER_DATA_MODELS
     + OPERATIONS_MODELS
     + TRANSACTION_MODELS

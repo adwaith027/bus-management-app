@@ -5,11 +5,12 @@ from .views.web import company as company_views
 from .views.web import dealers as dealer_views
 from .views.web import depots as depot_views
 from .views.web import executives as executive_views
-from .views.web import device_approvals as device_approval_views
 from .views.web import device_registry as device_registry_views
 from .views.web import ticket_reports
 from .views.web import raw_data_logs as raw_log_views
 from .views.web import settlements as settlement_views
+from .views.web import audit_logs as audit_log_views
+from .views.web import global_settings as global_settings_views
 from .views.web.masterdata import transport as transport_views
 from .views.web.masterdata import crew as crew_views
 from .views.web.masterdata import settings as settings_views
@@ -30,20 +31,22 @@ urlpatterns = [
     path('logout', auth_views.logout_view, name='logout'),
     path('protected', auth_views.protected_view, name='protected'),
     path('verify-auth', auth_views.verify_auth, name='verify_auth'),
-    path('device-approvals', device_approval_views.get_device_approvals, name='device_approvals'),
-    path('device-approvals/<int:mapping_id>/approve', device_approval_views.approve_device, name='approve_device'),
-    path('device-approvals/<int:mapping_id>/revoke', device_approval_views.revoke_device, name='revoke_device'),
-
-    # user data
-    path('create_user', user_views.create_user, name='create-user'),
-    path('get_users', user_views.get_all_users, name='get_all_users'),
-    path('update_user/<int:user_id>', user_views.update_user, name='update_user'),
-    path('change_user_password/<int:user_id>', user_views.change_user_password, name='change_user_password'),
+    # self-service password reset (no auth required)
+    path('auth/forgot-password', auth_views.forgot_password, name='forgot_password'),
+    path('auth/reset-password',  auth_views.reset_password,  name='reset_password'),
+    # user management
+    path('create_user',                          user_views.create_user,         name='create-user'),
+    path('get_users',                            user_views.get_all_users,        name='get_all_users'),
+    path('update_user/<int:user_id>',            user_views.update_user,          name='update_user'),
+    path('users/<int:user_id>/toggle-active',    user_views.toggle_user_active,   name='toggle_user_active'),
+    path('users/capacity',                       user_views.user_capacity,         name='user_capacity'),
+    path('change_user_password/<int:user_id>',   user_views.change_user_password,  name='change_user_password'),
 
     # company data
     path('customer-data', company_views.all_company_data, name='company_data'),
     path('create-company', company_views.create_company, name='create_company'),
     path('update-company-details/<int:pk>', company_views.update_company_details, name='update_company'),
+    path('delete-company/<int:pk>', company_views.delete_company, name='delete_company'),
     path('register-company-license/<int:pk>', company_views.register_company_with_license_server, name='register_company_license'),
     path('validate-company-license/<int:pk>', company_views.validate_company_license, name='validate_company_license'),
     path('get-company-by-company-id/<str:company_id>', company_views.get_company_by_company_id, name='get_company_by_company_id'),
@@ -97,6 +100,9 @@ urlpatterns = [
     path('dealers', dealer_views.get_all_dealers, name='get_all_dealers'),
     path('create-dealer', dealer_views.create_dealer, name='create_dealer'),
     path('update-dealer-details/<int:pk>', dealer_views.update_dealer_details, name='update_dealer_details'),
+    path('delete-dealer/<int:pk>', dealer_views.delete_dealer, name='delete_dealer'),
+    path('register-dealer-license/<int:pk>', dealer_views.register_dealer_with_license_server, name='register_dealer_license'),
+    path('validate-dealer-license/<int:pk>',  dealer_views.validate_dealer_license,             name='validate_dealer_license'),
     path('dealer-mappings', dealer_views.get_dealer_mappings, name='get_dealer_mappings'),
     path('create-dealer-mapping', dealer_views.create_dealer_mapping, name='create_dealer_mapping'),
     path('update-dealer-mapping/<int:pk>', dealer_views.update_dealer_mapping, name='update_dealer_mapping'),
@@ -110,6 +116,14 @@ urlpatterns = [
 
     # mdb upload
     path('import-mdb', mdb_views.MdbImportView.as_view(), name='import-mdb'),
+
+    # About page + GlobalSettings
+    path('about',            global_settings_views.about,           name='about'),
+    path('global-settings',  global_settings_views.global_settings, name='global_settings'),
+
+    # Audit logs (superadmin)
+    path('audit-logs',              audit_log_views.list_audit_logs,        name='audit_logs'),
+    path('audit-logs/action-types', audit_log_views.audit_log_action_types, name='audit_log_action_types'),
 
     # Master Data — transport
     path('masterdata/bus-types', transport_views.get_bus_types),
@@ -169,8 +183,9 @@ urlpatterns = [
     path('etm-devices/summary',                        device_registry_views.device_summary,             name='etm_summary'),
     path('etm-devices/bulk-assign-dealer',             device_registry_views.bulk_assign_dealer,         name='etm_bulk_dealer'),
     path('etm-devices/bulk-assign-company',            device_registry_views.bulk_assign_company,        name='etm_bulk_company'),
-    path('etm-devices/<int:device_id>/allocate',       device_registry_views.allocate_to_company,        name='etm_allocate'),
-    path('etm-devices/<int:device_id>/deactivate',     device_registry_views.deactivate_device,          name='etm_deactivate'),
+    path('etm-devices/<int:device_id>/allocate',        device_registry_views.allocate_to_company,  name='etm_allocate'),
+    path('etm-devices/<int:device_id>/deactivate',     device_registry_views.deactivate_device,   name='etm_deactivate'),
+    path('etm-devices/<int:device_id>/set-palmtec-id', device_registry_views.set_palmtec_id,      name='etm_set_palmtec_id'),
 
     # Palmtec device data APIs (server → APK → USB → device)
     path('device/getEtmVersion', setup_data_views.get_etm_device_version_for_apk),

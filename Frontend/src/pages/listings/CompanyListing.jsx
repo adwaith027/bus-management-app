@@ -180,6 +180,8 @@ const EMPTY = {
   address: '', address_2: '', city: '', state: '', district: '', zip_code: '',
   is_active: true,
   user_username: '', user_email: '', user_password: '',
+  // dealer path — pool allocation (only sent when role === dealer_admin)
+  palmtec_count: '', total_user_count: '', premium_user_count: '', intermediate_user_count: '',
 };
 
 // ── Helper ─────────────────────────────────────────────────────────────────────
@@ -195,6 +197,9 @@ function getStatusStyle(s) {
 
 // ══════════════════════════════════════════════════════════════════════════════
 export default function CompanyListing() {
+  const currentUser  = JSON.parse(localStorage.getItem('user') || '{}');
+  const isDealerAdmin = currentUser?.role === 'dealer_admin';
+
   // ── List state ───────────────────────────────────────────────────────────
   const [companies, setCompanies]     = useState([]);
   const [loading, setLoading]         = useState(true);
@@ -256,7 +261,10 @@ export default function CompanyListing() {
   const sec1 = !!(form.company_name && form.company_email && form.contact_person && form.contact_number);
   const sec2 = !!(form.address && form.state && form.district && form.city && form.zip_code);
   const sec3 = !!(form.user_username && form.user_email && form.user_password);
-  const canSubmit = sec1 && sec2 && sec3;
+  const sec4 = !isDealerAdmin || !!(
+    parseInt(form.total_user_count) > 0
+  );
+  const canSubmit = sec1 && sec2 && sec3 && sec4;
 
   // ── Import fetch ─────────────────────────────────────────────────────────
   const handleFetchImport = async () => {
@@ -292,6 +300,12 @@ export default function CompanyListing() {
       gst_number: form.gst_number, address: form.address, address_2: form.address_2,
       city: form.city, state: form.state, district: form.district, zip_code: form.zip_code,
       user_username: form.user_username, user_email: form.user_email, user_password: form.user_password,
+      ...(isDealerAdmin && {
+        palmtec_count:           parseInt(form.palmtec_count)           || 0,
+        total_user_count:        parseInt(form.total_user_count)        || 0,
+        premium_user_count:      parseInt(form.premium_user_count)      || 0,
+        intermediate_user_count: parseInt(form.intermediate_user_count) || 0,
+      }),
     };
     try {
       let res;
@@ -942,6 +956,37 @@ export default function CompanyListing() {
                 </div>
               </SectionCard>
 
+              {/* Step 4: Pool Allocation — dealer_admin only */}
+              {isDealerAdmin && createMode === 'new' && (
+                <SectionCard step={4} active={sec3} complete={sec4} title="Pool Allocation" subtitle="Deduct from your license pool — cannot exceed your remaining balance.">
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field label="ETM Devices" required hint="palmtec_count">
+                      <input type="number" min="0" value={form.palmtec_count}
+                        onChange={e => set('palmtec_count', e.target.value)}
+                        placeholder="0" className={inputCls} />
+                    </Field>
+                    <Field label="Total Users" required hint="max users allowed">
+                      <input type="number" min="1" value={form.total_user_count}
+                        onChange={e => set('total_user_count', e.target.value)}
+                        placeholder="0" className={inputCls} />
+                    </Field>
+                    <Field label="Premium User Slots" hint="optional">
+                      <input type="number" min="0" value={form.premium_user_count}
+                        onChange={e => set('premium_user_count', e.target.value)}
+                        placeholder="0" className={inputCls} />
+                    </Field>
+                    <Field label="Intermediate User Slots" hint="optional">
+                      <input type="number" min="0" value={form.intermediate_user_count}
+                        onChange={e => set('intermediate_user_count', e.target.value)}
+                        placeholder="0" className={inputCls} />
+                    </Field>
+                  </div>
+                  <p className="mt-3 text-xs text-slate-500">
+                    These counts are deducted from your pool immediately on save and restored if the company is deleted.
+                  </p>
+                </SectionCard>
+              )}
+
               {/* Bottom actions */}
               <div className="flex items-center justify-between mt-2">
                 <button type="button" onClick={() => { setPageView('list'); resetCreate(); }}
@@ -965,6 +1010,7 @@ export default function CompanyListing() {
               { label: 'Company identity', done: sec1 },
               { label: 'Registered address', done: sec2 },
               { label: 'Admin user account', done: sec3 },
+              ...(isDealerAdmin && createMode === 'new' ? [{ label: 'Pool allocation', done: sec4 }] : []),
             ]} />
             <TipCard />
           </div>

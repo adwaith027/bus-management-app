@@ -24,6 +24,15 @@ def _is_company_admin(user):
 def _is_superadmin_or_executive(user):
     return user and user.role in (ROLE_SUPERADMIN, ROLE_EXECUTIVE)
 
+# ── Tier access ───────────────────────────────────────────────────────────────
+_TIER_ORDER = {'basic': 0, 'intermediate': 1, 'premium': 2}
+
+def _meets_tier(user, minimum: str) -> bool:
+    """True if user's tier is >= minimum. Non-company roles are always allowed."""
+    if user.role not in ('company_admin', 'company_user'):
+        return True
+    return _TIER_ORDER.get(user.tier or 'basic', 0) >= _TIER_ORDER.get(minimum, 0)
+
 def _can_manage_devices(user):
     """Superadmin and executive can approve/reject ETM devices."""
     return _is_superadmin_or_executive(user)

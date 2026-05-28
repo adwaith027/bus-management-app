@@ -25,7 +25,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ...models import ETMDevice, Company, Dealer, DealerCustomerMapping
+from ...models import ETMDevice, Company, Dealer, AuditLog
 from ...serializers.devices import ETMDeviceSerializer
 from .auth import get_user_from_cookie
 from ..utils import (
@@ -35,6 +35,7 @@ from ..utils import (
     _is_company_admin,
     _is_superadmin_or_executive,
 )
+from .audit_logs import log_action
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +53,11 @@ def _device_qs_for_user(user):
         return qs.filter(created_by=user)
 
     if _is_executive(user):
-        from ...models import ExecutiveCompanyMapping
-        company_ids = ExecutiveCompanyMapping.objects.filter(
-            executive_user_id=user.id, is_active=True
-        ).values_list('company_id', flat=True)
+        # Executive sees devices for companies they created.
+        # TODO Phase 4: also restrict by executive's state (CustomUser.state).
+        company_ids = Company.objects.filter(
+            created_by=user, is_active=True
+        ).values_list('id', flat=True)
         return qs.filter(company_id__in=company_ids)
 
     if _is_dealer_admin(user):
@@ -138,6 +140,13 @@ class DeviceUploadView(APIView):
             )
             for s in new_serials
         ])
+
+        log_action(
+            actor=user, action=AuditLog.ActionType.SERIAL_UPLOAD,
+            target_model='ETMDevice',
+            details={'created': len(new_serials), 'skipped': len(existing)},
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
 
         logger.info(f"Device upload by {user}: {len(new_serials)} created, {len(existing)} skipped")
         return Response({
@@ -239,6 +248,14 @@ def bulk_assign_dealer(request):
         allocation_status=ETMDevice.AllocationStatus.STOCK,
     ).update(dealer=dealer, allocation_status=ETMDevice.AllocationStatus.DEALER_POOL)
 
+    log_action(
+        actor=user, action=AuditLog.ActionType.DEVICE_ALLOCATE,
+        target_model='ETMDevice',
+        target_display=dealer.dealer_name,
+        details={'dealer_id': dealer.id, 'count': updated},
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
+
     return Response({
         'message': f'{updated} device(s) moved to dealer pool.',
         'assigned': updated,
@@ -272,8 +289,8 @@ def bulk_assign_company(request):
     except Company.DoesNotExist:
         return Response({'error': 'Company not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    dealer_mapping = DealerCustomerMapping.objects.filter(company=company, is_active=True).first()
-    dealer = dealer_mapping.dealer if dealer_mapping else None
+    # Company.dealer FK now directly encodes the dealer relationship (no join table).
+    dealer = company.dealer
 
     updated = ETMDevice.objects.filter(
         serial_number__in=serial_numbers,
@@ -282,6 +299,14 @@ def bulk_assign_company(request):
         company=company,
         dealer=dealer,
         allocation_status=ETMDevice.AllocationStatus.ALLOCATED,
+    )
+
+    log_action(
+        actor=user, action=AuditLog.ActionType.DEVICE_ALLOCATE,
+        target_model='ETMDevice',
+        target_display=company.company_name,
+        details={'company_id': company.id, 'count': updated},
+        ip_address=request.META.get('REMOTE_ADDR'),
     )
 
     return Response({
@@ -319,14 +344,21 @@ def allocate_to_company(request, device_id):
     except ETMDevice.DoesNotExist:
         return Response({'error': 'Device not found in your pool'}, status=status.HTTP_404_NOT_FOUND)
 
-    if not DealerCustomerMapping.objects.filter(
-        dealer_id=user.dealer_id, company_id=company_id, is_active=True
-    ).exists():
+    # Verify the target company belongs to this dealer (Company.dealer FK).
+    if not Company.objects.filter(id=company_id, dealer_id=user.dealer_id, is_active=True).exists():
         return Response({'error': 'Company is not under your dealer'}, status=status.HTTP_403_FORBIDDEN)
 
     device.company_id = company_id
     device.allocation_status = ETMDevice.AllocationStatus.ALLOCATED
     device.save(update_fields=['company_id', 'allocation_status', 'updated_at'])
+
+    log_action(
+        actor=user, action=AuditLog.ActionType.DEVICE_ALLOCATE,
+        target_model='ETMDevice', target_id=device.pk,
+        target_display=device.serial_number,
+        details={'company_id': company_id},
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
 
     return Response({'message': 'Device allocated to company', 'data': ETMDeviceSerializer(device).data}, status=status.HTTP_200_OK)
 
@@ -348,4 +380,78 @@ def deactivate_device(request, device_id):
     device.allocation_status = ETMDevice.AllocationStatus.INACTIVE
     device.save(update_fields=['allocation_status', 'updated_at'])
 
+    log_action(
+        actor=user, action=AuditLog.ActionType.DEACTIVATE,
+        target_model='ETMDevice', target_id=device.pk,
+        target_display=device.serial_number,
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
+
     return Response({'message': 'Device deactivated', 'data': ETMDeviceSerializer(device).data}, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+def set_palmtec_id(request, device_id):
+    """
+    Company admin assigns the physical Palmtec ID to an allocated device.
+
+    The Palmtec ID is the integer identifier the ETM device broadcasts in
+    ticket / trip payloads (TransactionData.palmtec_id, TripData.palmtec_id, etc.).
+    Setting it here links the physical box to all its operational data.
+
+    Body: { palmtec_id: <positive integer> }
+    Company admin only — device must be ALLOCATED to their company.
+    """
+    user = get_user_from_cookie(request)
+    if not user:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    if not _is_company_admin(user):
+        return Response({'error': 'Company admin only'}, status=status.HTTP_403_FORBIDDEN)
+    if not user.company_id:
+        return Response({'error': 'No company linked to your account'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        device = ETMDevice.objects.get(
+            pk=device_id,
+            company_id=user.company_id,
+            allocation_status=ETMDevice.AllocationStatus.ALLOCATED,
+        )
+    except ETMDevice.DoesNotExist:
+        return Response({'error': 'Device not found in your company'}, status=status.HTTP_404_NOT_FOUND)
+
+    raw_id = request.data.get('palmtec_id')
+    if raw_id is None:
+        return Response({'error': 'palmtec_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        palmtec_id = int(raw_id)
+        if palmtec_id <= 0:
+            raise ValueError()
+    except (TypeError, ValueError):
+        return Response({'error': 'palmtec_id must be a positive integer'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Check for conflicts within the company
+    conflict = ETMDevice.objects.filter(
+        company_id=user.company_id,
+        palmtec_id=palmtec_id,
+    ).exclude(pk=device_id).first()
+    if conflict:
+        return Response({
+            'error': f'Palmtec ID {palmtec_id} is already assigned to device {conflict.serial_number}.'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    device.palmtec_id = palmtec_id
+    device.save(update_fields=['palmtec_id', 'updated_at'])
+
+    log_action(
+        actor=user, action=AuditLog.ActionType.UPDATE,
+        target_model='ETMDevice', target_id=device.pk,
+        target_display=device.serial_number,
+        details={'palmtec_id': palmtec_id},
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
+
+    return Response({
+        'message': f'Palmtec ID {palmtec_id} assigned to device {device.serial_number}.',
+        'data': ETMDeviceSerializer(device).data,
+    }, status=status.HTTP_200_OK)
