@@ -20,10 +20,11 @@ from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from ...models import Company, CustomUser
+from ...models import Company, CustomUser, AuditLog
 from ...serializers.auth import UserSerializer
 from .auth import get_user_from_cookie
 from ..utils import _is_superadmin, _is_dealer_admin, _is_company_admin
+from .audit_logs import log_action
 
 
 User = get_user_model()
@@ -171,7 +172,7 @@ def create_user(request):
         tier = 'none'
 
     try:
-        User.objects.create_user(
+        new_user = User.objects.create_user(
             username=username,
             email=email,
             password=password,
@@ -179,6 +180,13 @@ def create_user(request):
             role=role,
             tier=tier,
             created_by=requester,
+        )
+        log_action(
+            actor=requester, action=AuditLog.ActionType.CREATE,
+            target_model='CustomUser', target_id=new_user.pk,
+            target_display=new_user.username,
+            details={'role': new_user.role, 'tier': new_user.tier},
+            ip_address=request.META.get('REMOTE_ADDR'),
         )
         return Response({'message': 'User added successfully'}, status=status.HTTP_201_CREATED)
     except Exception:
@@ -287,6 +295,8 @@ def update_user(request, user_id):
         return Response({'error': 'Email already registered to another user.'}, status=status.HTTP_400_BAD_REQUEST)
 
     # ── Tier change (company-level users only) ────────────────────────────────
+    old_tier = target.tier
+    tier_changed = False
     if new_tier and target.role in ('company_admin', 'company_user'):
         if new_tier not in _VALID_TIERS:
             return Response({'error': f'Invalid tier. Choose from: {", ".join(_VALID_TIERS)}'}, status=status.HTTP_400_BAD_REQUEST)
@@ -295,6 +305,7 @@ def update_user(request, user_id):
             if not ok:
                 return Response({'error': err}, status=status.HTTP_403_FORBIDDEN)
             target.tier = new_tier
+            tier_changed = True
 
     # ── Save ──────────────────────────────────────────────────────────────────
     target.username = new_username
@@ -303,6 +314,21 @@ def update_user(request, user_id):
         target.save(update_fields=['username', 'email', 'tier'])
     except Exception:
         return Response({'error': 'Update failed.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    log_action(
+        actor=requester, action=AuditLog.ActionType.UPDATE,
+        target_model='CustomUser', target_id=target.pk,
+        target_display=target.username,
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
+    if tier_changed:
+        log_action(
+            actor=requester, action=AuditLog.ActionType.TIER_CHANGE,
+            target_model='CustomUser', target_id=target.pk,
+            target_display=target.username,
+            details={'old_tier': old_tier, 'new_tier': target.tier},
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
 
     return Response({
         'status': 'success',
@@ -358,6 +384,7 @@ def toggle_user_active(request, user_id):
         if not ok:
             return Response({'error': f'Cannot reactivate: {err}'}, status=status.HTTP_403_FORBIDDEN)
 
+    was_active = target.is_active
     new_state = not target.is_active
     target.is_active = new_state
     target.save(update_fields=['is_active'])
@@ -371,6 +398,14 @@ def toggle_user_active(request, user_id):
             logging.getLogger(__name__).info(
                 f"Killed {killed} session(s) for deactivated user '{target.username}'."
             )
+
+    toggle_action = AuditLog.ActionType.DEACTIVATE if was_active else AuditLog.ActionType.ACTIVATE
+    log_action(
+        actor=requester, action=toggle_action,
+        target_model='CustomUser', target_id=target.pk,
+        target_display=target.username,
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
 
     action = 'reactivated' if new_state else 'deactivated'
     return Response({
@@ -493,6 +528,13 @@ def change_user_password(request, user_id):
     try:
         target.set_password(new_password)
         target.save()
+        log_action(
+            actor=requester, action=AuditLog.ActionType.PASSWORD_RESET,
+            target_model='CustomUser', target_id=target.pk,
+            target_display=target.username,
+            details={'changed_by': requester.username},
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
         return Response({
             'status': 'success',
             'message': 'Password changed successfully.',

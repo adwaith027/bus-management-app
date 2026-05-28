@@ -20,6 +20,8 @@ from django.db.utils import OperationalError, ProgrammingError
 from django.db.models import Sum, Q, Count, Case, When, IntegerField
 from ...models import Company,TransactionData,TripData,Route,VehicleType,MosambeeTransaction,Dealer
 from ..utils import _is_superadmin, _is_executive, _is_dealer_admin, _is_company_admin
+from .audit_logs import log_action
+from ...models import AuditLog
 
 
 # Setup logger  
@@ -722,6 +724,14 @@ def import_company(request):
     )
     logger.info(f"Imported existing company '{company.company_name}' (company_id={company_id}) by user {user}")
 
+    log_action(
+        actor=user, action=AuditLog.ActionType.CREATE,
+        target_model='Company', target_id=company.pk,
+        target_display=company.company_name,
+        details={'client_type': 'direct', 'imported': True},
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
+
     serializer = CompanySerializer(company)
     return Response(
         {
@@ -921,6 +931,14 @@ def create_company(request):
     )
     logger.info(f"Company admin '{user_username}' created for '{company.company_name}'.")
 
+    log_action(
+        actor=user, action=AuditLog.ActionType.CREATE,
+        target_model='Company', target_id=company.pk,
+        target_display=company.company_name,
+        details={'client_type': company.client_type},
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
+
     return Response({"message": "Company created successfully", "data": serializer.data}, status=status.HTTP_201_CREATED)
 
 
@@ -1085,6 +1103,13 @@ def delete_company(request, pk):
     company.delete()
     logger.warning(f"Company '{company_name}' (pk={pk}) HARD-DELETED by {user.username}.")
 
+    log_action(
+        actor=user, action=AuditLog.ActionType.DELETE,
+        target_model='Company', target_id=pk,
+        target_display=company_name,
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
+
     return Response({'message': f'"{company_name}" deleted successfully.'}, status=status.HTTP_200_OK)
 
 
@@ -1115,9 +1140,15 @@ def update_company_details(request, pk):
     if serializer.is_valid():
         serializer.save()
         logger.info(f"Updated company: {company.company_name} (ID: {pk})")
+        log_action(
+            actor=user, action=AuditLog.ActionType.UPDATE,
+            target_model='Company', target_id=company.pk,
+            target_display=company.company_name,
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
         return Response(
             {
-                "message": "Company updated successfully", 
+                "message": "Company updated successfully",
                 "data": serializer.data
             },
             status=status.HTTP_200_OK

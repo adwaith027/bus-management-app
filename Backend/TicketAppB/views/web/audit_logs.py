@@ -15,7 +15,6 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from ...models import AuditLog
-from .auth import get_user_from_cookie
 from ..utils import _is_superadmin
 
 logger = logging.getLogger(__name__)
@@ -100,6 +99,7 @@ def list_audit_logs(request):
       ?page=<int>         — 1-based page number (default 1)
       ?page_size=<int>    — records per page (default 50, max 200)
     """
+    from .auth import get_user_from_cookie
     user = get_user_from_cookie(request)
     if not user:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -162,6 +162,7 @@ def audit_log_action_types(request):
     GET /audit-logs/action-types
     Returns the list of valid action type choices for frontend filter dropdowns.
     """
+    from .auth import get_user_from_cookie
     user = get_user_from_cookie(request)
     if not user:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)

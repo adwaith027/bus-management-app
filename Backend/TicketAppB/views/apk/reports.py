@@ -1,9 +1,3 @@
-from django.http import JsonResponse
-from django.db.models import Sum, Count, Max
-from django.utils import timezone
-from rest_framework.decorators import api_view
-from ...models import TransactionData, TripData, ScheduleData, Stage, ExpenseData
-from ..web.auth import get_user_from_request as get_user_from_cookie  # APK: Bearer header
 
 PAYMENT_LABELS = {'Cash': 'Cash', 'UPI': 'UPI', 'Card': 'Card'}
 
@@ -27,6 +21,8 @@ def duty_report(request):
     user = get_user_from_cookie(request)
     if not user:
         return JsonResponse({'error': 'Unauthorized'}, status=401)
+    if not _meets_tier(user, 'intermediate'):
+        return JsonResponse(_TIER_ERROR, status=403)
 
     device_id = request.GET.get('device_id')
     date = request.GET.get('date')
@@ -72,6 +68,8 @@ def bus_summary_report(request):
     user = get_user_from_cookie(request)
     if not user:
         return JsonResponse({'error': 'Unauthorized'}, status=401)
+    if not _meets_tier(user, 'intermediate'):
+        return JsonResponse(_TIER_ERROR, status=403)
 
     bus_no = request.GET.get('bus_no')
     from_date = request.GET.get('from_date')
@@ -119,6 +117,8 @@ def payment_type_report(request):
     user = get_user_from_cookie(request)
     if not user:
         return JsonResponse({'error': 'Unauthorized'}, status=401)
+    if not _meets_tier(user, 'intermediate'):
+        return JsonResponse(_TIER_ERROR, status=403)
 
     bus_no = request.GET.get('bus_no')
     from_date = request.GET.get('from_date')
@@ -177,6 +177,8 @@ def farewise_report(request):
     user = get_user_from_cookie(request)
     if not user:
         return JsonResponse({'error': 'Unauthorized'}, status=401)
+    if not _meets_tier(user, 'intermediate'):
+        return JsonResponse(_TIER_ERROR, status=403)
 
     bus_no = request.GET.get('bus_no')
     from_date = request.GET.get('from_date')
@@ -248,6 +250,8 @@ def passenger_info(request):
     user = get_user_from_cookie(request)
     if not user:
         return JsonResponse({'error': 'Unauthorized'}, status=401)
+    if not _meets_tier(user, 'intermediate'):
+        return JsonResponse(_TIER_ERROR, status=403)
 
     device_id = request.GET.get('device_id')
     date = request.GET.get('date')
@@ -306,6 +310,8 @@ def trip_details(request):
     user = get_user_from_cookie(request)
     if not user:
         return JsonResponse({'error': 'Unauthorized'}, status=401)
+    if not _meets_tier(user, 'intermediate'):
+        return JsonResponse(_TIER_ERROR, status=403)
 
     device_id = request.GET.get('device_id')
     trip_no = request.GET.get('trip_no')
@@ -399,6 +405,8 @@ def ticket_details(request):
     user = get_user_from_cookie(request)
     if not user:
         return JsonResponse({'error': 'Unauthorized'}, status=401)
+    if not _meets_tier(user, 'intermediate'):
+        return JsonResponse(_TIER_ERROR, status=403)
 
     device_id = request.GET.get('device_id')
     trip_no = request.GET.get('trip_no')
@@ -474,6 +482,8 @@ def expense_report(request):
     user = get_user_from_cookie(request)
     if not user:
         return JsonResponse({'error': 'Unauthorized'}, status=401)
+    if not _meets_tier(user, 'intermediate'):
+        return JsonResponse(_TIER_ERROR, status=403)
 
     bus_no = request.GET.get('bus_no')
     from_date = request.GET.get('from_date')
@@ -519,6 +529,8 @@ def stage_wise_report(request):
     user = get_user_from_cookie(request)
     if not user:
         return JsonResponse({'error': 'Unauthorized'}, status=401)
+    if not _meets_tier(user, 'intermediate'):
+        return JsonResponse(_TIER_ERROR, status=403)
 
     bus_no = request.GET.get('bus_no')
     from_date = request.GET.get('from_date')
@@ -590,6 +602,8 @@ def apk_dashboard(request):
     user = get_user_from_cookie(request)
     if not user:
         return JsonResponse({'error': 'Unauthorized'}, status=401)
+    if not _meets_tier(user, 'intermediate'):
+        return JsonResponse(_TIER_ERROR, status=403)
 
     date_str = request.GET.get('date')
     if not date_str:

@@ -22,11 +22,12 @@ from rest_framework.response import Response
 from rest_framework.decorators import api_view
 from django.contrib.auth import get_user_model
 
-from ...models import Dealer, Company, ETMDevice
+from ...models import Dealer, Company, ETMDevice, AuditLog
 from ...serializers.dealers import DealerSerializer
 from ...serializers.company import CompanySerializer
 from .auth import get_user_from_cookie
 from ..utils import _is_superadmin, _is_dealer_admin
+from .audit_logs import log_action
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -248,6 +249,13 @@ def create_dealer(request):
         created_by=user,
     )
 
+    log_action(
+        actor=user, action=AuditLog.ActionType.CREATE,
+        target_model='Dealer', target_id=dealer.pk,
+        target_display=dealer.dealer_name,
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
+
     return Response({
         'message': 'Dealer created. Call /register-dealer-license to register with the license server.',
         'data': serializer.data,
@@ -288,6 +296,15 @@ def register_dealer_with_license_server(request, pk):
     dealer.save(update_fields=['unique_identifier'])
 
     logger.info(f"Dealer '{dealer.dealer_name}' registered with license server. ID={result['customer_id']}")
+
+    log_action(
+        actor=user, action=AuditLog.ActionType.LICENSE_RENEWAL,
+        target_model='Dealer', target_id=dealer.pk,
+        target_display=dealer.dealer_name,
+        details={'step': 'register', 'customer_id': dealer.unique_identifier},
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
+
     return Response({
         'message': f"Registered with license server. Customer ID: {result['customer_id']}",
         'customer_id': result['customer_id'],
@@ -326,6 +343,14 @@ def validate_dealer_license(request, pk):
 
         dealer.authentication_status = Dealer.AuthStatus.VALIDATING
         dealer.save(update_fields=['authentication_status'])
+
+    log_action(
+        actor=user, action=AuditLog.ActionType.LICENSE_RENEWAL,
+        target_model='Dealer', target_id=dealer.pk,
+        target_display=dealer.dealer_name,
+        details={'step': 'validate_started'},
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
 
     threading.Thread(
         target=_background_dealer_license_polling,
@@ -370,9 +395,85 @@ def update_dealer_details(request, pk):
     serializer = DealerSerializer(dealer, data=request.data, partial=True)
     if serializer.is_valid():
         serializer.save()
+        log_action(
+            actor=user, action=AuditLog.ActionType.UPDATE,
+            target_model='Dealer', target_id=dealer.pk,
+            target_display=dealer.dealer_name,
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
         return Response({'message': 'Dealer updated successfully', 'data': serializer.data}, status=status.HTTP_200_OK)
 
     return Response({'message': 'Validation failed', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ── Dealer delete ─────────────────────────────────────────────────────────────
+
+@api_view(['DELETE'])
+def delete_dealer(request, pk):
+    """
+    Hard-delete a dealer. Superadmin only.
+
+    Blocked if the dealer has any companies still linked (is_active=True or False
+    — even inactive companies keep FK references). All companies must be deleted
+    or reassigned first.
+
+    On success:
+      - Devices still in DealerPool for this dealer → returned to Stock
+      - All dealer users soft-deactivated (is_active=False)
+      - Dealer record hard-deleted (ETMDevice.dealer → SET_NULL via CASCADE)
+    """
+    user = get_user_from_cookie(request)
+    if not user:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    if not _is_superadmin(user):
+        return Response({'error': 'Superadmin only'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        dealer = Dealer.objects.get(pk=pk)
+    except Dealer.DoesNotExist:
+        return Response({'error': 'Dealer not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Block if any companies (active or inactive) still reference this dealer
+    company_count = Company.objects.filter(dealer=dealer).count()
+    if company_count:
+        return Response({
+            'error': (
+                f'This dealer has {company_count} linked '
+                f'{"company" if company_count == 1 else "companies"}. '
+                'Delete all client companies before deleting the dealer.'
+            ),
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    dealer_name = dealer.dealer_name
+
+    # Return unallocated pool devices to Stock
+    from ...models import ETMDevice
+    returned = ETMDevice.objects.filter(
+        dealer=dealer,
+        allocation_status=ETMDevice.AllocationStatus.DEALER_POOL,
+    ).update(dealer=None, allocation_status=ETMDevice.AllocationStatus.STOCK)
+
+    # Soft-deactivate all dealer users
+    from django.contrib.auth import get_user_model as _get_user_model
+    _User = _get_user_model()
+    deactivated = _User.objects.filter(dealer=dealer, is_active=True).update(is_active=False)
+
+    dealer.delete()
+
+    log_action(
+        actor=user, action=AuditLog.ActionType.DELETE,
+        target_model='Dealer', target_id=pk,
+        target_display=dealer_name,
+        details={'pool_devices_returned': returned, 'users_deactivated': deactivated},
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
+
+    logger.warning(f"Dealer '{dealer_name}' (pk={pk}) HARD-DELETED by {user.username}.")
+    return Response({
+        'message': f'"{dealer_name}" deleted successfully.',
+        'pool_devices_returned_to_stock': returned,
+        'users_deactivated': deactivated,
+    }, status=status.HTTP_200_OK)
 
 
 # ── Removed mapping endpoints (410 Gone) ─────────────────────────────────────

@@ -34,7 +34,8 @@ from django.contrib.auth import get_user_model, authenticate
 from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
 from django.conf import settings
 
-from ...models import Company, UserSession
+from ...models import Company, UserSession, AuditLog
+from .audit_logs import log_action
 
 logger = logging.getLogger(__name__)
 _token_generator = PasswordResetTokenGenerator()
@@ -423,6 +424,15 @@ def login_view(request):
     except Exception as _exc:
         logger.warning(f"Failed to compute login notifications: {_exc}")
 
+    device_type = _detect_device_type(request)
+    log_action(
+        actor=user, action=AuditLog.ActionType.LOGIN,
+        target_model='CustomUser', target_id=user.pk,
+        target_display=user.username,
+        details={'device_type': device_type},
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
+
     return response
 
 
@@ -434,6 +444,8 @@ def logout_view(request):
     Web: session_uid read from JWT cookie claim.
     APK: session_uid read from JWT Bearer claim (or body fallback).
     """
+    logout_user = get_user_from_request(request)
+
     session_uid = _get_session_uid_from_request(request)
     if not session_uid:
         # Fallback: APK may pass session_uid in body
@@ -453,6 +465,14 @@ def logout_view(request):
             blacklist_refresh_token.delay(refresh_token_str)
         except Exception:
             pass
+
+    if logout_user:
+        log_action(
+            actor=logout_user, action=AuditLog.ActionType.LOGOUT,
+            target_model='CustomUser', target_id=logout_user.pk,
+            target_display=logout_user.username,
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
 
     if _is_apk_request(request):
         return Response({'message': 'Logged out successfully'})
@@ -642,6 +662,14 @@ def reset_password(request):
 
     user.set_password(new_password)
     user.save()
+
+    log_action(
+        actor=user, action=AuditLog.ActionType.PASSWORD_RESET,
+        target_model='CustomUser', target_id=user.pk,
+        target_display=user.username,
+        details={'self_service': True},
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
 
     # Invalidate all active sessions so the old password can no longer be used
     # (sessions hold JWTs signed before the password change).

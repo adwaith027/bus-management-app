@@ -25,7 +25,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ...models import ETMDevice, Company, Dealer
+from ...models import ETMDevice, Company, Dealer, AuditLog
 from ...serializers.devices import ETMDeviceSerializer
 from .auth import get_user_from_cookie
 from ..utils import (
@@ -35,6 +35,7 @@ from ..utils import (
     _is_company_admin,
     _is_superadmin_or_executive,
 )
+from .audit_logs import log_action
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +141,13 @@ class DeviceUploadView(APIView):
             for s in new_serials
         ])
 
+        log_action(
+            actor=user, action=AuditLog.ActionType.SERIAL_UPLOAD,
+            target_model='ETMDevice',
+            details={'created': len(new_serials), 'skipped': len(existing)},
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
+
         logger.info(f"Device upload by {user}: {len(new_serials)} created, {len(existing)} skipped")
         return Response({
             'message': f'{len(new_serials)} device(s) added to stock.',
@@ -240,6 +248,14 @@ def bulk_assign_dealer(request):
         allocation_status=ETMDevice.AllocationStatus.STOCK,
     ).update(dealer=dealer, allocation_status=ETMDevice.AllocationStatus.DEALER_POOL)
 
+    log_action(
+        actor=user, action=AuditLog.ActionType.DEVICE_ALLOCATE,
+        target_model='ETMDevice',
+        target_display=dealer.dealer_name,
+        details={'dealer_id': dealer.id, 'count': updated},
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
+
     return Response({
         'message': f'{updated} device(s) moved to dealer pool.',
         'assigned': updated,
@@ -285,6 +301,14 @@ def bulk_assign_company(request):
         allocation_status=ETMDevice.AllocationStatus.ALLOCATED,
     )
 
+    log_action(
+        actor=user, action=AuditLog.ActionType.DEVICE_ALLOCATE,
+        target_model='ETMDevice',
+        target_display=company.company_name,
+        details={'company_id': company.id, 'count': updated},
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
+
     return Response({
         'message': f'{updated} device(s) allocated to company.',
         'assigned': updated,
@@ -328,6 +352,14 @@ def allocate_to_company(request, device_id):
     device.allocation_status = ETMDevice.AllocationStatus.ALLOCATED
     device.save(update_fields=['company_id', 'allocation_status', 'updated_at'])
 
+    log_action(
+        actor=user, action=AuditLog.ActionType.DEVICE_ALLOCATE,
+        target_model='ETMDevice', target_id=device.pk,
+        target_display=device.serial_number,
+        details={'company_id': company_id},
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
+
     return Response({'message': 'Device allocated to company', 'data': ETMDeviceSerializer(device).data}, status=status.HTTP_200_OK)
 
 
@@ -347,6 +379,13 @@ def deactivate_device(request, device_id):
 
     device.allocation_status = ETMDevice.AllocationStatus.INACTIVE
     device.save(update_fields=['allocation_status', 'updated_at'])
+
+    log_action(
+        actor=user, action=AuditLog.ActionType.DEACTIVATE,
+        target_model='ETMDevice', target_id=device.pk,
+        target_display=device.serial_number,
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
 
     return Response({'message': 'Device deactivated', 'data': ETMDeviceSerializer(device).data}, status=status.HTTP_200_OK)
 
@@ -403,6 +442,14 @@ def set_palmtec_id(request, device_id):
 
     device.palmtec_id = palmtec_id
     device.save(update_fields=['palmtec_id', 'updated_at'])
+
+    log_action(
+        actor=user, action=AuditLog.ActionType.UPDATE,
+        target_model='ETMDevice', target_id=device.pk,
+        target_display=device.serial_number,
+        details={'palmtec_id': palmtec_id},
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
 
     return Response({
         'message': f'Palmtec ID {palmtec_id} assigned to device {device.serial_number}.',

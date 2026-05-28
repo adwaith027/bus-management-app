@@ -100,6 +100,7 @@ urlpatterns = [
     path('dealers', dealer_views.get_all_dealers, name='get_all_dealers'),
     path('create-dealer', dealer_views.create_dealer, name='create_dealer'),
     path('update-dealer-details/<int:pk>', dealer_views.update_dealer_details, name='update_dealer_details'),
+    path('delete-dealer/<int:pk>', dealer_views.delete_dealer, name='delete_dealer'),
     path('register-dealer-license/<int:pk>', dealer_views.register_dealer_with_license_server, name='register_dealer_license'),
     path('validate-dealer-license/<int:pk>',  dealer_views.validate_dealer_license,             name='validate_dealer_license'),
     path('dealer-mappings', dealer_views.get_dealer_mappings, name='get_dealer_mappings'),
