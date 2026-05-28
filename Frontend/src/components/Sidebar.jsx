@@ -2,13 +2,14 @@ import { useState, useRef, useEffect } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Building2, Users, Handshake,
-  SmartphoneNfc, FileInput, Warehouse, Database,
+  FileInput, Warehouse, Database,
   BarChart2, Receipt, LogOut, Menu,
   AlertTriangle, XCircle, QrCode,
   ChevronDown, ChevronLeft, ChevronRight,
   Coins, Users2,
   Route, Truck, CalendarCog, Settings,
   Ticket, CalendarRange, IndianRupee, Cpu, MonitorDown, BusFront,
+  FileText, Settings2, Info,
 } from "lucide-react";
 import api, { BASE_URL } from "../assets/js/axiosConfig";
 import cacheManager from "../assets/js/reportCache";
@@ -154,13 +155,10 @@ export default function Sidebar() {
   const username = user?.username || user?.name || "User";
 
   const handleLogout = async () => {
-    const deviceUid = localStorage.getItem("device_uid");
-    const body = deviceUid ? { device_uid: deviceUid } : {};
-    try { await api.post(`${BASE_URL}/logout`, body); } catch {}
+    try { await api.post(`${BASE_URL}/logout`); } catch {}
     finally {
       cacheManager.invalidateAll();
-      ["user", "device_uid"]
-        .forEach(k => localStorage.removeItem(k));
+      localStorage.removeItem("user");
       navigate("/login");
     }
   };
@@ -303,11 +301,13 @@ export default function Sidebar() {
                 <NavItem to="/dashboard/users"            icon={Users}         label="Users"            isCollapsed={isCollapsed} onClose={close} />
                 <SectionLabel label="Device Management" isCollapsed={isCollapsed} />
                 <NavItem to="/dashboard/device-registry"  icon={Cpu}           label="Device Registry"  isCollapsed={isCollapsed} onClose={close} />
-                <NavItem to="/dashboard/device-approvals" icon={SmartphoneNfc} label="Device Approvals" isCollapsed={isCollapsed} onClose={close} />
                 <SectionLabel label="Data" isCollapsed={isCollapsed} />
                 <NavItem to="/dashboard/data-import"      icon={FileInput}     label="MDB Data Import"  isCollapsed={isCollapsed} onClose={close} />
                 <SectionLabel label="Diagnostics" isCollapsed={isCollapsed} />
                 <NavItem to="/dashboard/failed-payloads"   icon={AlertTriangle} label="Failed Payloads"  isCollapsed={isCollapsed} onClose={close} />
+                <SectionLabel label="Settings" isCollapsed={isCollapsed} />
+                <NavItem to="/dashboard/audit-logs"       icon={FileText}     label="Audit Logs"      isCollapsed={isCollapsed} onClose={close} />
+                <NavItem to="/dashboard/global-settings"  icon={Settings2}    label="Global Settings" isCollapsed={isCollapsed} onClose={close} />
               </>
             )}
 
@@ -386,6 +386,10 @@ export default function Sidebar() {
                 </DropdownSection>
               </>
             )}
+
+            {/* About — all roles */}
+            <SectionLabel label="Support" isCollapsed={isCollapsed} />
+            <NavItem to="/dashboard/about" icon={Info} label="About" isCollapsed={isCollapsed} onClose={close} />
 
           </ul>
         </nav>

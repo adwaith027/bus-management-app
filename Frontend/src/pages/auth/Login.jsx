@@ -99,6 +99,7 @@ export default function Login() {
   const [error, setError] = useState(searchParams.get('error') || '');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [pendingNotifications, setPendingNotifications] = useState([]);
 
   /* focus ring state */
   const [userFocus, setUserFocus] = useState(false);
@@ -125,30 +126,24 @@ export default function Login() {
       const login_data = {
         username: trimmedUsername,
         password: trimmedPassword,
-        device_uid: localStorage.getItem("device_uid") || null,
       };
       const response = await api.post(`${BASE_URL}/login`, login_data);
       if (response.data.user) {
         localStorage.setItem('user', JSON.stringify(response.data.user));
       }
-      navigate('/dashboard');
+      const notifications = response.data.notifications || [];
+      if (notifications.length > 0) {
+        setPendingNotifications(notifications);
+      } else {
+        navigate('/dashboard');
+      }
     } catch (err) {
       console.error('Login error:', err);
       const backendCode = err.response?.data?.error_code;
       const backendMessage = err.response?.data?.message || err.response?.data?.error;
 
-      if (backendCode === "DEVICE_PENDING_APPROVAL") {
-        const generatedUid = err.response?.data?.details?.device_uid;
-        if (generatedUid) localStorage.setItem("device_uid", generatedUid);
-        setError(backendMessage || "Device registered. Wait for superadmin approval and retry.");
-      } else if (backendCode === "DEVICE_INACTIVE") {
-        setError(backendMessage || "Device has been revoked. Contact administrator.");
-      } else if (backendCode === "DEVICE_UID_ALREADY_BOUND") {
-        setError(backendMessage || "This device is linked to another user. Contact administrator.");
-      } else if (backendCode === "DEVICE_LIMIT_REACHED") {
-        setError(backendMessage || "Maximum active devices reached. Another device must log out first.");
-      } else if (backendCode === "DEVICE_UID_REQUIRED") {
-        setError(backendMessage || "Device ID is required for mobile login.");
+      if (backendCode === "ALREADY_LOGGED_IN") {
+        setError(backendMessage || "You are already logged in on another device. Log out there first.");
       } else if (err.response) {
         switch (err.response.status) {
           case 401: setError(backendMessage || 'Invalid username or password'); break;
@@ -298,9 +293,7 @@ export default function Login() {
                 <label style={{ fontSize: 13, fontWeight: 600, color: '#334155', letterSpacing: '0.01em' }}>
                   Password
                 </label>
-                <a href="#" style={{ fontSize: 12, color: '#64748b', fontWeight: 500, textDecoration: 'none' }}>
-                  Forgot password?
-                </a>
+                <NavLink to="/forgot-password" style={{ fontSize: 12, color: '#64748b', fontWeight: 500, textDecoration: 'none' }}>Forgot password?</NavLink>
               </div>
               <div style={{
                 position: 'relative', display: 'flex', alignItems: 'center',
@@ -376,10 +369,48 @@ export default function Login() {
             </button>
           </form>
 
-          {/* signup link — hidden per spec, preserved for routing */}
-          <div style={{ display: 'none' }}>
-            <NavLink to="/signup">Create an account</NavLink>
-          </div>
+          {pendingNotifications.length > 0 && (
+            <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: 'rgba(15,23,42,0.5)', backdropFilter: 'blur(4px)' }}>
+              <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', width: '100%', maxWidth: 460, padding: '28px 28px 24px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 8, background: '#fef3c7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', margin: 0 }}>Login Alerts</p>
+                    <p style={{ fontSize: 12, color: '#64748b', margin: 0 }}>{pendingNotifications.length} notification{pendingNotifications.length > 1 ? 's' : ''} require your attention</p>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+                  {pendingNotifications.map((n, i) => {
+                    const isError = n.type === 'license_error' || n.type === 'dealer_license_error';
+                    return (
+                      <div key={i} style={{
+                        display: 'flex', alignItems: 'flex-start', gap: 10,
+                        padding: '10px 12px', borderRadius: 10,
+                        background: isError ? '#fef2f2' : '#fffbeb',
+                        border: `1px solid ${isError ? '#fecaca' : '#fde68a'}`,
+                      }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isError ? '#dc2626' : '#d97706'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
+                          {isError
+                            ? <><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>
+                            : <><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></>}
+                        </svg>
+                        <p style={{ fontSize: 13, color: isError ? '#b91c1c' : '#92400e', margin: 0, lineHeight: 1.4 }}>{n.message}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+                <button
+                  onClick={() => { setPendingNotifications([]); navigate('/dashboard'); }}
+                  style={{ width: '100%', padding: '12px 0', background: '#1e293b', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Continue to Dashboard
+                </button>
+              </div>
+            </div>
+          )}
+
 
           {/* copyright */}
           <div style={{ marginTop: 48 }}>

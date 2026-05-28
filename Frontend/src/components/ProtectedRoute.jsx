@@ -11,9 +11,11 @@ const ROLE_PATHS = {
     '/dashboard/dealers',
     '/dashboard/users',
     '/dashboard/device-registry',
-    '/dashboard/device-approvals',
     '/dashboard/data-import',
     '/dashboard/failed-payloads',
+    '/dashboard/audit-logs',
+    '/dashboard/global-settings',
+    '/dashboard/about',
   ],
   company_admin: [
     '/dashboard/depots',
@@ -23,20 +25,24 @@ const ROLE_PATHS = {
     '/dashboard/trip-data',
     '/dashboard/ticket-data',
     '/dashboard/settlements',
+    '/dashboard/about',
   ],
   dealer_admin:  [
     '/dashboard/companies',
     '/dashboard/device-registry',
+    '/dashboard/about',
   ],
   executive:     [
     '/dashboard/companies',
     '/dashboard/device-registry',
+    '/dashboard/about',
   ],
   user:          [],
   company_user:  [
     '/dashboard/schedule-data',
     '/dashboard/trip-data',
     '/dashboard/ticket-data',
+    '/dashboard/about',
   ],
   production:    [],  // handled separately — always /dashboard/device-registry
 };

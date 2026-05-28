@@ -30,15 +30,14 @@ api.interceptors.response.use(
 
         // No need to retry these endpoints
         if (originalRequest.url?.includes('/token/refresh') || 
-            originalRequest.url?.includes('/login') ||
-            originalRequest.url?.includes('/signup')) { 
+            originalRequest.url?.includes('/login')) {
             return Promise.reject(error);
         }
 
         // If 403 — license expired or forbidden, force logout
         if (error.response?.status === 403) {
             const message = error.response?.data?.detail || error.response?.data?.error || "Access forbidden.";
-            ["user", "device_uid"]
+            ["user"]
                 .forEach(k => localStorage.removeItem(k));
             window.location.href = `/login?error=${encodeURIComponent(message)}`;
             return Promise.reject(error);
@@ -56,7 +55,7 @@ api.interceptors.response.use(
                 return api(originalRequest);
                 
             } catch (refreshError) {
-                ["user", "device_uid"]
+                ["user"]
                     .forEach(k => localStorage.removeItem(k));
                 window.location.href = '/login';
                 return Promise.reject(refreshError);
