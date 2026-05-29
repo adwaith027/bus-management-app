@@ -387,9 +387,12 @@ export default function Sidebar() {
               </>
             )}
 
-            {/* About — all roles */}
-            <SectionLabel label="Support" isCollapsed={isCollapsed} />
-            <NavItem to="/dashboard/about" icon={Info} label="About" isCollapsed={isCollapsed} onClose={close} />
+            {role !== "superadmin" && role !== "production" && (
+              <>
+                <SectionLabel label="Support" isCollapsed={isCollapsed} />
+                <NavItem to="/dashboard/about" icon={Info} label="About" isCollapsed={isCollapsed} onClose={close} />
+              </>
+            )}
 
           </ul>
         </nav>

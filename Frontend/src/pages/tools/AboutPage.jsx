@@ -121,7 +121,7 @@ export default function AboutPage() {
 
             {!loading && !error && (
               <p className="text-xs text-slate-400 mt-5 leading-relaxed">
-                For technical support, contact the developer team above.
+                For technical support, please use the above contacts.
               </p>
             )}
           </div>
