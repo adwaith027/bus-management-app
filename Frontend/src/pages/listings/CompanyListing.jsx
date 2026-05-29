@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import Modal from '../../components/Modal';
 import TableSkeleton from '../../components/TableSkeleton';
 import api, { BASE_URL } from '../../assets/js/axiosConfig';
 import statesDistricts from '../../assets/json/indiaStatesDistricts.json';
@@ -197,8 +196,10 @@ function getStatusStyle(s) {
 
 // ══════════════════════════════════════════════════════════════════════════════
 export default function CompanyListing() {
-  const currentUser  = JSON.parse(localStorage.getItem('user') || '{}');
+  const currentUser   = JSON.parse(localStorage.getItem('user') || '{}');
   const isDealerAdmin = currentUser?.role === 'dealer_admin';
+  const isExecutive   = currentUser?.role === 'executive';
+  const executiveState = currentUser?.state || '';
 
   // ── List state ───────────────────────────────────────────────────────────
   const [companies, setCompanies]     = useState([]);
@@ -217,7 +218,11 @@ export default function CompanyListing() {
   const [importFetching,setImportFetching]= useState(false);
   const [importError,   setImportError]   = useState('');
   const [importLicense, setImportLicense] = useState(null);
-  const [form,          setForm]          = useState(EMPTY);
+  const [form,          setForm]          = useState(() =>
+    currentUser?.role === 'executive' && currentUser?.state
+      ? { ...EMPTY, state: currentUser.state }
+      : EMPTY
+  );
   const [submitting,    setSubmitting]    = useState(false);
 
   // ── Modal state (view / edit) ────────────────────────────────────────────
@@ -249,7 +254,7 @@ export default function CompanyListing() {
   const set = (k, v) => setForm(f => k === 'state' ? { ...f, state: v, district: '' } : { ...f, [k]: v });
 
   const resetCreate = () => {
-    setForm(EMPTY);
+    setForm(isExecutive ? { ...EMPTY, state: executiveState } : EMPTY);
     setCreateMode('new');
     setImportStep('search');
     setImportId('');
@@ -902,11 +907,19 @@ export default function CompanyListing() {
                   </Field>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Field label="State" required>
-                      <select value={form.state} onChange={e => set('state', e.target.value)}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white">
-                        <option value="">Select state…</option>
-                        {Object.keys(statesDistricts).sort().map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
+                      {isExecutive ? (
+                        <input
+                          value={executiveState}
+                          readOnly
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 text-slate-600 cursor-not-allowed"
+                        />
+                      ) : (
+                        <select value={form.state} onChange={e => set('state', e.target.value)}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white">
+                          <option value="">Select state…</option>
+                          {Object.keys(statesDistricts).sort().map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      )}
                     </Field>
                     <Field label="District" required>
                       <select value={form.district} onChange={e => set('district', e.target.value)} disabled={!form.state}

@@ -1,11 +1,14 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
-  Users, CheckCircle2, KeyRound, Activity, Layers, Plus, Search,
+  Users, CheckCircle2, KeyRound, Activity, Plus, Search,
   ArrowUp, ArrowDown, ArrowUpDown, Building2, Eye, Edit, X,
-  ArrowRight, Info, Save,
+  Info, Save,
 } from 'lucide-react';
 import api, { BASE_URL } from '../../assets/js/axiosConfig';
 import { useNavigate } from 'react-router-dom';
+import statesDistricts from '../../assets/json/indiaStatesDistricts.json';
+
+const STATE_NAMES = Object.keys(statesDistricts).sort();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -142,9 +145,6 @@ export default function UserListing() {
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [executiveMappings, setExecutiveMappings] = useState([]);
-  const [execPanelOpen, setExecPanelOpen] = useState(false);
-  const [executiveMappingForm, setExecutiveMappingForm] = useState({ executive_user: '', company: '', is_active: true });
 
   // ── Filter / sort / paginate state ───────────────────────────────────────────
   const [search, setSearch] = useState('');
@@ -163,7 +163,7 @@ export default function UserListing() {
   const [togglingId, setTogglingId] = useState(null);
 
   // ── Form state ───────────────────────────────────────────────────────────────
-  const [formData, setFormData] = useState({ username: '', email: '', role: defaultRole, company_id: '', password: '' });
+  const [formData, setFormData] = useState({ username: '', email: '', role: defaultRole, company_id: '', password: '', state: '' });
   const [pw, setPw] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -174,7 +174,6 @@ export default function UserListing() {
   useEffect(() => {
     fetchUsers();
     fetchCompanies();
-    fetchExecutiveMappings();
   }, []);
 
   const fetchUsers = async () => {
@@ -195,15 +194,6 @@ export default function UserListing() {
       setCompanies(res.data?.data || []);
     } catch (err) {
       console.error('Error fetching companies:', err);
-    }
-  };
-
-  const fetchExecutiveMappings = async () => {
-    try {
-      const res = await api.get(`${BASE_URL}/executive-mappings`);
-      setExecutiveMappings(res.data?.data || []);
-    } catch (err) {
-      console.error('Error fetching executive mappings:', err);
     }
   };
 
@@ -274,7 +264,7 @@ export default function UserListing() {
   const openCreate = () => {
     setModalMode('create');
     setSelectedUser(null);
-    setFormData({ username: '', email: '', role: defaultRole, company_id: '', password: '' });
+    setFormData({ username: '', email: '', role: defaultRole, company_id: '', password: '', state: '' });
     setModalOpen(true);
   };
 
@@ -283,7 +273,7 @@ export default function UserListing() {
   const openEdit = (u) => {
     setModalMode('edit');
     setSelectedUser(u);
-    setFormData({ username: u.username, email: u.email, role: u.role, company_id: u.company || '', password: '' });
+    setFormData({ username: u.username, email: u.email, role: u.role, company_id: u.company || '', password: '', state: u.state || '' });
     setModalOpen(true);
   };
 
@@ -300,7 +290,10 @@ export default function UserListing() {
     const { name, value } = e.target;
     setFormData(prev => {
       const next = { ...prev, [name]: value };
-      if (name === 'role' && value === 'executive') next.company_id = '';
+      if (name === 'role') {
+        if (value === 'executive') next.company_id = '';
+        else next.state = '';
+      }
       return next;
     });
   };
@@ -316,9 +309,18 @@ export default function UserListing() {
           email: formData.email,
           role: formData.role,
           company_id: formData.company_id,
+          ...(formData.role === 'executive' ? { state: formData.state } : {}),
         });
       } else {
-        response = await api.post(`${BASE_URL}/create_user`, formData);
+        const payload = {
+          username: formData.username,
+          email: formData.email,
+          role: formData.role,
+          password: formData.password,
+          company_id: formData.company_id,
+          ...(formData.role === 'executive' ? { state: formData.state } : {}),
+        };
+        response = await api.post(`${BASE_URL}/create_user`, payload);
       }
       if (response?.status === 200 || response?.status === 201) {
         window.alert(response.data.message || 'Operation successful!');
@@ -365,34 +367,6 @@ export default function UserListing() {
     }
   };
 
-  const handleExecutiveMappingChange = (e) => {
-    const { name, value, type, checked } = e.target;
-    setExecutiveMappingForm(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
-  };
-
-  const handleCreateExecutiveMapping = async (e) => {
-    e.preventDefault();
-    try {
-      const res = await api.post(`${BASE_URL}/create-executive-mapping`, executiveMappingForm);
-      if (res?.status === 201) {
-        window.alert(res.data.message || 'Mapping created');
-        setExecutiveMappingForm({ executive_user: '', company: '', is_active: true });
-        fetchExecutiveMappings();
-      }
-    } catch (err) {
-      window.alert(err.response?.data?.message || err.response?.data?.error || 'Mapping failed');
-    }
-  };
-
-  const handleToggleExecutiveMapping = async (mapping) => {
-    try {
-      const res = await api.put(`${BASE_URL}/update-executive-mapping/${mapping.id}`, { is_active: !mapping.is_active });
-      if (res?.status === 200) fetchExecutiveMappings();
-    } catch (err) {
-      window.alert(err.response?.data?.message || err.response?.data?.error || 'Update failed');
-    }
-  };
-
   // ─── Render ───────────────────────────────────────────────────────────────────
   return (
     <div className="p-6 md:p-8 min-h-screen bg-slate-50">
@@ -423,15 +397,6 @@ export default function UserListing() {
 
         {/* Right: action buttons */}
         <div className="flex items-center gap-2">
-          {isSuperadmin && (
-            <button
-              onClick={() => setExecPanelOpen(v => !v)}
-              className={`inline-flex items-center gap-1.5 h-9 px-3 text-xs rounded-lg font-medium border transition-colors cursor-pointer ${execPanelOpen ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
-            >
-              <Layers size={13} />
-              Exec Mapping
-            </button>
-          )}
           <button
             onClick={openCreate}
             className="inline-flex items-center gap-1.5 h-9 px-4 text-sm rounded-lg font-medium bg-slate-900 hover:bg-slate-700 text-white cursor-pointer transition-colors shadow-sm"
@@ -441,89 +406,6 @@ export default function UserListing() {
           </button>
         </div>
       </div>
-
-      {/* ── Executive Mapping Panel (superadmin only, collapsible) ──────────── */}
-      {execPanelOpen && isSuperadmin && (
-        <div className="mb-5">
-          <div className="border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden">
-            <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/60">
-              <div className="flex items-center gap-2">
-                <Layers size={13} className="text-emerald-600" />
-                <span className="text-xs font-semibold text-slate-700">Executive → Company Mapping</span>
-              </div>
-              <button onClick={() => setExecPanelOpen(false)} className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer">
-                <X size={13} />
-              </button>
-            </div>
-            <div className="p-4">
-              <form onSubmit={handleCreateExecutiveMapping} className="flex flex-wrap items-end gap-3 mb-4">
-                <div className="flex-1 min-w-[160px]">
-                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Executive</label>
-                  <select
-                    name="executive_user"
-                    value={executiveMappingForm.executive_user}
-                    onChange={handleExecutiveMappingChange}
-                    required
-                    className="w-full h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-400"
-                  >
-                    <option value="">Select…</option>
-                    {users.filter(u => u.role === 'executive').map(u => (
-                      <option key={u.id} value={u.id}>{u.username}</option>
-                    ))}
-                  </select>
-                </div>
-                <ArrowRight size={14} className="text-slate-300 mb-1" />
-                <div className="flex-1 min-w-[160px]">
-                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1 block">Company</label>
-                  <select
-                    name="company"
-                    value={executiveMappingForm.company}
-                    onChange={handleExecutiveMappingChange}
-                    required
-                    className="w-full h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-400"
-                  >
-                    <option value="">Select…</option>
-                    {companies.map(c => (
-                      <option key={c.id} value={c.id}>{c.company_name}</option>
-                    ))}
-                  </select>
-                </div>
-                <button
-                  type="submit"
-                  disabled={!executiveMappingForm.executive_user || !executiveMappingForm.company}
-                  className="inline-flex items-center gap-1.5 h-8 px-3 text-xs rounded-lg font-medium bg-slate-900 hover:bg-slate-700 text-white cursor-pointer transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Plus size={12} />
-                  Assign
-                </button>
-              </form>
-
-              {executiveMappings.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {executiveMappings.map(m => {
-                    const exec = users.find(u => u.id === m.executive_user);
-                    const comp = companies.find(c => c.id === m.company);
-                    return (
-                      <div key={m.id} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs">
-                        <span className="font-medium text-slate-700">{exec?.username || 'Unknown'}</span>
-                        <ArrowRight size={10} className="text-slate-300" />
-                        <span className="text-slate-500">{comp?.company_name || 'Unknown'}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleToggleExecutiveMapping(m)}
-                          className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold cursor-pointer transition-colors ${m.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}
-                        >
-                          {m.is_active ? 'On' : 'Off'}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── Search + filter bar ─────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3.5 shadow-sm mb-4">
@@ -738,6 +620,7 @@ export default function UserListing() {
                 { label: 'Status', value: selectedUser.is_active ? 'Active' : 'Inactive' },
                 { label: 'Company', value: getCompany(selectedUser.company) || 'Not assigned' },
                 { label: 'Role', value: ROLE_CONFIG[selectedUser.role]?.label || selectedUser.role },
+                ...(selectedUser.role === 'executive' ? [{ label: 'State', value: selectedUser.state || '—' }] : []),
                 { label: 'Joined', value: selectedUser.date_joined ? new Date(selectedUser.date_joined).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—' },
                 { label: 'Last Login', value: timeAgo(selectedUser.last_login) },
               ].map(({ label, value }) => (
@@ -832,23 +715,41 @@ export default function UserListing() {
                 {allowedRoles.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
               </select>
             </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium text-slate-700 flex items-center gap-1">
-                Company
-                {formData.role !== 'executive' && !isCompanyAdmin && <span className="text-rose-500">*</span>}
-              </label>
-              <select
-                name="company_id"
-                value={formData.company_id}
-                onChange={handleInputChange}
-                required={formData.role !== 'executive' && !isCompanyAdmin}
-                disabled={formData.role === 'executive' || isCompanyAdmin}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:bg-slate-50 disabled:cursor-not-allowed"
-              >
-                <option value="">Select company…</option>
-                {companies.map(c => <option key={c.id} value={c.id}>{c.company_name}</option>)}
-              </select>
-            </div>
+            {formData.role === 'executive' ? (
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-slate-700 flex items-center gap-1">
+                  State <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  name="state"
+                  value={formData.state}
+                  onChange={handleInputChange}
+                  required
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400"
+                >
+                  <option value="">Select state…</option>
+                  {STATE_NAMES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-slate-700 flex items-center gap-1">
+                  Company
+                  {!isCompanyAdmin && <span className="text-rose-500">*</span>}
+                </label>
+                <select
+                  name="company_id"
+                  value={formData.company_id}
+                  onChange={handleInputChange}
+                  required={!isCompanyAdmin}
+                  disabled={isCompanyAdmin}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:bg-slate-50 disabled:cursor-not-allowed"
+                >
+                  <option value="">Select company…</option>
+                  {companies.map(c => <option key={c.id} value={c.id}>{c.company_name}</option>)}
+                </select>
+              </div>
+            )}
           </div>
 
           {modalMode === 'create' && (
