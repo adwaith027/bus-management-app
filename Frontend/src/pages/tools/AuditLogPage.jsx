@@ -97,7 +97,12 @@ function DetailModal({ log, onClose }) {
 }
 
 // ─── Main page ─────────────────────────────────────────────────────────────────
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 10;
+
+const todayISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 
 export default function AuditLogPage() {
   const [logs,       setLogs]       = useState([]);
@@ -109,13 +114,17 @@ export default function AuditLogPage() {
   const [total,      setTotal]      = useState(0);
   const [actionTypes, setActionTypes] = useState([]);
 
-  const [filters, setFilters] = useState({ action: '', from: '', to: '', search: '' });
-  const [applied, setApplied] = useState({ action: '', from: '', to: '', search: '' });
+  const today = todayISO();
+  const [filters, setFilters] = useState({ action: '', from: today, to: today, search: '' });
+  const [applied, setApplied] = useState({ action: '', from: today, to: today, search: '' });
 
   // Fetch action types once
   useEffect(() => {
     api.get(`${BASE_URL}/audit-logs/action-types`)
-      .then(res => setActionTypes(res.data?.data ?? res.data ?? []))
+      .then(res => {
+        const raw = res.data?.data ?? res.data ?? [];
+        setActionTypes(raw.map(a => typeof a === 'object' ? { value: a.value, label: a.label } : { value: a, label: a }));
+      })
       .catch(() => {});
   }, []);
 
@@ -130,9 +139,10 @@ export default function AuditLogPage() {
       if (f.search) params.set('search', f.search);
 
       const res = await api.get(`${BASE_URL}/audit-logs?${params}`);
+      const meta = res.data?.pagination ?? {};
       setLogs(res.data?.data ?? []);
-      setTotal(res.data?.total ?? 0);
-      setTotalPages(res.data?.total_pages ?? 1);
+      setTotal(meta.total ?? 0);
+      setTotalPages(meta.total_pages ?? 1);
       setPage(pg);
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'Request failed');
@@ -149,7 +159,7 @@ export default function AuditLogPage() {
   };
 
   const handleClear = () => {
-    const reset = { action: '', from: '', to: '', search: '' };
+    const reset = { action: '', from: todayISO(), to: todayISO(), search: '' };
     setFilters(reset);
     setApplied(reset);
     fetchLogs(reset, 1);
@@ -203,7 +213,7 @@ export default function AuditLogPage() {
               >
                 <option value="">All Actions</option>
                 {actionTypes.map(a => (
-                  <option key={a} value={a}>{a}</option>
+                  <option key={a.value} value={a.value}>{a.label}</option>
                 ))}
               </select>
             </div>
