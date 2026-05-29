@@ -26,6 +26,7 @@ def _is_superadmin_or_executive(user):
 
 # ── Tier access ───────────────────────────────────────────────────────────────
 _TIER_ORDER = {'basic': 0, 'intermediate': 1, 'premium': 2}
+_TIER_ERROR = {"error": "This report requires Intermediate tier or above."}
 
 def _meets_tier(user, minimum: str) -> bool:
     """True if user's tier is >= minimum. Non-company roles are always allowed."""
