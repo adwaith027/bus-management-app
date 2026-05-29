@@ -135,6 +135,7 @@ def _user_payload(user, company):
         'email':          user.email,
         'role':           user.role,
         'tier':           user.tier,
+        'state':          user.state,
         'is_verified':    user.is_verified,
         'company_name':   company.company_name   if company else None,
         'company_id':     company.company_id     if company else None,
