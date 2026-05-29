@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 import time
 import logging
 import requests
@@ -24,9 +25,13 @@ from .audit_logs import log_action
 from ...models import AuditLog
 
 
-# Setup logger  
+# Setup logger
 logger = logging.getLogger(__name__)
 User = get_user_model()
+
+_STATES_DISTRICTS = json.loads(
+    (Path(__file__).resolve().parent.parent.parent / 'data' / 'states_districts.json').read_text()
+)
 
 
 def check_datetime(date_str):
@@ -816,8 +821,8 @@ def create_company(request):
     if not user:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
 
-    if not _is_superadmin(user) and not _is_dealer_admin(user):
-        return Response({'error': 'Only superadmin or dealer_admin can create companies.'}, status=status.HTTP_403_FORBIDDEN)
+    if not _is_superadmin(user) and not _is_executive(user) and not _is_dealer_admin(user):
+        return Response({'error': 'Only superadmin, executive, or dealer_admin can create companies.'}, status=status.HTTP_403_FORBIDDEN)
 
     if not request.data:
         return Response({"message": "No input received"}, status=status.HTTP_400_BAD_REQUEST)
@@ -833,6 +838,25 @@ def create_company(request):
         return Response({'message': 'Username already exists'}, status=status.HTTP_400_BAD_REQUEST)
     if User.objects.filter(email=user_email_field).exists():
         return Response({'message': 'User email already exists'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # ── Executive state/district restriction ──────────────────────────────────
+    if _is_executive(user):
+        if not user.state:
+            return Response({'error': 'Your account has no state assigned. Contact superadmin.'}, status=status.HTTP_403_FORBIDDEN)
+        company_state = (request.data.get('state') or '').strip()
+        company_district = (request.data.get('district') or '').strip()
+        if company_state != user.state:
+            return Response(
+                {'error': f'You can only create companies in {user.state}.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if company_district:
+            valid_districts = _STATES_DISTRICTS.get(user.state, [])
+            if company_district not in valid_districts:
+                return Response(
+                    {'error': f'"{company_district}" is not a valid district in {user.state}.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
     serializer = CompanySerializer(data=request.data)
     if not serializer.is_valid():
@@ -909,7 +933,7 @@ def create_company(request):
             f"Allocated: palmtec={alloc_palmtec}, users={alloc_total}"
         )
 
-    # ── Path A: superadmin ────────────────────────────────────────────────────
+    # ── Path A: superadmin / executive ───────────────────────────────────────
     else:
         company = serializer.save(
             created_by=user,
