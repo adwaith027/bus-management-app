@@ -8,7 +8,9 @@ AuditLog is append-only; no update or delete endpoints are exposed.
 """
 
 import logging
+from datetime import datetime, timedelta
 
+from django.utils import timezone as tz
 from django.utils.dateparse import parse_date
 from rest_framework import status
 from rest_framework.decorators import api_view
@@ -121,17 +123,25 @@ def list_audit_logs(request):
     if actor_filter:
         qs = qs.filter(actor_id=actor_filter)
 
+    search_filter = request.query_params.get('search')
+    if search_filter:
+        from django.db.models import Q
+        qs = qs.filter(
+            Q(actor_username_snapshot__icontains=search_filter) |
+            Q(target_display__icontains=search_filter)
+        )
+
     from_date = request.query_params.get('from')
     if from_date:
         d = parse_date(from_date)
         if d:
-            qs = qs.filter(timestamp__date__gte=d)
+            qs = qs.filter(timestamp__gte=tz.make_aware(datetime.combine(d, datetime.min.time())))
 
     to_date = request.query_params.get('to')
     if to_date:
         d = parse_date(to_date)
         if d:
-            qs = qs.filter(timestamp__date__lte=d)
+            qs = qs.filter(timestamp__lt=tz.make_aware(datetime.combine(d + timedelta(days=1), datetime.min.time())))
 
     # ── Pagination ────────────────────────────────────────────────────────────
     try:
