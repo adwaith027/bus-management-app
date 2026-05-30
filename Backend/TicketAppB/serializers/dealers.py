@@ -25,21 +25,21 @@ class DealerSerializer(serializers.ModelSerializer):
             'contact_number',
             'email',
             'address',
-            'address_2',
-            'city',
             'state',
             'district',
-            'zip_code',
             'gst_number',
             'is_active',
             'authentication_status',
             'product_from_date',
             'product_to_date',
             # Total counts (license-granted)
+            'number_of_licences',
             'palmtec_count',
             'total_user_count',
             'premium_user_count',
             'intermediate_user_count',
+            # License error
+            'error_message',
             # Remaining pool (available to allocate)
             'remaining_palmtec_count',
             'remaining_total_user_count',
@@ -52,7 +52,13 @@ class DealerSerializer(serializers.ModelSerializer):
         read_only_fields = [
             'id',
             'authentication_status',
-            # Pool fields are managed by service layer, not directly editable via form
+            'number_of_licences',
+            'palmtec_count',
+            'total_user_count',
+            'premium_user_count',
+            'intermediate_user_count',
+            'error_message',
+            # Pool fields managed by service layer
             'remaining_palmtec_count',
             'remaining_total_user_count',
             'remaining_premium_user_count',

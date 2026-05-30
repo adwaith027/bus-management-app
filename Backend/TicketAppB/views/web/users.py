@@ -34,67 +34,31 @@ _VALID_TIERS = {'basic', 'intermediate', 'premium'}
 
 # ── Slot helpers ──────────────────────────────────────────────────────────────
 
-def _check_user_slot(company, tier):
+def _check_tier_availability(company, tier):
     """
-    Check capacity before creating a new user.
+    Check that the requested tier is licensed for this company.
     Returns (ok: bool, error: str | None).
-    A limit of 0 means "not configured yet" — creation is allowed.
+
+    User creation is unlimited — concurrent login caps are enforced at login time.
+    This check only gates whether the tier itself is configured (count > 0).
     """
     if not company:
         return True, None
 
-    if company.total_user_count > 0:
-        current = User.objects.filter(
-            company=company, is_active=True,
-            role__in=('company_admin', 'company_user'),
-        ).count()
-        if current >= company.total_user_count:
-            return False, (
-                f'User limit reached ({current}/{company.total_user_count}). '
-                'Upgrade your license or deactivate an existing user.'
-            )
+    if company.total_user_count == 0:
+        return False, 'No user licenses allocated for this company. Contact administrator.'
 
-    if tier == 'intermediate' and company.intermediate_user_count > 0:
-        current = User.objects.filter(
-            company=company, is_active=True, tier='intermediate',
-        ).count()
-        if current >= company.intermediate_user_count:
-            return False, f'Intermediate tier limit reached ({current}/{company.intermediate_user_count}).'
+    if tier == 'premium' and company.premium_user_count == 0:
+        return False, 'Premium tier is not available for this company.'
 
-    if tier == 'premium' and company.premium_user_count > 0:
-        current = User.objects.filter(
-            company=company, is_active=True, tier='premium',
-        ).count()
-        if current >= company.premium_user_count:
-            return False, f'Premium tier limit reached ({current}/{company.premium_user_count}).'
+    if tier == 'intermediate' and company.intermediate_user_count == 0:
+        return False, 'Intermediate tier is not available for this company.'
 
     return True, None
 
 
-def _check_tier_slot_for_update(company, exclude_user_pk, new_tier):
-    """
-    Check tier slot capacity before changing a user's tier.
-    Excludes the user being updated so they don't count against their own slot.
-    Only tier-specific sub-limits matter here — total count is unchanged.
-    """
-    if not company:
-        return True, None
-
-    if new_tier == 'intermediate' and company.intermediate_user_count > 0:
-        current = User.objects.filter(
-            company=company, is_active=True, tier='intermediate',
-        ).exclude(pk=exclude_user_pk).count()
-        if current >= company.intermediate_user_count:
-            return False, f'Intermediate tier limit reached ({current}/{company.intermediate_user_count}).'
-
-    if new_tier == 'premium' and company.premium_user_count > 0:
-        current = User.objects.filter(
-            company=company, is_active=True, tier='premium',
-        ).exclude(pk=exclude_user_pk).count()
-        if current >= company.premium_user_count:
-            return False, f'Premium tier limit reached ({current}/{company.premium_user_count}).'
-
-    return True, None
+# Keep old name as alias so toggle_user_active call-site still works.
+_check_user_slot = _check_tier_availability
 
 
 # ── Create user ───────────────────────────────────────────────────────────────
@@ -163,13 +127,30 @@ def create_user(request):
     if User.objects.filter(email=email).exists():
         return Response({'error': 'Email already exists.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    if role in ('company_admin', 'company_user'):
+    # Determine tier and apply creation-time checks.
+    if role == 'company_admin':
+        # Exactly 1 company_admin per company. Tier is always none (role-based access).
+        if company_instance and User.objects.filter(
+            company=company_instance, role='company_admin', is_active=True,
+        ).exists():
+            return Response(
+                {'error': 'This company already has an active company admin account.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        tier = 'none'
+
+    elif role == 'company_user':
         tier = requested_tier if requested_tier in _VALID_TIERS else 'basic'
-        ok, err = _check_user_slot(company_instance, tier)
+        ok, err = _check_tier_availability(company_instance, tier)
         if not ok:
             return Response({'error': err}, status=status.HTTP_403_FORBIDDEN)
+
     else:
         tier = 'none'
+
+    # company_admin is pre-verified (trusted account created by superadmin/dealer).
+    # company_user starts unverified — first APK login requires device approval.
+    is_verified = role == 'company_admin'
 
     try:
         new_user = User.objects.create_user(
@@ -180,6 +161,7 @@ def create_user(request):
             role=role,
             tier=tier,
             created_by=requester,
+            is_verified=is_verified,
         )
         log_action(
             actor=requester, action=AuditLog.ActionType.CREATE,
@@ -294,14 +276,14 @@ def update_user(request, user_id):
     if User.objects.filter(email=new_email).exclude(pk=user_id).exists():
         return Response({'error': 'Email already registered to another user.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # ── Tier change (company-level users only) ────────────────────────────────
+    # ── Tier change (company_user only — company_admin always has tier=none) ────
     old_tier = target.tier
     tier_changed = False
-    if new_tier and target.role in ('company_admin', 'company_user'):
+    if new_tier and target.role == 'company_user':
         if new_tier not in _VALID_TIERS:
             return Response({'error': f'Invalid tier. Choose from: {", ".join(_VALID_TIERS)}'}, status=status.HTTP_400_BAD_REQUEST)
         if new_tier != target.tier:
-            ok, err = _check_tier_slot_for_update(target.company, user_id, new_tier)
+            ok, err = _check_tier_availability(target.company, new_tier)
             if not ok:
                 return Response({'error': err}, status=status.HTTP_403_FORBIDDEN)
             target.tier = new_tier
@@ -377,12 +359,18 @@ def toggle_user_active(request, user_id):
     if target.pk == requester.pk:
         return Response({'error': 'You cannot deactivate your own account.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # ── Reactivation slot check ───────────────────────────────────────────────
-    if not target.is_active:
-        # User is currently inactive — reactivating means adding them back to the slot count
-        ok, err = _check_user_slot(target.company, target.tier)
-        if not ok:
-            return Response({'error': f'Cannot reactivate: {err}'}, status=status.HTTP_403_FORBIDDEN)
+    # ── Deactivation guards ───────────────────────────────────────────────────
+    if target.is_active:
+        # Cannot deactivate the last active company_admin — company would be locked out.
+        if target.role == 'company_admin' and target.company:
+            remaining = User.objects.filter(
+                company=target.company, role='company_admin', is_active=True,
+            ).exclude(pk=target.pk).count()
+            if remaining == 0:
+                return Response(
+                    {'error': 'Cannot deactivate the only active company admin. Assign another admin first.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
     was_active = target.is_active
     new_state = not target.is_active
@@ -456,11 +444,11 @@ def user_capacity(request):
     else:
         return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
 
-    # Count active users per tier
+    # Count active company_user accounts per tier (company_admin excluded from counts)
     from django.db.models import Count, Case, When, IntegerField, Value
     stats = User.objects.filter(
         company=company, is_active=True,
-        role__in=('company_admin', 'company_user'),
+        role='company_user',
     ).aggregate(
         total       = Count('id'),
         basic_count = Count(Case(When(tier='basic',        then=Value(1)), output_field=IntegerField())),

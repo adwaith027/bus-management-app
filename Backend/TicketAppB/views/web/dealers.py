@@ -56,15 +56,9 @@ def _build_dealer_registration_payload(dealer):
         "CustomerEmail":         dealer.email,
         "GSTNumber":             dealer.gst_number or '',
         "CustomerContactPerson": dealer.contact_person,
-        "CustomerContact":       dealer.contact_number,
         "CustomerAddress":       dealer.address,
-        "CustomerAddress2":      dealer.address_2 or '',
-        "CustomerState":         dealer.state,
-        "CustomerCity":          dealer.city,
-        "DeviceModel":           "Windows",
-        "DeviceIdentifier1":     dealer.dealer_name,
-        "DeviceType":            2,                     # 2 = Dealer
-        "Version":               settings.APP_VERSION,
+        "DeviceModel":           settings.DEVICE_MODEL,
+        "DeviceType":            settings.DEVICE_TYPE,
         "ProjectName":           settings.PROJECT_NAME,
     }
 
@@ -121,7 +115,11 @@ def _background_dealer_license_polling(dealer_id):
 
                 if auth_status == 'Approve':
                     dealer.authentication_status = Dealer.AuthStatus.APPROVED
-                    _populate_dealer_counts(dealer, data)
+                    ok, err = _populate_dealer_counts(dealer, data)
+                    if not ok:
+                        dealer.save()
+                        logger.error(f"[BACKGROUND] Dealer {dealer_id} license config error: {err}")
+                        return
                     dealer.save()
                     logger.info(f"[BACKGROUND] Dealer {dealer_id} approved.")
                     return
@@ -163,17 +161,33 @@ def _populate_dealer_counts(dealer, auth_data):
     """
     Fill total counts from license server response and initialise remaining pool.
     remaining_* = total_* − already_allocated (computed from child companies).
-    Called on first approval and on license renewal.
+    Called on first approval and on license renewal/sync.
+    Returns (ok: bool, error_msg: str|None).
     """
-    new_palmtec  = _safe_int(auth_data.get('PalmtecCount') or auth_data.get('NumberOfLicence'))
+    new_number_of_licences = _safe_int(auth_data.get('NumberOfLicence'))
+    new_palmtec  = _safe_int(auth_data.get('PalmtecCount'))
     new_total    = _safe_int(auth_data.get('TotalUserCount'))
     new_premium  = _safe_int(auth_data.get('PremiumUserCount'))
     new_inter    = _safe_int(auth_data.get('IntermediateUserCount'))
 
+    # Hard block: profile counts must not exceed NumberOfLicence
+    if new_number_of_licences > 0 and (new_palmtec + new_total) > new_number_of_licences:
+        msg = (
+            f"License config error: device slots ({new_palmtec}) + "
+            f"user slots ({new_total}) = {new_palmtec + new_total} "
+            f"exceeds total licensed units ({new_number_of_licences}). "
+            "Contact the license server administrator."
+        )
+        dealer.authentication_status = Dealer.AuthStatus.PENDING
+        dealer.error_message = msg
+        return False, msg
+
+    dealer.number_of_licences      = new_number_of_licences
     dealer.palmtec_count           = new_palmtec
     dealer.total_user_count        = new_total
     dealer.premium_user_count      = new_premium
     dealer.intermediate_user_count = new_inter
+    dealer.error_message           = None
 
     # Compute how much is already allocated to existing companies
     from django.db.models import Sum
@@ -188,7 +202,6 @@ def _populate_dealer_counts(dealer, auth_data):
     dealer.remaining_premium_user_count      = max(0, new_premium - _safe_int(allocated['premium']))
     dealer.remaining_intermediate_user_count = max(0, new_inter   - _safe_int(allocated['inter']))
 
-    import datetime as _dt
     from .company import check_datetime as _check_datetime
     raw_from = auth_data.get('ProductFromDate')
     raw_to   = auth_data.get('ProductToDate')
@@ -201,6 +214,7 @@ def _populate_dealer_counts(dealer, auth_data):
 
     dealer.product_registration_id = _safe_int(auth_data.get('ProductRegistrationId'))
     dealer.unique_identifier        = auth_data.get('UniqueIDentifier', '')
+    return True, None
 
 
 # ── Views ─────────────────────────────────────────────────────────────────────
@@ -560,4 +574,184 @@ def dealer_dashboard(request):
                 'pending_devices': sum(d['devices']['pending'] for d in companies_data),
             },
         },
+    }, status=status.HTTP_200_OK)
+
+
+# ── Sync license (dry-run + confirm) ─────────────────────────────────────────
+
+def _fetch_dealer_from_license_server(customer_id):
+    """Single non-polling call to license server. Returns {success, status, data}."""
+    try:
+        resp = requests.post(
+            settings.PRODUCT_AUTH_URL,
+            json={"CustomerId": customer_id},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        auth_status = data.get('Authenticationstatus', '')
+        if not auth_status:
+            return {'success': False, 'error': 'No response from license server.'}
+        return {'success': True, 'status': auth_status, 'data': data}
+    except requests.exceptions.Timeout:
+        return {'success': False, 'error': 'License server timed out.'}
+    except requests.exceptions.ConnectionError:
+        return {'success': False, 'error': 'Cannot connect to license server.'}
+    except Exception as e:
+        logger.exception(f"Dealer license server fetch error: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+def _build_dealer_sync_diff(dealer, auth_data):
+    """
+    Compute old vs incoming breakdown for dealer sync confirmation UI.
+    """
+    new_nol     = _safe_int(auth_data.get('NumberOfLicence'))
+    new_palmtec = _safe_int(auth_data.get('PalmtecCount'))
+    new_total   = _safe_int(auth_data.get('TotalUserCount'))
+    new_premium = _safe_int(auth_data.get('PremiumUserCount'))
+    new_inter   = _safe_int(auth_data.get('IntermediateUserCount'))
+
+    error = None
+    if new_nol > 0 and (new_palmtec + new_total) > new_nol:
+        error = (
+            f"License config error: device slots ({new_palmtec}) + "
+            f"user slots ({new_total}) = {new_palmtec + new_total} "
+            f"exceeds total licensed units ({new_nol}). "
+            "Contact the license server administrator."
+        )
+
+    # For dealers, "in use" = already allocated to child companies
+    allocated_palmtec = dealer.palmtec_count - dealer.remaining_palmtec_count
+    allocated_total   = dealer.total_user_count - dealer.remaining_total_user_count
+    allocated_premium = dealer.premium_user_count - dealer.remaining_premium_user_count
+    allocated_inter   = dealer.intermediate_user_count - dealer.remaining_intermediate_user_count
+
+    from .company import check_datetime as _check_datetime
+    raw_from = auth_data.get('ProductFromDate')
+    raw_to   = auth_data.get('ProductToDate')
+    incoming_from = _check_datetime(raw_from).date() if raw_from else None
+    incoming_to   = _check_datetime(raw_to).date()   if raw_to   else None
+
+    return {
+        'current': {
+            'number_of_licences':      dealer.number_of_licences or 0,
+            'palmtec_count':           dealer.palmtec_count,
+            'total_user_count':        dealer.total_user_count,
+            'premium_user_count':      dealer.premium_user_count,
+            'intermediate_user_count': dealer.intermediate_user_count,
+            'remaining_palmtec_count':           dealer.remaining_palmtec_count,
+            'remaining_total_user_count':        dealer.remaining_total_user_count,
+            'remaining_premium_user_count':      dealer.remaining_premium_user_count,
+            'remaining_intermediate_user_count': dealer.remaining_intermediate_user_count,
+            'product_from_date': str(dealer.product_from_date) if dealer.product_from_date else None,
+            'product_to_date':   str(dealer.product_to_date)   if dealer.product_to_date   else None,
+        },
+        'incoming': {
+            'number_of_licences':      new_nol,
+            'palmtec_count':           new_palmtec,
+            'total_user_count':        new_total,
+            'premium_user_count':      new_premium,
+            'intermediate_user_count': new_inter,
+            'product_from_date': str(incoming_from) if incoming_from else None,
+            'product_to_date':   str(incoming_to)   if incoming_to   else None,
+            'authentication_status': auth_data.get('Authenticationstatus'),
+        },
+        'in_use': {
+            'palmtec_allocated_to_companies': allocated_palmtec,
+            'total_users_allocated':          allocated_total,
+            'premium_users_allocated':        allocated_premium,
+            'intermediate_users_allocated':   allocated_inter,
+        },
+        'error': error,
+    }
+
+
+@api_view(['POST'])
+def sync_dealer_license(request, pk):
+    """
+    Dry-run sync for dealer: fetch latest data from license server, return diff.
+    Does NOT save. Call /confirm to apply.
+    Superadmin and executive only.
+    """
+    user = get_user_from_cookie(request)
+    if not user:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    if not _is_superadmin(user):
+        return Response({'error': 'Superadmin access required.'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        dealer = Dealer.objects.get(pk=pk)
+    except Dealer.DoesNotExist:
+        return Response({'error': 'Dealer not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not dealer.unique_identifier and not dealer.product_registration_id:
+        return Response({'error': 'Dealer is not registered with the license server yet.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    customer_id = dealer.unique_identifier or dealer.product_registration_id
+    result = _fetch_dealer_from_license_server(customer_id)
+    if not result['success']:
+        return Response({'error': result['error']}, status=status.HTTP_502_BAD_GATEWAY)
+
+    diff = _build_dealer_sync_diff(dealer, result['data'])
+    return Response({'message': 'Sync preview ready.', 'data': diff}, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+def sync_dealer_license_confirm(request, pk):
+    """
+    Apply dealer sync: re-fetch from license server and write new values.
+    Updates total counts and recalculates remaining pool.
+    """
+    user = get_user_from_cookie(request)
+    if not user:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    if not _is_superadmin(user):
+        return Response({'error': 'Superadmin access required.'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        dealer = Dealer.objects.get(pk=pk)
+    except Dealer.DoesNotExist:
+        return Response({'error': 'Dealer not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not dealer.unique_identifier and not dealer.product_registration_id:
+        return Response({'error': 'Dealer is not registered with the license server yet.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    customer_id = dealer.unique_identifier or dealer.product_registration_id
+    result = _fetch_dealer_from_license_server(customer_id)
+    if not result['success']:
+        return Response({'error': result['error']}, status=status.HTTP_502_BAD_GATEWAY)
+
+    auth_data = result['data']
+
+    # Set auth status before populate (needed if approve→ APPROVED)
+    status_map = {
+        'Approve': Dealer.AuthStatus.APPROVED,
+        'Expired': Dealer.AuthStatus.EXPIRED,
+        'Block':   Dealer.AuthStatus.BLOCKED,
+    }
+    dealer.authentication_status = status_map.get(
+        auth_data.get('Authenticationstatus', ''),
+        dealer.authentication_status,
+    )
+
+    ok, err = _populate_dealer_counts(dealer, auth_data)
+    if not ok:
+        dealer.save()
+        return Response({'error': err}, status=status.HTTP_400_BAD_REQUEST)
+
+    dealer.save()
+
+    log_action(
+        actor=user, action=AuditLog.ActionType.UPDATE,
+        target_model='Dealer', target_id=dealer.pk,
+        target_display=dealer.dealer_name,
+        details={'action': 'license_sync'},
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
+
+    serializer = DealerSerializer(dealer)
+    return Response({
+        'message': 'Dealer license data synced successfully.',
+        'data': serializer.data,
     }, status=status.HTTP_200_OK)

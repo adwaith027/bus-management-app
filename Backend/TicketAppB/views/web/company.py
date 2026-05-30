@@ -19,7 +19,7 @@ from django.contrib.auth import get_user_model
 from rest_framework.decorators import api_view
 from django.db.utils import OperationalError, ProgrammingError
 from django.db.models import Sum, Q, Count, Case, When, IntegerField
-from ...models import Company,TransactionData,TripData,Route,VehicleType,MosambeeTransaction,Dealer
+from ...models import Company, TransactionData, TripData, Route, VehicleType, MosambeeTransaction, Dealer, ETMDevice, UserSession
 from ..utils import _is_superadmin, _is_executive, _is_dealer_admin, _is_company_admin
 from .audit_logs import log_action
 from ...models import AuditLog
@@ -56,21 +56,15 @@ def build_license_registration_payload(company):
     Maps Company model fields to license server expected format.
     """
     payload = {
-        "CustomerName": company.company_name,
-        "PhoneNumber": company.contact_number,
-        "CustomerEmail": company.company_email,
-        "GSTNumber": company.gst_number or '',
+        "CustomerName":          company.company_name,
+        "PhoneNumber":           company.contact_number,
+        "CustomerEmail":         company.company_email,
+        "GSTNumber":             company.gst_number or '',
         "CustomerContactPerson": company.contact_person,
-        "CustomerContact": company.contact_number,
-        "CustomerAddress": company.address,
-        "CustomerAddress2": company.address_2 or '',
-        "CustomerState": company.state,
-        "CustomerCity": company.city,
-        "DeviceModel": "Windows",
-        "DeviceIdentifier1": company.company_name,
-        "DeviceType": 1,
-        "Version": settings.APP_VERSION,
-        "ProjectName": settings.PROJECT_NAME
+        "CustomerAddress":       company.address,
+        "DeviceModel":           settings.DEVICE_MODEL,
+        "DeviceType":            settings.DEVICE_TYPE,
+        "ProjectName":           settings.PROJECT_NAME,
     }
     
     logger.info(f"Built registration payload for company: {company.company_name}")
@@ -281,41 +275,53 @@ def background_license_polling(company_id):
         # Update license details (only if approved)
         if auth_status == 'Approve':
             product_from_date = auth_data.get('ProductFromDate')
-            product_to_date = auth_data.get('ProductToDate')
+            product_to_date   = auth_data.get('ProductToDate')
 
             company.product_registration_id = auth_data.get('ProductRegistrationId')
-            company.unique_identifier = auth_data.get('UniqueIDentifier')
-
+            company.unique_identifier        = auth_data.get('UniqueIDentifier')
             company.product_from_date = check_datetime(product_from_date).date() if product_from_date else None
-            company.product_to_date = check_datetime(product_to_date).date() if product_to_date else None
+            company.product_to_date   = check_datetime(product_to_date).date()   if product_to_date   else None
 
-            # PalmtecCount → palmtec_count (max ETM/Palmtec devices)
-            # TODO: license server field rename from NumberOfLicence → PalmtecCount
-            # (keep NumberOfLicence fallback for backward compat until server is updated)
-            try:
-                company.palmtec_count = int(
-                    auth_data.get('PalmtecCount') or auth_data.get('NumberOfLicence', 0)
+            def _safe_int(val, default=0):
+                try:
+                    return int(val or default)
+                except (ValueError, TypeError):
+                    return default
+
+            # NumberOfLicence — total capacity ceiling from the registration page.
+            number_of_licences = _safe_int(auth_data.get('NumberOfLicence'))
+
+            # PalmtecCount — device slots from profile mapping.
+            palmtec_count = _safe_int(auth_data.get('PalmtecCount'))
+
+            # User counts — from profile mapping (come as strings).
+            total_user_count        = _safe_int(auth_data.get('TotalUserCount'))
+            premium_user_count      = _safe_int(auth_data.get('PremiumUserCount'))
+            intermediate_user_count = _safe_int(auth_data.get('IntermediateUserCount'))
+
+            # Hard block: profile counts must not exceed NumberOfLicence.
+            if number_of_licences > 0 and (palmtec_count + total_user_count) > number_of_licences:
+                logger.error(
+                    f"[BACKGROUND] License config error for {company.company_name}: "
+                    f"palmtec({palmtec_count}) + users({total_user_count}) = "
+                    f"{palmtec_count + total_user_count} > NumberOfLicence({number_of_licences})"
                 )
-            except (ValueError, TypeError):
-                company.palmtec_count = 0
+                company.authentication_status = Company.AuthStatus.PENDING
+                company.error_message = (
+                    f"License config error: device slots ({palmtec_count}) + "
+                    f"user slots ({total_user_count}) = {palmtec_count + total_user_count} "
+                    f"exceeds total licensed units ({number_of_licences}). "
+                    "Contact the license server administrator."
+                )
+                company.save()
+                return
 
-            # TotalUserCount → total_user_count
-            try:
-                company.total_user_count = int(auth_data.get('TotalUserCount', 0))
-            except (ValueError, TypeError):
-                company.total_user_count = 0
-
-            # PremiumUserCount → premium_user_count
-            try:
-                company.premium_user_count = int(auth_data.get('PremiumUserCount', 0))
-            except (ValueError, TypeError):
-                company.premium_user_count = 0
-
-            # IntermediateUserCount → intermediate_user_count
-            try:
-                company.intermediate_user_count = int(auth_data.get('IntermediateUserCount', 0))
-            except (ValueError, TypeError):
-                company.intermediate_user_count = 0
+            company.number_of_licences      = number_of_licences
+            company.palmtec_count           = palmtec_count
+            company.total_user_count        = total_user_count
+            company.premium_user_count      = premium_user_count
+            company.intermediate_user_count = intermediate_user_count
+            company.error_message           = None  # clear any previous error
 
             logger.info(f"[BACKGROUND] Updated license details for company: {company.company_name}")
         
@@ -685,17 +691,15 @@ def import_company(request):
     # License server does not return name/address/email, so the frontend
     # supplies these from the form the user filled in on the confirm step.
     form_data = {
-        'company_id':      company_id,
-        'company_name':    request.data.get('company_name', '').strip(),
-        'company_email':   request.data.get('company_email', '').strip(),
-        'contact_person':  request.data.get('contact_person', '').strip(),
-        'contact_number':  request.data.get('contact_number', '').strip(),
-        'gst_number':      request.data.get('gst_number', '').strip(),
-        'address':         request.data.get('address', '').strip(),
-        'address_2':       request.data.get('address_2', '').strip(),
-        'city':            request.data.get('city', '').strip(),
-        'state':           request.data.get('state', '').strip(),
-        'zip_code':        request.data.get('zip_code', '').strip(),
+        'company_id':     company_id,
+        'company_name':   request.data.get('company_name', '').strip(),
+        'company_email':  request.data.get('company_email', '').strip(),
+        'contact_person': request.data.get('contact_person', '').strip(),
+        'contact_number': request.data.get('contact_number', '').strip(),
+        'gst_number':     request.data.get('gst_number', '').strip(),
+        'address':        request.data.get('address', '').strip(),
+        'state':          request.data.get('state', '').strip(),
+        'district':       request.data.get('district', '').strip() or None,
     }
 
     if not form_data['company_name']:
@@ -948,7 +952,7 @@ def create_company(request):
         email=user_email_field,
         password=user_password,
         role='company_admin',
-        tier='basic',
+        tier='none',
         company=company,
         is_verified=True,
         created_by=user,
@@ -1518,3 +1522,220 @@ def get_admin_dashboard_data(request):
         return Response({"message": "Success", "data": dashboard_data}, status=status.HTTP_200_OK)
     except Exception as e:
         return Response({"message": "Data fetching failed"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ── Sync license (dry-run + confirm) ─────────────────────────────────────────
+
+def _build_company_sync_diff(company, auth_data):
+    """
+    Compute old vs incoming vs in-use breakdown for the sync confirmation UI.
+    Returns a dict with 'current', 'incoming', 'in_use', and 'error' keys.
+    error is non-None if NumberOfLicence consistency check fails.
+    """
+    def _si(val):
+        try:
+            return int(val or 0)
+        except (ValueError, TypeError):
+            return 0
+
+    incoming_nol     = _si(auth_data.get('NumberOfLicence'))
+    incoming_palmtec = _si(auth_data.get('PalmtecCount'))
+    incoming_total   = _si(auth_data.get('TotalUserCount'))
+    incoming_premium = _si(auth_data.get('PremiumUserCount'))
+    incoming_inter   = _si(auth_data.get('IntermediateUserCount'))
+
+    # Consistency check
+    error = None
+    if incoming_nol > 0 and (incoming_palmtec + incoming_total) > incoming_nol:
+        error = (
+            f"License config error: device slots ({incoming_palmtec}) + "
+            f"user slots ({incoming_total}) = {incoming_palmtec + incoming_total} "
+            f"exceeds total licensed units ({incoming_nol}). "
+            "Contact the license server administrator."
+        )
+
+    # Live "in use" counts
+    palmtec_used = ETMDevice.objects.filter(
+        company=company, allocation_status='Allocated',
+    ).count()
+    sessions_total = UserSession.objects.filter(
+        user__company=company, is_active=True,
+    ).count()
+    sessions_premium = UserSession.objects.filter(
+        user__company=company, user__tier='premium', is_active=True,
+    ).count()
+    sessions_inter = UserSession.objects.filter(
+        user__company=company, user__tier='intermediate', is_active=True,
+    ).count()
+
+    raw_from = auth_data.get('ProductFromDate')
+    raw_to   = auth_data.get('ProductToDate')
+    incoming_from = check_datetime(raw_from).date() if raw_from else None
+    incoming_to   = check_datetime(raw_to).date()   if raw_to   else None
+
+    return {
+        'current': {
+            'number_of_licences':      company.number_of_licences or 0,
+            'palmtec_count':           company.palmtec_count or 0,
+            'total_user_count':        company.total_user_count or 0,
+            'premium_user_count':      company.premium_user_count or 0,
+            'intermediate_user_count': company.intermediate_user_count or 0,
+            'product_from_date':       str(company.product_from_date) if company.product_from_date else None,
+            'product_to_date':         str(company.product_to_date)   if company.product_to_date   else None,
+        },
+        'incoming': {
+            'number_of_licences':      incoming_nol,
+            'palmtec_count':           incoming_palmtec,
+            'total_user_count':        incoming_total,
+            'premium_user_count':      incoming_premium,
+            'intermediate_user_count': incoming_inter,
+            'product_from_date':       str(incoming_from) if incoming_from else None,
+            'product_to_date':         str(incoming_to)   if incoming_to   else None,
+            'authentication_status':   auth_data.get('Authenticationstatus'),
+            'product_registration_id': _si(auth_data.get('ProductRegistrationId')),
+            'unique_identifier':       auth_data.get('UniqueIDentifier', ''),
+        },
+        'in_use': {
+            'palmtec_devices_allocated': palmtec_used,
+            'active_sessions_total':     sessions_total,
+            'active_sessions_premium':   sessions_premium,
+            'active_sessions_intermediate': sessions_inter,
+        },
+        'error': error,
+    }
+
+
+@api_view(['POST'])
+def sync_company_license(request, pk):
+    """
+    Dry-run sync: fetch latest data from license server, return old vs new diff.
+    Does NOT save anything. Call /confirm to apply.
+
+    Access: superadmin, executive (own companies), company_admin (own company).
+    """
+    user = get_user_from_cookie(request)
+    if not user:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    try:
+        company = Company.objects.get(pk=pk)
+    except Company.DoesNotExist:
+        return Response({'error': 'Company not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Access control
+    if _is_company_admin(user):
+        if not user.company or user.company_id != company.id:
+            return Response({'error': 'You can only sync your own company.'}, status=status.HTTP_403_FORBIDDEN)
+    elif _is_executive(user):
+        if company.created_by_id != user.id:
+            return Response({'error': 'You can only sync companies you created.'}, status=status.HTTP_403_FORBIDDEN)
+    elif not _is_superadmin(user):
+        return Response({'error': 'Not authorized.'}, status=status.HTTP_403_FORBIDDEN)
+
+    if company.client_type != Company.ClientType.DIRECT:
+        return Response({'error': 'Sync is only available for direct companies (not dealer-managed companies).'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not company.company_id:
+        return Response({'error': 'Company is not registered with the license server yet.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Fetch from license server (single call, no polling)
+    result = fetch_company_from_license_server(company.company_id)
+    if not result['success']:
+        return Response({'error': result['error']}, status=status.HTTP_502_BAD_GATEWAY)
+
+    diff = _build_company_sync_diff(company, result['data'])
+    return Response({'message': 'Sync preview ready.', 'data': diff}, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+def sync_company_license_confirm(request, pk):
+    """
+    Apply the sync: re-fetch from license server and write new values to DB.
+    Re-fetches rather than trusting client payload to prevent tampering.
+
+    Sync reduction (count decrease with excess users) is deferred — this
+    endpoint only applies expansions and date updates cleanly.
+    """
+    user = get_user_from_cookie(request)
+    if not user:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    try:
+        company = Company.objects.get(pk=pk)
+    except Company.DoesNotExist:
+        return Response({'error': 'Company not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if _is_company_admin(user):
+        if not user.company or user.company_id != company.id:
+            return Response({'error': 'You can only sync your own company.'}, status=status.HTTP_403_FORBIDDEN)
+    elif _is_executive(user):
+        if company.created_by_id != user.id:
+            return Response({'error': 'You can only sync companies you created.'}, status=status.HTTP_403_FORBIDDEN)
+    elif not _is_superadmin(user):
+        return Response({'error': 'Not authorized.'}, status=status.HTTP_403_FORBIDDEN)
+
+    if company.client_type != Company.ClientType.DIRECT:
+        return Response({'error': 'Sync is only available for direct companies.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not company.company_id:
+        return Response({'error': 'Company is not registered with the license server yet.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    result = fetch_company_from_license_server(company.company_id)
+    if not result['success']:
+        return Response({'error': result['error']}, status=status.HTTP_502_BAD_GATEWAY)
+
+    auth_data = result['data']
+
+    # Re-run consistency check before applying
+    diff = _build_company_sync_diff(company, auth_data)
+    if diff['error']:
+        company.authentication_status = Company.AuthStatus.PENDING
+        company.error_message = diff['error']
+        company.save(update_fields=['authentication_status', 'error_message'])
+        return Response({'error': diff['error']}, status=status.HTTP_400_BAD_REQUEST)
+
+    def _si(val):
+        try:
+            return int(val or 0)
+        except (ValueError, TypeError):
+            return 0
+
+    raw_from = auth_data.get('ProductFromDate')
+    raw_to   = auth_data.get('ProductToDate')
+
+    status_map = {
+        'Approve': Company.AuthStatus.APPROVED,
+        'Expired': Company.AuthStatus.EXPIRED,
+        'Block':   Company.AuthStatus.BLOCKED,
+    }
+    new_auth_status = status_map.get(
+        auth_data.get('Authenticationstatus', ''),
+        company.authentication_status,
+    )
+
+    company.number_of_licences      = _si(auth_data.get('NumberOfLicence'))
+    company.palmtec_count           = _si(auth_data.get('PalmtecCount'))
+    company.total_user_count        = _si(auth_data.get('TotalUserCount'))
+    company.premium_user_count      = _si(auth_data.get('PremiumUserCount'))
+    company.intermediate_user_count = _si(auth_data.get('IntermediateUserCount'))
+    company.product_from_date = check_datetime(raw_from).date() if raw_from else company.product_from_date
+    company.product_to_date   = check_datetime(raw_to).date()   if raw_to   else company.product_to_date
+    company.authentication_status   = new_auth_status
+    company.product_registration_id = _si(auth_data.get('ProductRegistrationId'))
+    company.unique_identifier       = auth_data.get('UniqueIDentifier', '') or company.unique_identifier
+    company.error_message           = None
+    company.save()
+
+    log_action(
+        actor=user, action=AuditLog.ActionType.UPDATE,
+        target_model='Company', target_id=company.pk,
+        target_display=company.company_name,
+        details={'action': 'license_sync'},
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
+
+    serializer = CompanySerializer(company)
+    return Response({
+        'message': 'License data synced successfully.',
+        'data': serializer.data,
+    }, status=status.HTTP_200_OK)
