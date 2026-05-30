@@ -1,8 +1,36 @@
-import { Outlet } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
+import { Outlet, useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
+import api, { BASE_URL } from '../assets/js/axiosConfig';
 
+const IDLE_MS = 20 * 60 * 1000; // 20 minutes
 
 export default function Dashboard() {
+  const navigate = useNavigate();
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    const logout = async () => {
+      try { await api.post(`${BASE_URL}/logout`); } catch {}
+      localStorage.removeItem('user');
+      navigate('/login');
+    };
+
+    const reset = () => {
+      clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(logout, IDLE_MS);
+    };
+
+    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    events.forEach(e => window.addEventListener(e, reset, { passive: true }));
+    reset();
+
+    return () => {
+      events.forEach(e => window.removeEventListener(e, reset));
+      clearTimeout(timerRef.current);
+    };
+  }, [navigate]);
+
   return (
     <div className="flex min-h-screen overflow-x-hidden bg-slate-100 text-slate-900">
       <Sidebar />
@@ -12,27 +40,3 @@ export default function Dashboard() {
     </div>
   );
 }
-
-/**
- * USAGE NOTES:
- * 
- * 1. All dashboard pages will automatically have:
- *    - Sidebar navigation
- *    - Slate-50 background
- *    - Proper padding
- * 
- * 2. Create page content cards like this:
- *    <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
- *      Your content
- *    </div>
- * 
- * 3. For page headers:
- *    <h1 className="text-2xl font-bold text-slate-800 mb-6">
- *      Page Title
- *    </h1>
- * 
- * 4. For responsive grids:
- *    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
- *      Cards here
- *    </div>
- */
