@@ -30,6 +30,8 @@ class DealerSerializer(serializers.ModelSerializer):
             'gst_number',
             'is_active',
             'authentication_status',
+            'product_registration_id',
+            'unique_identifier',
             'product_from_date',
             'product_to_date',
             # Total counts (license-granted)
@@ -52,6 +54,8 @@ class DealerSerializer(serializers.ModelSerializer):
         read_only_fields = [
             'id',
             'authentication_status',
+            'product_registration_id',
+            'unique_identifier',
             'number_of_licences',
             'palmtec_count',
             'total_user_count',
