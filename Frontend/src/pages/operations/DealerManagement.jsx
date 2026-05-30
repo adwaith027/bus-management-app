@@ -20,10 +20,8 @@ export default function DealerManagement() {
     contact_number: '',
     email: '',
     address: '',
-    city: '',
     state: '',
     district: '',
-    zip_code: '',
     gst_number: '',
     is_active: true,
     allocated_licence_count: 0,
@@ -56,10 +54,8 @@ export default function DealerManagement() {
       contact_number: '',
       email: '',
       address: '',
-      city: '',
       state: '',
       district: '',
-      zip_code: '',
       gst_number: '',
       is_active: true,
       allocated_licence_count: 0,
@@ -79,10 +75,8 @@ export default function DealerManagement() {
       contact_number: dealer.contact_number || '',
       email: dealer.email || '',
       address: dealer.address || '',
-      city: dealer.city || '',
       state: dealer.state || '',
       district: dealer.district || '',
-      zip_code: dealer.zip_code || '',
       gst_number: dealer.gst_number || '',
       is_active: dealer.is_active ?? true,
       allocated_licence_count: dealer.allocated_licence_count ?? 0,
@@ -277,16 +271,6 @@ export default function DealerManagement() {
                   <option key={d} value={d}>{d}</option>
                 ))}
               </select>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-slate-700">City</label>
-              <input type="text" name="city" value={formData.city} onChange={handleInputChange}
-                required className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg" />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-slate-700">Zip Code</label>
-              <input type="text" name="zip_code" value={formData.zip_code} onChange={handleInputChange}
-                required className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg" />
             </div>
             <div className="flex items-center space-x-2 mt-2">
               <input type="checkbox" name="is_active" checked={formData.is_active} onChange={handleInputChange} />
