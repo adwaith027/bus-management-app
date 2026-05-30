@@ -1,7 +1,7 @@
 # Auth models
-from .auth import CustomUser, UserRole, UserTier, UserSession
+from .auth import CustomUser, UserRole, UserTier, UserSession, UserApprovedDevice, DevicePendingApproval
 
-AUTH_MODELS = ['CustomUser', 'UserRole', 'UserTier', 'UserSession']
+AUTH_MODELS = ['CustomUser', 'UserRole', 'UserTier', 'UserSession', 'UserApprovedDevice', 'DevicePendingApproval']
 
 
 # Company models

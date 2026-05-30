@@ -27,11 +27,13 @@ class UserTier(models.TextChoices):
 
 
 # Roles that should never have a tier assigned.
+# company_admin access is role-based (full company scope), not tier-based.
 _NON_COMPANY_ROLES = {
     UserRole.SUPERADMIN,
     UserRole.EXECUTIVE,
     UserRole.PRODUCTION,
     UserRole.DEALER_ADMIN,
+    UserRole.COMPANY_ADMIN,
 }
 
 
@@ -232,6 +234,9 @@ class UserSession(models.Model):
     # Stale sessions (app crash / force-kill) auto-expire via TTL check on next login.
     last_seen_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
+    # MAC address / hardware UUID from APK login payload. Stored for future FCM use.
+    device_uuid = models.CharField(max_length=255, null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -244,3 +249,88 @@ class UserSession(models.Model):
     def __str__(self):
         status = 'Active' if self.is_active else 'Inactive'
         return f'{self.user.username} | {self.device_type} | {status}'
+
+
+# ── UserApprovedDevice ────────────────────────────────────────────────────────
+
+class UserApprovedDevice(models.Model):
+    """
+    Records devices (by UUID/MAC address) that a company_admin has approved
+    for a company_user. APK logins from an unrecognised UUID are blocked until
+    an entry exists here.
+
+    is_revoked — future use: allow company_admin to revoke a lost/stolen device.
+    """
+
+    user        = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='approved_devices',
+    )
+    device_uuid = models.CharField(max_length=255, db_index=True)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='devices_approved',
+    )
+    approved_at = models.DateTimeField(auto_now_add=True)
+    is_revoked  = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = 'user_approved_device'
+        unique_together = [('user', 'device_uuid')]
+        indexes = [
+            models.Index(fields=['user', 'device_uuid', 'is_revoked']),
+        ]
+
+    def __str__(self):
+        return f'{self.user.username} | {self.device_uuid[:16]}…'
+
+
+# ── DevicePendingApproval ─────────────────────────────────────────────────────
+
+class DevicePendingApproval(models.Model):
+    """
+    Created when a company_user attempts an APK login from an unrecognised UUID.
+    company_admin reviews and approves or rejects from the sessions page.
+    On approval: UserApprovedDevice record created, user.is_verified set True.
+    """
+
+    class Status(models.TextChoices):
+        PENDING  = 'pending',  'Pending'
+        APPROVED = 'approved', 'Approved'
+        REJECTED = 'rejected', 'Rejected'
+
+    user         = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='device_approvals',
+    )
+    device_uuid  = models.CharField(max_length=255)
+    device_type  = models.CharField(max_length=20, blank=True)
+    requested_at = models.DateTimeField(auto_now_add=True)
+    status       = models.CharField(
+        max_length=10,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    reviewed_by  = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='device_approvals_reviewed',
+    )
+    reviewed_at  = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'device_pending_approval'
+        indexes = [
+            models.Index(fields=['user', 'status']),
+        ]
+
+    def __str__(self):
+        return f'{self.user.username} | {self.device_uuid[:16]}… | {self.status}'

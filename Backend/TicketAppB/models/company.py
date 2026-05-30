@@ -50,12 +50,9 @@ class Company(models.Model):
     contact_number = models.CharField(max_length=20)
 
     # ── Address ───────────────────────────────────────────────────────────────
-    address   = models.TextField()
-    address_2 = models.TextField(blank=True, null=True)
-    city      = models.CharField(max_length=100)
-    state     = models.CharField(max_length=100)
-    district  = models.CharField(max_length=100, blank=True, null=True)
-    zip_code  = models.CharField(max_length=20)
+    address  = models.TextField()
+    state    = models.CharField(max_length=100)
+    district = models.CharField(max_length=100, blank=True, null=True)
 
     # ── Creation path ─────────────────────────────────────────────────────────
     client_type = models.CharField(
@@ -93,12 +90,17 @@ class Company(models.Model):
     # ── Counts (how many resources this company is allowed) ───────────────────
     # palmtec_count: max ETM / Palmtec devices that can be mapped to this company.
     palmtec_count           = models.IntegerField(default=0, null=True, blank=True)
-    # total_user_count: hard ceiling on total active users (any tier).
+    # total_user_count: max simultaneous logins (concurrent session cap, not a creation limit).
     total_user_count        = models.IntegerField(default=0, null=True, blank=True)
-    # premium_user_count / intermediate_user_count: slots for each paid tier.
-    # Basic users fill the remainder (total_user_count - premium - intermediate).
+    # premium_user_count / intermediate_user_count: concurrent sub-limits by tier.
     premium_user_count      = models.IntegerField(default=0, null=True, blank=True)
     intermediate_user_count = models.IntegerField(default=0, null=True, blank=True)
+    # number_of_licences: total capacity ceiling from the license server registration page.
+    # PalmtecCount + TotalUserCount must not exceed this value.
+    number_of_licences      = models.IntegerField(default=0, null=True, blank=True)
+    # error_message: set when license validation hard-blocks (e.g. count inconsistency).
+    # Cleared on successful authentication or sync.
+    error_message           = models.CharField(max_length=500, null=True, blank=True)
 
     # ── Status ────────────────────────────────────────────────────────────────
     is_active = models.BooleanField(default=True, db_index=True)
@@ -211,11 +213,8 @@ class Dealer(models.Model):
     contact_number = models.CharField(max_length=20)
     email          = models.EmailField(unique=True)
     address        = models.TextField()
-    address_2      = models.TextField(blank=True, null=True)
-    city           = models.CharField(max_length=100)
     state          = models.CharField(max_length=100)
     district       = models.CharField(max_length=100, blank=True, null=True)
-    zip_code       = models.CharField(max_length=20)
     gst_number     = models.CharField(max_length=20, null=True, blank=True)
 
     # ── License (dealer's own — from license server) ──────────────────────────
@@ -237,6 +236,8 @@ class Dealer(models.Model):
     total_user_count        = models.IntegerField(default=0)
     premium_user_count      = models.IntegerField(default=0)
     intermediate_user_count = models.IntegerField(default=0)
+    number_of_licences      = models.IntegerField(default=0, null=True, blank=True)
+    error_message           = models.CharField(max_length=500, null=True, blank=True)
 
     # ── Remaining pool (available to allocate to new client companies) ────────
     # Decremented when a company is created under this dealer.
