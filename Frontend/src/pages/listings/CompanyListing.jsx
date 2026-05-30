@@ -6,7 +6,7 @@ import {
   Building2, CheckCircle2, CircleDot, Search,
   Phone, MapPin, IdCard, ArrowLeft, AlertCircle,
   Download, Plus, Mail, KeyRound, User, Sparkles,
-  Eye, Edit, X, RefreshCw,
+  Eye, Edit, X, RefreshCw, Info,
 } from 'lucide-react';
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
@@ -550,7 +550,6 @@ export default function CompanyListing() {
                 ) : filteredCompanies.map(company => {
                   const authStatus   = company.authentication_status;
                   const isApproved   = authStatus === 'Approve';
-                  const isPending    = authStatus === 'Pending';
                   const isValidating = authStatus === 'Validating';
                   const hasConfigErr = !!company.error_message;
                   const hasCompanyId = company.company_id != null;
@@ -1102,6 +1101,10 @@ export default function CompanyListing() {
                         className="flex-1 px-3 py-2 border border-slate-300 rounded-r-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
                     </div>
                   </Field>
+                </div>
+                <div className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-100 px-3 py-2.5 text-xs text-amber-700">
+                  <Info size={13} className="mt-0.5 shrink-0 text-amber-500" />
+                  <span>This admin account is <strong>not counted against your licensed user slots</strong>. It provides management access to the company dashboard and is excluded from all login slot caps.</span>
                 </div>
               </SectionCard>
 
