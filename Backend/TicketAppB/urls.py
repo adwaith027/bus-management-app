@@ -11,6 +11,7 @@ from .views.web import raw_data_logs as raw_log_views
 from .views.web import settlements as settlement_views
 from .views.web import audit_logs as audit_log_views
 from .views.web import global_settings as global_settings_views
+from .views.web import sessions as session_views
 from .views.web.masterdata import transport as transport_views
 from .views.web.masterdata import crew as crew_views
 from .views.web.masterdata import settings as settings_views
@@ -42,6 +43,13 @@ urlpatterns = [
     path('users/capacity',                       user_views.user_capacity,         name='user_capacity'),
     path('change_user_password/<int:user_id>',   user_views.change_user_password,  name='change_user_password'),
 
+    # session management + device approvals (company_admin)
+    path('sessions',                                   session_views.list_sessions,          name='list_sessions'),
+    path('sessions/<str:session_uid>/force-logout',    session_views.force_logout_session,   name='force_logout_session'),
+    path('device-approvals',                           session_views.list_pending_approvals, name='list_pending_approvals'),
+    path('device-approvals/<int:approval_id>/approve', session_views.approve_device,         name='approve_device'),
+    path('device-approvals/<int:approval_id>/reject',  session_views.reject_device,          name='reject_device'),
+
     # company data
     path('customer-data', company_views.all_company_data, name='company_data'),
     path('create-company', company_views.create_company, name='create_company'),
@@ -49,6 +57,8 @@ urlpatterns = [
     path('delete-company/<int:pk>', company_views.delete_company, name='delete_company'),
     path('register-company-license/<int:pk>', company_views.register_company_with_license_server, name='register_company_license'),
     path('validate-company-license/<int:pk>', company_views.validate_company_license, name='validate_company_license'),
+    path('sync-company-license/<int:pk>',         company_views.sync_company_license,         name='sync_company_license'),
+    path('sync-company-license/<int:pk>/confirm', company_views.sync_company_license_confirm, name='sync_company_license_confirm'),
     path('get-company-by-company-id/<str:company_id>', company_views.get_company_by_company_id, name='get_company_by_company_id'),
     path('import-company', company_views.import_company, name='import_company'),
     path('get_company_dashboard_metrics', company_views.get_company_dashboard_metrics, name='company_dashboard_data'),
@@ -103,6 +113,8 @@ urlpatterns = [
     path('delete-dealer/<int:pk>', dealer_views.delete_dealer, name='delete_dealer'),
     path('register-dealer-license/<int:pk>', dealer_views.register_dealer_with_license_server, name='register_dealer_license'),
     path('validate-dealer-license/<int:pk>',  dealer_views.validate_dealer_license,             name='validate_dealer_license'),
+    path('sync-dealer-license/<int:pk>',         dealer_views.sync_dealer_license,         name='sync_dealer_license'),
+    path('sync-dealer-license/<int:pk>/confirm', dealer_views.sync_dealer_license_confirm, name='sync_dealer_license_confirm'),
     path('dealer-mappings', dealer_views.get_dealer_mappings, name='get_dealer_mappings'),
     path('create-dealer-mapping', dealer_views.create_dealer_mapping, name='create_dealer_mapping'),
     path('update-dealer-mapping/<int:pk>', dealer_views.update_dealer_mapping, name='update_dealer_mapping'),

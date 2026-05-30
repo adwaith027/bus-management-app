@@ -1,20 +1,21 @@
 """
-Auth views — Phase 2
-====================
+Auth views
+==========
 Token delivery:
-  Web (cookie path) — access_token + refresh_token set as HttpOnly cookies.
-                      session_uid stored as a separate HttpOnly cookie.
-  APK (Bearer path) — access_token + refresh_token + session_uid returned in
-                      response body. APK stores them in SharedPreferences and
-                      sends Authorization: Bearer <access_token> on every request.
+  All clients (web + APK) — access_token + refresh_token + session_uid
+  delivered as HttpOnly cookies. APK team handles cookie storage in their
+  HTTP client (cookie_jar / dio).
+
+  APK is identified by `device_type` field in the login request body.
+  Bearer header path has been removed.
 
 Session enforcement:
-  - One active UserSession per user.
-  - New login is blocked if an existing session's last_seen_at is within
-    SESSION_INACTIVITY_DAYS, unless the requester is superadmin.
-  - On new login all stale (beyond TTL) sessions are killed first.
-  - logout marks the session inactive via session_uid in JWT claim.
-  - token refresh updates last_seen_at to keep the session alive.
+  - One active UserSession per user at a time.
+  - New login blocked if an existing active session is found (not stale).
+  - Stale sessions (last_seen_at > 24h ago) are auto-expired before the check.
+  - Superadmin is exempt from all session limits.
+  - company_user logins also check company-level concurrent session caps.
+  - APK logins for company_user require device UUID approval by company_admin.
 """
 
 import uuid
@@ -34,7 +35,7 @@ from django.contrib.auth import get_user_model, authenticate
 from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
 from django.conf import settings
 
-from ...models import Company, UserSession, AuditLog
+from ...models import Company, UserSession, AuditLog, UserApprovedDevice, DevicePendingApproval
 from .audit_logs import log_action
 
 logger = logging.getLogger(__name__)
@@ -43,10 +44,9 @@ _token_generator = PasswordResetTokenGenerator()
 
 User = get_user_model()
 
-# A session whose last_seen_at is older than this is considered stale.
-# Must match or exceed the JWT refresh-token TTL so an active session
-# can always be refreshed within the window.
-SESSION_INACTIVITY_DAYS = 7
+# Sessions inactive for longer than this are considered stale and auto-expired
+# at login time before the single-session check runs.
+SESSION_INACTIVITY_HOURS = 24
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -66,22 +66,13 @@ def _get_client_ip(request):
 def _is_apk_request(request):
     """
     Returns True if the request originates from the APK (Flutter app).
-    Detection order:
-      1. Explicit body hint: device_type in ('android', 'ios')
-      2. Authorization: Bearer header present (no access_token cookie)
-    Web requests always carry the access_token cookie; APK requests carry a
-    Bearer header because cookies are inconvenient on mobile.
+    Detection: device_type field in request body ('android' or 'ios').
+    APK uses the same cookie-based auth as web.
     """
-    device_type_hint = ''
     if hasattr(request, 'data') and isinstance(request.data, dict):
-        device_type_hint = str(request.data.get('device_type', '')).lower()
-    if device_type_hint in ('android', 'ios'):
-        return True
-
-    auth_header = request.META.get('HTTP_AUTHORIZATION', '')
-    if auth_header.startswith('Bearer ') and not request.COOKIES.get('access_token'):
-        return True
-
+        hint = str(request.data.get('device_type', '')).lower()
+        if hint in ('android', 'ios'):
+            return True
     return False
 
 
@@ -174,10 +165,8 @@ def _build_apk_token_response(user, company, access_token, refresh_token, sessio
 
 
 def _build_token_response(user, company, session_uid, request):
-    """Dispatch to web or APK token response based on request origin."""
+    """Issue tokens as HttpOnly cookies (same path for web and APK)."""
     _, access_token, refresh_token = _make_tokens(user, session_uid)
-    if _is_apk_request(request):
-        return _build_apk_token_response(user, company, access_token, refresh_token, session_uid)
     return _build_web_token_response(user, company, access_token, refresh_token, session_uid)
 
 
@@ -208,31 +197,15 @@ def get_user_from_cookie(request):
 
 def get_user_from_request(request):
     """
-    Dual-path — Bearer header (APK) first, cookie (web) fallback.
-    Use this in APK views and shared endpoints.
+    Cookie-based auth — works for both web and APK (APK uses cookies).
+    Kept as an alias for get_user_from_cookie for call-site compatibility.
     """
-    auth_header = request.META.get('HTTP_AUTHORIZATION', '')
-    if auth_header.startswith('Bearer '):
-        token_str = auth_header[7:]
-        try:
-            token = AccessToken(token_str)
-            return User.objects.get(id=token['user_id'])
-        except (TokenError, User.DoesNotExist):
-            return None
     return get_user_from_cookie(request)
 
 
 def _get_session_uid_from_request(request):
-    """
-    Extract the session_uid claim from the JWT on the current request.
-    Works for both web (cookie) and APK (Bearer header).
-    """
-    auth_header = request.META.get('HTTP_AUTHORIZATION', '')
-    if auth_header.startswith('Bearer '):
-        token_str = auth_header[7:]
-    else:
-        token_str = request.COOKIES.get('access_token')
-
+    """Extract the session_uid claim from the access_token cookie."""
+    token_str = request.COOKIES.get('access_token')
     if not token_str:
         return None
     try:
@@ -244,37 +217,38 @@ def _get_session_uid_from_request(request):
 
 # ── Session helpers ───────────────────────────────────────────────────────────
 
+def _expire_stale_sessions(user):
+    """
+    Kill all sessions for this user that have been inactive for >24 hours.
+    Called at login time before the single-session check.
+    """
+    cutoff = timezone.now() - timedelta(hours=SESSION_INACTIVITY_HOURS)
+    UserSession.objects.filter(
+        user=user, is_active=True, last_seen_at__lt=cutoff,
+    ).update(is_active=False)
+    UserSession.objects.filter(
+        user=user, is_active=True,
+        last_seen_at__isnull=True, created_at__lt=cutoff,
+    ).update(is_active=False)
+
+
 def _enforce_single_session(user):
     """
-    Block new login if a live session already exists (non-superadmin only).
+    Block new login if a live session already exists.
+    Superadmin is exempt. Stale sessions must be expired first via _expire_stale_sessions().
     Returns an error Response or None if the login may proceed.
-    Cleans up stale sessions before the check.
     """
     if user.role == 'superadmin':
-        return None  # superadmin is always exempt
+        return None
 
-    cutoff = timezone.now() - timedelta(days=SESSION_INACTIVITY_DAYS)
-
-    # Kill all sessions that are beyond the inactivity TTL
-    UserSession.objects.filter(
-        user=user,
-        is_active=True,
-        last_seen_at__lt=cutoff,
-    ).update(is_active=False)
-
-    # Also kill null last_seen_at sessions that are beyond TTL by created_at
-    UserSession.objects.filter(
-        user=user,
-        is_active=True,
-        last_seen_at__isnull=True,
-        created_at__lt=cutoff,
-    ).update(is_active=False)
-
-    # Now check for a genuinely active session
     if UserSession.objects.filter(user=user, is_active=True).exists():
         return Response(
             {
-                'error': 'You are already logged in from another device. Please log out first.',
+                'error': (
+                    'Active session detected on another device. '
+                    'Log out from there first, or contact your company admin '
+                    'if this was not you.'
+                ),
                 'error_code': 'ALREADY_LOGGED_IN',
             },
             status=status.HTTP_403_FORBIDDEN,
@@ -282,7 +256,7 @@ def _enforce_single_session(user):
     return None
 
 
-def _create_session(user, request):
+def _create_session(user, request, device_uuid=None):
     """Create a new UserSession and return its session_uid (str)."""
     session = UserSession.objects.create(
         user=user,
@@ -291,6 +265,7 @@ def _create_session(user, request):
         user_agent=(request.META.get('HTTP_USER_AGENT') or '')[:500],
         is_active=True,
         last_seen_at=timezone.now(),
+        device_uuid=device_uuid,
     )
     return str(session.session_uid)
 
@@ -340,13 +315,18 @@ def signup_view(request):
 @api_view(['POST'])
 def login_view(request):
     """
-    Login — Phase 2 flow:
+    Login — full check order:
 
-      Step 1  Authenticate credentials.
-      Step 2  Entity (company / dealer) active + license checks.
-      Step 3  Single-session enforcement (superadmin exempt).
-      Step 4  Create UserSession; embed session_uid in JWT.
-      Step 5  Issue tokens — cookies (web) or body (APK).
+      1.  Credentials valid + user is_active
+      2.  Entity (company / dealer) active + license not expired
+      3.  company_admin cannot log in via APK
+      4.  APK + unrecognised device UUID → DEVICE_PENDING
+      5.  Auto-expire stale sessions (>24h)
+      6.  Active session elsewhere → block + notify
+      7.  Concurrent session cap (company_user only)
+      8.  Create UserSession (store device_uuid)
+      9.  Issue tokens as cookies
+      10. Attach login notifications
     """
     if not request.data:
         return Response({'error': 'Invalid request. No credentials provided'}, status=status.HTTP_400_BAD_REQUEST)
@@ -357,7 +337,7 @@ def login_view(request):
     if not username or not password:
         return Response({'error': 'Please provide username and password'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # ── Step 1: Authenticate ──────────────────────────────────────────────────
+    # ── 1: Credentials + is_active ────────────────────────────────────────────
     user = authenticate(username=username, password=password)
 
     if not user:
@@ -373,50 +353,124 @@ def login_view(request):
         return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
 
     if not user.is_active:
-        return Response({'error': 'Account is inactive'}, status=status.HTTP_403_FORBIDDEN)
+        return Response({'error': 'Account is inactive. Contact administrator.'}, status=status.HTTP_403_FORBIDDEN)
 
-    # ── Step 2: Entity checks ────────────────────────────────────────────────
+    # ── 2: Entity checks ──────────────────────────────────────────────────────
     company = user.company
     if company:
         if not company.is_active:
             return Response(
-                {'error': 'Company account is deactivated. Contact Administrator.'},
+                {'error': 'Company account is deactivated. Contact administrator.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
         if company.product_to_date and date.today() > company.product_to_date:
             return Response(
-                {'error': f'License Expired (ID: {company.company_id}). Contact Administrator'},
+                {'error': f'License expired (ID: {company.company_id}). Contact administrator.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
         if company.authentication_status and company.authentication_status != Company.AuthStatus.APPROVED:
             return Response(
-                {'error': 'Pending License Approval. Contact Administrator'},
+                {'error': 'License not yet approved. Contact administrator.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
     dealer = user.dealer
     if dealer and not dealer.is_active:
         return Response(
-            {'error': 'Dealer account is deactivated. Contact Administrator.'},
+            {'error': 'Dealer account is deactivated. Contact administrator.'},
             status=status.HTTP_403_FORBIDDEN,
         )
 
-    # ── Step 3: Single-session enforcement ───────────────────────────────────
+    is_apk = _is_apk_request(request)
+
+    # ── 3: company_admin cannot log in via APK ────────────────────────────────
+    if user.role == 'company_admin' and is_apk:
+        return Response(
+            {'error': 'Company admin accounts can only log in via the web dashboard.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    # ── 4: Device approval check (APK, company_user only) ────────────────────
+    device_uuid = None
+    if is_apk and user.role == 'company_user':
+        device_uuid = (
+            request.data.get('uuid') or request.data.get('device_uuid') or ''
+        ).strip() or None
+
+        if device_uuid:
+            approved = UserApprovedDevice.objects.filter(
+                user=user, device_uuid=device_uuid, is_revoked=False
+            ).exists()
+            if not approved:
+                DevicePendingApproval.objects.get_or_create(
+                    user=user,
+                    device_uuid=device_uuid,
+                    defaults={
+                        'device_type': str(_detect_device_type(request)),
+                        'status': DevicePendingApproval.Status.PENDING,
+                    },
+                )
+                return Response(
+                    {
+                        'error': (
+                            'Initial login on this device. '
+                            'Contact your company admin for approval.'
+                        ),
+                        'error_code': 'DEVICE_PENDING',
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+    # ── 5: Auto-expire stale sessions (>24h) ─────────────────────────────────
+    _expire_stale_sessions(user)
+
+    # ── 6: Active session elsewhere ───────────────────────────────────────────
     block = _enforce_single_session(user)
     if block:
         return block
 
-    # ── Step 4: Create session + issue tokens ─────────────────────────────────
-    session_uid = _create_session(user, request)
+    # ── 7: Concurrent session cap (company_user only, superadmin exempt) ──────
+    if user.role == 'company_user' and company:
+        if company.total_user_count > 0:
+            active_count = UserSession.objects.filter(
+                user__company=company, is_active=True,
+            ).count()
+            if active_count >= company.total_user_count:
+                return Response(
+                    {'error': 'All login slots are in use. Another user must log out first.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        if user.tier == 'premium' and company.premium_user_count > 0:
+            premium_active = UserSession.objects.filter(
+                user__company=company, user__tier='premium', is_active=True,
+            ).count()
+            if premium_active >= company.premium_user_count:
+                return Response(
+                    {'error': 'All premium tier slots are in use. Another premium user must log out first.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        if user.tier == 'intermediate' and company.intermediate_user_count > 0:
+            intermediate_active = UserSession.objects.filter(
+                user__company=company, user__tier='intermediate', is_active=True,
+            ).count()
+            if intermediate_active >= company.intermediate_user_count:
+                return Response(
+                    {'error': 'All intermediate tier slots are in use. Another intermediate user must log out first.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+    # ── 8: Create session ─────────────────────────────────────────────────────
+    session_uid = _create_session(user, request, device_uuid=device_uuid)
 
     user.last_login = timezone.now()
     user.save(update_fields=['last_login'])
 
-    # ── Step 5: Token response (web cookies or APK body) ─────────────────────
+    # ── 9: Issue tokens as cookies ────────────────────────────────────────────
     response = _build_token_response(user, company, session_uid, request)
 
-    # ── Step 6: Attach login notifications (Phase 5) ─────────────────────────
-    # Computed after auth so they don't slow down failed login attempts.
+    # ── 10: Login notifications ───────────────────────────────────────────────
     try:
         from .notifications import get_login_notifications
         notifications = get_login_notifications(user, company)
@@ -425,12 +479,11 @@ def login_view(request):
     except Exception as _exc:
         logger.warning(f"Failed to compute login notifications: {_exc}")
 
-    device_type = _detect_device_type(request)
     log_action(
         actor=user, action=AuditLog.ActionType.LOGIN,
         target_model='CustomUser', target_id=user.pk,
         target_display=user.username,
-        details={'device_type': device_type},
+        details={'device_type': str(_detect_device_type(request))},
         ip_address=request.META.get('REMOTE_ADDR'),
     )
 
@@ -475,26 +528,17 @@ def logout_view(request):
             ip_address=request.META.get('REMOTE_ADDR'),
         )
 
-    if _is_apk_request(request):
-        return Response({'message': 'Logged out successfully'})
     return _build_logout_response('Logged out successfully')
 
 
 @api_view(['POST'])
 def refresh_token_view(request):
     """
-    Token refresh.
-
-    Web: reads refresh_token from cookie; issues new access_token cookie.
-    APK: reads refresh_token from body; returns new access_token in body.
-    Both: update UserSession.last_seen_at to keep session alive.
+    Token refresh. Reads refresh_token from cookie; issues new access_token cookie.
+    Updates UserSession.last_seen_at to keep the session alive (resets 24h TTL).
     """
-    if _is_apk_request(request):
-        refresh_token_str = request.data.get('refresh_token') if hasattr(request, 'data') else None
-        session_uid_hint  = request.data.get('session_uid')   if hasattr(request, 'data') else None
-    else:
-        refresh_token_str = request.COOKIES.get('refresh_token')
-        session_uid_hint  = request.COOKIES.get('session_uid')
+    refresh_token_str = request.COOKIES.get('refresh_token')
+    session_uid_hint  = request.COOKIES.get('session_uid')
 
     if not refresh_token_str:
         return Response({'error': 'No refresh token found'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -503,18 +547,12 @@ def refresh_token_view(request):
         refresh = RefreshToken(refresh_token_str)
         session_uid = refresh.get('session_uid') or session_uid_hint
 
-        # Touch the UserSession so the inactivity TTL resets
         if session_uid:
             UserSession.objects.filter(
-                session_uid=session_uid,
-                is_active=True,
+                session_uid=session_uid, is_active=True,
             ).update(last_seen_at=timezone.now())
 
         new_access_token = str(refresh.access_token)
-
-        if _is_apk_request(request):
-            return Response({'message': 'Token refreshed successfully', 'access_token': new_access_token})
-
         response = Response({'message': 'Token refreshed successfully'})
         response.set_cookie(
             key='access_token', value=new_access_token,
