@@ -5,7 +5,7 @@ import statesDistricts from '../../assets/json/indiaStatesDistricts.json';
 import {
   Handshake, CheckCircle2, CircleDot, Search,
   Phone, MapPin, IdCard, ArrowLeft, AlertCircle,
-  Plus, Mail, KeyRound, User, Hash, Eye, Edit, X,
+  Plus, Mail, KeyRound, User, Hash, Eye, Edit, X, RefreshCw,
 } from 'lucide-react';
 
 // ── ModalWrapper ───────────────────────────────────────────────────────────────
@@ -113,7 +113,7 @@ function DealerPreview({ form }) {
           </div>
           <div className="flex items-start gap-2 text-slate-500">
             <MapPin size={11} className="mt-0.5 shrink-0" />
-            <span className="line-clamp-2">{[form.address_2, form.city, form.district, form.state].filter(Boolean).join(', ') || '—'}</span>
+            <span className="line-clamp-2">{[form.district, form.state].filter(Boolean).join(', ') || '—'}</span>
           </div>
           {form.contact_number && (
             <div className="flex items-center gap-2 text-slate-500">
@@ -183,11 +183,26 @@ function PoolSummaryCard() {
   );
 }
 
+function DiffRow({ label, current, incoming, inUse }) {
+  const changed = current !== incoming;
+  return (
+    <div className={`rounded-lg px-3 py-2.5 border text-sm ${changed ? 'bg-blue-50 border-blue-100' : 'bg-slate-50 border-slate-100'}`}>
+      <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 mb-1">{label}</p>
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="text-slate-600">Was: <strong>{current ?? '—'}</strong></span>
+        {changed && <span className="text-blue-700">→ New: <strong>{incoming}</strong></span>}
+        {!changed && <span className="text-slate-400 text-xs">(no change)</span>}
+        {inUse !== undefined && <span className="text-slate-500 text-xs ml-auto">Allocated: {inUse}</span>}
+      </div>
+    </div>
+  );
+}
+
 // ── EMPTY form ─────────────────────────────────────────────────────────────────
 const EMPTY = {
   dealer_code: '', dealer_name: '', contact_person: '', contact_number: '',
   email: '', gst_number: '', is_active: true,
-  address: '', address_2: '', city: '', state: '', district: '', zip_code: '',
+  address: '', state: '', district: '',
   user_username: '', user_email: '', user_password: '',
 };
 
@@ -205,7 +220,7 @@ export default function DealerListing() {
   const [form, setForm]         = useState(EMPTY);
   const [submitting, setSubmitting] = useState(false);
 
-  // ── Modal state (view / edit) ────────────────────────────────────────────
+  // ── Modal state (view / edit / sync) ─────────────────────────────────────
   const [modal,           setModal]           = useState(null);
   const [editingItem,     setEditingItem]     = useState(null);
   const [modalForm,       setModalForm]       = useState(EMPTY);
@@ -213,6 +228,10 @@ export default function DealerListing() {
 
   // ── License action state ─────────────────────────────────────────────────
   const [licenseAction, setLicenseAction] = useState({ busy: false, msg: '', err: '' });
+
+  // ── Sync state ───────────────────────────────────────────────────────────
+  const [syncDiff,       setSyncDiff]       = useState(null);
+  const [syncConfirming, setSyncConfirming] = useState(false);
 
   // ── Fetch ────────────────────────────────────────────────────────────────
   const fetchDealers = useCallback(async () => {
@@ -226,6 +245,14 @@ export default function DealerListing() {
 
   useEffect(() => { fetchDealers(); }, [fetchDealers]);
 
+  // Auto-refresh while any dealer is in Validating state
+  useEffect(() => {
+    const hasValidating = dealers.some(d => d.authentication_status === 'Validating');
+    if (!hasValidating) return;
+    const id = setInterval(fetchDealers, 5000);
+    return () => clearInterval(id);
+  }, [dealers, fetchDealers]);
+
   // ── Form helpers ─────────────────────────────────────────────────────────
   const set = (k, v) => setForm(f => k === 'state' ? { ...f, state: v, district: '' } : { ...f, [k]: v });
 
@@ -233,7 +260,7 @@ export default function DealerListing() {
 
   // ── Create form completeness ──────────────────────────────────────────────
   const sec1 = !!(form.dealer_code && form.dealer_name && form.contact_person && form.contact_number && form.email);
-  const sec2 = !!(form.address && form.state && form.district && form.city && form.zip_code);
+  const sec2 = !!(form.address && form.state && form.district);
   const sec3 = !!(form.user_username && form.user_email && form.user_password);
   const canSubmit = sec1 && sec2 && sec3;
 
@@ -246,8 +273,8 @@ export default function DealerListing() {
       const res = await api.post(`${BASE_URL}/create-dealer`, {
         dealer_name: form.dealer_name, email: form.email, dealer_code: form.dealer_code,
         contact_person: form.contact_person, contact_number: form.contact_number,
-        gst_number: form.gst_number, address: form.address, address_2: form.address_2, city: form.city,
-        state: form.state, district: form.district, zip_code: form.zip_code,
+        gst_number: form.gst_number, address: form.address,
+        state: form.state, district: form.district,
         is_active: form.is_active,
         user_username: form.user_username, user_email: form.user_email, user_password: form.user_password,
       });
@@ -273,8 +300,7 @@ export default function DealerListing() {
     contact_person: dealer.contact_person || '', contact_number: dealer.contact_number || '',
     email: dealer.email || '', gst_number: dealer.gst_number || '',
     is_active: dealer.is_active ?? true, address: dealer.address || '',
-    address_2: dealer.address_2 || '', city: dealer.city || '', state: dealer.state || '',
-    district: dealer.district || '', zip_code: dealer.zip_code || '',
+    state: dealer.state || '', district: dealer.district || '',
     user_username: '', user_email: '', user_password: '',
   });
 
@@ -298,9 +324,8 @@ export default function DealerListing() {
         dealer_name: modalForm.dealer_name, email: modalForm.email,
         dealer_code: modalForm.dealer_code, contact_person: modalForm.contact_person,
         contact_number: modalForm.contact_number, gst_number: modalForm.gst_number,
-        address: modalForm.address, address_2: modalForm.address_2, city: modalForm.city,
-        state: modalForm.state, district: modalForm.district,
-        zip_code: modalForm.zip_code, is_active: modalForm.is_active,
+        address: modalForm.address, state: modalForm.state, district: modalForm.district,
+        is_active: modalForm.is_active,
       });
       if (res?.status === 200 || res?.status === 201) {
         window.alert(res.data.message || 'Dealer updated!');
@@ -317,12 +342,16 @@ export default function DealerListing() {
     } finally { setModalSubmitting(false); }
   };
 
+  // ── License handlers ─────────────────────────────────────────────────────
   const handleRegisterLicense = async () => {
     setLicenseAction({ busy: true, msg: '', err: '' });
     try {
       const res = await api.post(`${BASE_URL}/register-dealer-license/${editingItem.id}`);
       setLicenseAction({ busy: false, msg: res.data.message || 'Registered.', err: '' });
       fetchDealers();
+      // Refresh editingItem with latest dealer data
+      const updated = (await api.get(`${BASE_URL}/dealers`)).data?.data?.find(d => d.id === editingItem.id);
+      if (updated) setEditingItem(updated);
     } catch (err) {
       setLicenseAction({ busy: false, msg: '', err: err?.response?.data?.error || 'Registration failed.' });
     }
@@ -334,9 +363,36 @@ export default function DealerListing() {
       const res = await api.post(`${BASE_URL}/validate-dealer-license/${editingItem.id}`);
       setLicenseAction({ busy: false, msg: res.data.message || 'Validation started.', err: '' });
       fetchDealers();
+      const updated = (await api.get(`${BASE_URL}/dealers`)).data?.data?.find(d => d.id === editingItem.id);
+      if (updated) setEditingItem(updated);
     } catch (err) {
       setLicenseAction({ busy: false, msg: '', err: err?.response?.data?.error || 'Validation failed.' });
     }
+  };
+
+  const handleSyncDryRun = async () => {
+    setLicenseAction({ busy: true, msg: '', err: '' });
+    try {
+      const res = await api.post(`${BASE_URL}/sync-dealer-license/${editingItem.id}`);
+      setSyncDiff(res.data.data);
+      setModal('sync');
+      setLicenseAction({ busy: false, msg: '', err: '' });
+    } catch (err) {
+      setLicenseAction({ busy: false, msg: '', err: err?.response?.data?.error || 'Sync fetch failed.' });
+    }
+  };
+
+  const handleSyncConfirm = async () => {
+    setSyncConfirming(true);
+    try {
+      const res = await api.post(`${BASE_URL}/sync-dealer-license/${editingItem.id}/confirm`);
+      window.alert(res.data.message || 'License synced successfully.');
+      setModal(null);
+      setSyncDiff(null);
+      fetchDealers();
+    } catch (err) {
+      window.alert(err?.response?.data?.error || 'Sync confirmation failed.');
+    } finally { setSyncConfirming(false); }
   };
 
   const filteredDealers = useMemo(() => {
@@ -349,6 +405,17 @@ export default function DealerListing() {
       d.contact_person?.toLowerCase().includes(q)
     );
   }, [dealers, search]);
+
+  // ── License status style helper ───────────────────────────────────────────
+  const licenseStatusStyle = (s) => {
+    switch (s) {
+      case 'Approve':    return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+      case 'Validating': return 'bg-blue-50 text-blue-700 border-blue-200';
+      case 'Expired':    return 'bg-red-50 text-red-700 border-red-200';
+      case 'Block':      return 'bg-red-50 text-red-700 border-red-200';
+      default:           return 'bg-amber-50 text-amber-700 border-amber-200';
+    }
+  };
 
   // ══════════════════════════════════════════════════════════════════════════
   // ── LIST VIEW ──────────────────────────────────────────────────────────
@@ -458,14 +525,8 @@ export default function DealerListing() {
                           {dealer.is_active ? 'Active' : 'Inactive'}
                         </span>
                         {dealer.authentication_status && (
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium border ${
-                            dealer.authentication_status === 'Registered'
-                              ? 'bg-blue-50 text-blue-700 border-blue-200'
-                              : dealer.authentication_status === 'Validated'
-                              ? 'bg-green-50 text-green-700 border-green-200'
-                              : 'bg-amber-50 text-amber-700 border-amber-200'
-                          }`}>
-                            {dealer.authentication_status}
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium border ${licenseStatusStyle(dealer.authentication_status)}`}>
+                            {dealer.authentication_status === 'Approve' ? 'Licensed' : dealer.authentication_status}
                           </span>
                         )}
                       </div>
@@ -533,13 +594,13 @@ export default function DealerListing() {
               </div>
 
               {/* Address */}
-              {(editingItem.address || editingItem.city || editingItem.state) && (
+              {(editingItem.address || editingItem.state) && (
                 <div className="rounded-xl border border-slate-100 bg-white p-3">
                   <p className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mb-2">Registered Address</p>
                   <div className="flex items-start gap-2 text-sm text-slate-700">
                     <MapPin size={13} className="text-slate-400 mt-0.5 shrink-0" />
                     <span className="leading-relaxed">
-                      {[editingItem.address, editingItem.address_2, editingItem.city, editingItem.district, editingItem.state, editingItem.zip_code]
+                      {[editingItem.address, editingItem.district, editingItem.state]
                         .filter(Boolean).join(', ')}
                     </span>
                   </div>
@@ -549,55 +610,98 @@ export default function DealerListing() {
               {/* License section */}
               <div className="rounded-xl border border-slate-100 bg-white p-3">
                 <p className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mb-3">License</p>
+
                 <div className="flex items-center gap-2 mb-3">
                   <span className="text-xs text-slate-500">Status:</span>
                   {editingItem.authentication_status ? (
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium border ${
-                      editingItem.authentication_status === 'Registered'
-                        ? 'bg-blue-50 text-blue-700 border-blue-200'
-                        : editingItem.authentication_status === 'Validated'
-                        ? 'bg-green-50 text-green-700 border-green-200'
-                        : 'bg-amber-50 text-amber-700 border-amber-200'
-                    }`}>
-                      {editingItem.authentication_status}
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium border ${licenseStatusStyle(editingItem.authentication_status)}`}>
+                      {editingItem.authentication_status === 'Approve' ? 'Licensed' : editingItem.authentication_status}
                     </span>
                   ) : (
                     <span className="text-xs text-slate-400 italic">Not registered</span>
                   )}
+                  {editingItem.product_to_date && (
+                    <span className="ml-auto text-xs text-slate-400">
+                      Expires: {new Date(editingItem.product_to_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </span>
+                  )}
                 </div>
 
+                {/* Pool counts — shown when approved */}
+                {editingItem.authentication_status === 'Approve' && (
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    {[
+                      { label: 'ETM Devices', total: editingItem.palmtec_count, remaining: editingItem.remaining_palmtec_count },
+                      { label: 'Total Users', total: editingItem.total_user_count, remaining: editingItem.remaining_total_user_count },
+                      { label: 'Premium', total: editingItem.premium_user_count, remaining: editingItem.remaining_premium_user_count },
+                      { label: 'Intermediate', total: editingItem.intermediate_user_count, remaining: editingItem.remaining_intermediate_user_count },
+                    ].map(({ label, total, remaining }) => (
+                      <div key={label} className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2">
+                        <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">{label}</p>
+                        <p className="text-sm font-semibold text-slate-800 tabular-nums">
+                          {remaining ?? 0} <span className="text-xs font-normal text-slate-400">/ {total ?? 0}</span>
+                        </p>
+                        <p className="text-[10px] text-slate-400">remaining</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Error message */}
+                {editingItem.error_message && (
+                  <div className="mb-3 flex items-start gap-1.5 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
+                    <AlertCircle size={13} className="shrink-0 mt-0.5 text-red-500" />
+                    {editingItem.error_message}
+                  </div>
+                )}
+
                 {licenseAction.msg && (
-                  <div className="mb-2 flex items-start gap-1.5 rounded-lg bg-green-50 border border-green-200 px-3 py-2 text-xs text-green-700">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                  <div className="mb-2 flex items-start gap-1.5 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-700">
+                    <CheckCircle2 size={13} className="shrink-0 mt-0.5 text-emerald-500" />
                     {licenseAction.msg}
                   </div>
                 )}
                 {licenseAction.err && (
                   <div className="mb-2 flex items-start gap-1.5 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    <AlertCircle size={13} className="shrink-0 mt-0.5 text-red-500" />
                     {licenseAction.err}
                   </div>
                 )}
 
-                <div className="flex gap-2">
-                  {(!editingItem.authentication_status || editingItem.authentication_status === 'Pending') && (
+                {/* Button state machine per spec §4 */}
+                <div className="flex gap-2 flex-wrap">
+                  {/* Register — only before unique_identifier is set */}
+                  {!editingItem.unique_identifier && (
                     <button
                       type="button"
                       onClick={handleRegisterLicense}
                       disabled={licenseAction.busy}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-slate-800 rounded-lg hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-slate-800 rounded-lg hover:bg-slate-700 disabled:opacity-50 transition-colors cursor-pointer"
                     >
                       {licenseAction.busy ? 'Processing…' : 'Register with License Server'}
                     </button>
                   )}
-                  {editingItem.company_id && (
+                  {/* Authenticate — registered but not yet approved */}
+                  {editingItem.unique_identifier && editingItem.authentication_status !== 'Approve' && (
                     <button
                       type="button"
                       onClick={handleValidateLicense}
                       disabled={licenseAction.busy}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors cursor-pointer"
                     >
-                      {licenseAction.busy ? 'Processing…' : 'Validate License'}
+                      {licenseAction.busy ? 'Processing…' : 'Authenticate License'}
+                    </button>
+                  )}
+                  {/* Sync — only when approved */}
+                  {editingItem.authentication_status === 'Approve' && (
+                    <button
+                      type="button"
+                      onClick={handleSyncDryRun}
+                      disabled={licenseAction.busy}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50 transition-colors cursor-pointer"
+                    >
+                      <RefreshCw size={11} />
+                      {licenseAction.busy ? 'Fetching…' : 'Sync License'}
                     </button>
                   )}
                 </div>
@@ -612,6 +716,58 @@ export default function DealerListing() {
                 <button type="button" onClick={() => setModal(null)}
                   className="px-4 py-2 text-sm font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-700 transition-colors">
                   Close
+                </button>
+              </div>
+            </div>
+          )}
+        </ModalWrapper>
+
+        {/* ── Sync Preview Modal ──────────────────────────────────────── */}
+        <ModalWrapper
+          open={modal === 'sync'}
+          onClose={() => { setModal('view'); setSyncDiff(null); }}
+          title="Sync License Preview"
+          icon={RefreshCw}
+          width="max-w-xl"
+        >
+          {syncDiff && (
+            <div className="space-y-3">
+              <p className="text-sm text-slate-600">
+                Review the incoming values from the license server. Click <strong>Apply Sync</strong> to update.
+              </p>
+
+              {syncDiff.error && (
+                <div className="flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 px-3 py-2.5 text-xs text-red-700">
+                  <AlertCircle size={13} className="mt-0.5 shrink-0 text-red-500" />
+                  {syncDiff.error}
+                </div>
+              )}
+
+              <DiffRow label="Total Licensed Units" current={syncDiff.current.number_of_licences} incoming={syncDiff.incoming.number_of_licences} />
+              <DiffRow label="ETM Devices" current={syncDiff.current.palmtec_count} incoming={syncDiff.incoming.palmtec_count} inUse={syncDiff.in_use.palmtec_allocated_to_companies} />
+              <DiffRow label="Total Users" current={syncDiff.current.total_user_count} incoming={syncDiff.incoming.total_user_count} inUse={syncDiff.in_use.total_users_allocated} />
+              <DiffRow label="Premium Users" current={syncDiff.current.premium_user_count} incoming={syncDiff.incoming.premium_user_count} inUse={syncDiff.in_use.premium_users_allocated} />
+              <DiffRow label="Intermediate Users" current={syncDiff.current.intermediate_user_count} incoming={syncDiff.incoming.intermediate_user_count} inUse={syncDiff.in_use.intermediate_users_allocated} />
+              <DiffRow label="License From" current={syncDiff.current.product_from_date} incoming={syncDiff.incoming.product_from_date} />
+              <DiffRow label="License To" current={syncDiff.current.product_to_date} incoming={syncDiff.incoming.product_to_date} />
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => { setModal('view'); setSyncDiff(null); }}
+                  className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSyncConfirm}
+                  disabled={syncConfirming || !!syncDiff.error}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer"
+                >
+                  {syncConfirming
+                    ? <><svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Applying…</>
+                    : <><RefreshCw size={13} /> Apply Sync</>}
                 </button>
               </div>
             </div>
@@ -640,15 +796,9 @@ export default function DealerListing() {
             </div>
 
             <div className="space-y-1">
-              <label className="text-sm font-medium text-slate-700">Address Line 1 <span className="text-red-500">*</span></label>
+              <label className="text-sm font-medium text-slate-700">Address <span className="text-red-500">*</span></label>
               <textarea name="address" value={modalForm.address || ''} onChange={handleModalInputChange}
                 rows={2} required
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
-            </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium text-slate-700">Address Line 2 <span className="text-xs text-slate-400 font-normal ml-1">— Optional</span></label>
-              <textarea name="address_2" value={modalForm.address_2 || ''} onChange={handleModalInputChange}
-                rows={2}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
             </div>
 
@@ -670,14 +820,6 @@ export default function DealerListing() {
                   {(statesDistricts[modalForm.state] || []).map(d => <option key={d} value={d}>{d}</option>)}
                 </select>
               </div>
-              {[{ label: 'City', name: 'city', required: true }, { label: 'Zip Code', name: 'zip_code', required: true }].map(f => (
-                <div key={f.name} className="space-y-1">
-                  <label className="text-sm font-medium text-slate-700">{f.label}{f.required && <span className="text-red-500 ml-0.5">*</span>}</label>
-                  <input type="text" name={f.name} value={modalForm[f.name] || ''} onChange={handleModalInputChange}
-                    required={f.required}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
-                </div>
-              ))}
             </div>
 
             <label className="flex items-center gap-3 cursor-pointer">
@@ -796,12 +938,8 @@ export default function DealerListing() {
             {/* Step 2: Registered Address */}
             <SectionCard step={2} active={sec1} complete={sec2} title="Registered Address" subtitle="Used on invoices, contracts, and the dealer's certificate.">
               <div className="space-y-4">
-                <Field label="Address Line 1" required>
+                <Field label="Address" required>
                   <textarea value={form.address} onChange={e => set('address', e.target.value)} rows={2} placeholder="Street, area, landmark…"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
-                </Field>
-                <Field label="Address Line 2" hint="Optional">
-                  <textarea value={form.address_2} onChange={e => set('address_2', e.target.value)} rows={2} placeholder="Building, floor, suite…"
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
                 </Field>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -818,12 +956,6 @@ export default function DealerListing() {
                       <option value="">Select district…</option>
                       {(statesDistricts[form.state] || []).map(d => <option key={d} value={d}>{d}</option>)}
                     </select>
-                  </Field>
-                  <Field label="City" required>
-                    <input value={form.city} onChange={e => set('city', e.target.value)} placeholder="City" className={inputCls} />
-                  </Field>
-                  <Field label="Zip Code" required>
-                    <input value={form.zip_code} onChange={e => set('zip_code', e.target.value)} placeholder="515001" className={inputCls} />
                   </Field>
                 </div>
               </div>
