@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Users, CheckCircle2, KeyRound, Activity, Plus, Search,
   ArrowUp, ArrowDown, ArrowUpDown, Building2, Eye, Edit, X,
-  Info, Save,
+  Info, Save, AlertCircle, ShieldAlert,
 } from 'lucide-react';
 import api, { BASE_URL } from '../../assets/js/axiosConfig';
 import { useNavigate } from 'react-router-dom';
@@ -46,7 +46,15 @@ const ROLE_CONFIG = {
   dealer_admin:  { label: 'Dealer Admin',  bg: 'bg-amber-50',   text: 'text-amber-700',   border: 'border-amber-200',   dot: 'bg-amber-500' },
   company_admin: { label: 'Company Admin', bg: 'bg-violet-50',  text: 'text-violet-700',  border: 'border-violet-200',  dot: 'bg-violet-500' },
   executive:     { label: 'Executive',     bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', dot: 'bg-emerald-500' },
+  company_user:  { label: 'User',          bg: 'bg-blue-50',    text: 'text-blue-700',    border: 'border-blue-200',    dot: 'bg-blue-500' },
   user:          { label: 'User',          bg: 'bg-blue-50',    text: 'text-blue-700',    border: 'border-blue-200',    dot: 'bg-blue-500' },
+};
+
+const TIER_CONFIG = {
+  basic:        { label: 'Basic',        bg: 'bg-slate-50',   text: 'text-slate-600',  border: 'border-slate-200' },
+  intermediate: { label: 'Intermediate', bg: 'bg-sky-50',     text: 'text-sky-700',    border: 'border-sky-200' },
+  premium:      { label: 'Premium',      bg: 'bg-violet-50',  text: 'text-violet-700', border: 'border-violet-200' },
+  none:         { label: '—',            bg: 'bg-slate-50',   text: 'text-slate-400',  border: 'border-slate-200' },
 };
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
@@ -56,6 +64,16 @@ function RoleBadge({ role }) {
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${c.bg} ${c.text} ${c.border}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />
+      {c.label}
+    </span>
+  );
+}
+
+function TierBadge({ tier }) {
+  if (!tier || tier === 'none') return null;
+  const c = TIER_CONFIG[tier] || TIER_CONFIG.basic;
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${c.bg} ${c.text} ${c.border}`}>
       {c.label}
     </span>
   );
@@ -135,16 +153,19 @@ export default function UserListing() {
     : isDealerAdmin
     ? [{ value: 'company_admin', label: 'Company Admin' }]
     : isCompanyAdmin
-    ? [{ value: 'user', label: 'User' }]
+    ? [{ value: 'company_user', label: 'User' }]
     : [];
 
-  const defaultRole = allowedRoles[0]?.value || 'user';
+  const defaultRole = allowedRoles[0]?.value || 'company_user';
 
   // ── Data state ───────────────────────────────────────────────────────────────
   const [users, setUsers] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+
+  // Tier capacity — only relevant when isCompanyAdmin
+  const [capacity, setCapacity] = useState(null);
 
   // ── Filter / sort / paginate state ───────────────────────────────────────────
   const [search, setSearch] = useState('');
@@ -163,7 +184,7 @@ export default function UserListing() {
   const [togglingId, setTogglingId] = useState(null);
 
   // ── Form state ───────────────────────────────────────────────────────────────
-  const [formData, setFormData] = useState({ username: '', email: '', role: defaultRole, company_id: '', password: '', state: '' });
+  const [formData, setFormData] = useState({ username: '', email: '', role: defaultRole, company_id: '', password: '', state: '', tier: 'basic' });
   const [pw, setPw] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -173,7 +194,8 @@ export default function UserListing() {
   // ── Fetch ────────────────────────────────────────────────────────────────────
   useEffect(() => {
     fetchUsers();
-    fetchCompanies();
+    if (!isCompanyAdmin) fetchCompanies();
+    if (isCompanyAdmin) fetchCapacity();
   }, []);
 
   const fetchUsers = async () => {
@@ -197,16 +219,34 @@ export default function UserListing() {
     }
   };
 
+  const fetchCapacity = async () => {
+    try {
+      const res = await api.get(`${BASE_URL}/users/capacity`);
+      setCapacity(res.data?.data || null);
+    } catch (err) {
+      console.error('Error fetching capacity:', err);
+    }
+  };
+
   const handleLogout = async () => {
     try { await api.post(`${BASE_URL}/logout`); } catch {}
     finally {
       localStorage.removeItem('user');
-      localStorage.removeItem('authToken');
-      localStorage.removeItem('refreshToken');
-      localStorage.removeItem('userRole');
       navigate('/login');
     }
   };
+
+  // ── Tier availability helpers ─────────────────────────────────────────────────
+  const noLicenses = isCompanyAdmin && capacity && !capacity.total?.limit;
+
+  const availableTiers = useMemo(() => {
+    if (!isCompanyAdmin || !capacity) return [{ value: 'basic', label: 'Basic' }, { value: 'intermediate', label: 'Intermediate' }, { value: 'premium', label: 'Premium' }];
+    const tiers = [];
+    if (capacity.total?.limit > 0) tiers.push({ value: 'basic', label: 'Basic' });
+    if (capacity.tiers?.intermediate?.limit) tiers.push({ value: 'intermediate', label: 'Intermediate' });
+    if (capacity.tiers?.premium?.limit) tiers.push({ value: 'premium', label: 'Premium' });
+    return tiers;
+  }, [isCompanyAdmin, capacity]);
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
   const getCompany = (id) => companies.find(c => c.id === id)?.company_name || null;
@@ -262,9 +302,11 @@ export default function UserListing() {
 
   // ── Modal handlers ───────────────────────────────────────────────────────────
   const openCreate = () => {
+    if (noLicenses) return;
     setModalMode('create');
     setSelectedUser(null);
-    setFormData({ username: '', email: '', role: defaultRole, company_id: '', password: '', state: '' });
+    const defaultTier = availableTiers[0]?.value || 'basic';
+    setFormData({ username: '', email: '', role: defaultRole, company_id: '', password: '', state: '', tier: defaultTier });
     setModalOpen(true);
   };
 
@@ -273,7 +315,7 @@ export default function UserListing() {
   const openEdit = (u) => {
     setModalMode('edit');
     setSelectedUser(u);
-    setFormData({ username: u.username, email: u.email, role: u.role, company_id: u.company || '', password: '', state: u.state || '' });
+    setFormData({ username: u.username, email: u.email, role: u.role, company_id: u.company || '', password: '', state: u.state || '', tier: u.tier || 'basic' });
     setModalOpen(true);
   };
 
@@ -293,6 +335,8 @@ export default function UserListing() {
       if (name === 'role') {
         if (value === 'executive') next.company_id = '';
         else next.state = '';
+        if (value !== 'company_user') next.tier = 'none';
+        else next.tier = availableTiers[0]?.value || 'basic';
       }
       return next;
     });
@@ -310,6 +354,7 @@ export default function UserListing() {
           role: formData.role,
           company_id: formData.company_id,
           ...(formData.role === 'executive' ? { state: formData.state } : {}),
+          ...(formData.role === 'company_user' ? { tier: formData.tier } : {}),
         });
       } else {
         const payload = {
@@ -319,6 +364,7 @@ export default function UserListing() {
           password: formData.password,
           company_id: formData.company_id,
           ...(formData.role === 'executive' ? { state: formData.state } : {}),
+          ...(formData.role === 'company_user' ? { tier: formData.tier } : {}),
         };
         response = await api.post(`${BASE_URL}/create_user`, payload);
       }
@@ -326,6 +372,7 @@ export default function UserListing() {
         window.alert(response.data.message || 'Operation successful!');
         closeModal();
         fetchUsers();
+        if (isCompanyAdmin) fetchCapacity();
       }
     } catch (err) {
       window.alert(err.response?.data?.message || err.response?.data?.error || 'Operation failed');
@@ -380,7 +427,7 @@ export default function UserListing() {
           </div>
           <div>
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">User Management</h1>
-            <p className="text-sm text-slate-500 mt-0.5">{stats.total} users across {companies.length} companies</p>
+            <p className="text-sm text-slate-500 mt-0.5">{stats.total} users{!isCompanyAdmin && ` across ${companies.length} companies`}</p>
           </div>
         </div>
 
@@ -397,15 +444,45 @@ export default function UserListing() {
 
         {/* Right: action buttons */}
         <div className="flex items-center gap-2">
-          <button
-            onClick={openCreate}
-            className="inline-flex items-center gap-1.5 h-9 px-4 text-sm rounded-lg font-medium bg-slate-900 hover:bg-slate-700 text-white cursor-pointer transition-colors shadow-sm"
-          >
-            <Plus size={14} />
-            Add User
-          </button>
+          {noLicenses ? (
+            <div className="flex items-center gap-1.5 h-9 px-4 text-sm rounded-lg font-medium bg-red-50 border border-red-200 text-red-600 cursor-not-allowed">
+              <ShieldAlert size={14} />
+              No User Licenses
+            </div>
+          ) : (
+            <button
+              onClick={openCreate}
+              className="inline-flex items-center gap-1.5 h-9 px-4 text-sm rounded-lg font-medium bg-slate-900 hover:bg-slate-700 text-white cursor-pointer transition-colors shadow-sm"
+            >
+              <Plus size={14} />
+              Add User
+            </button>
+          )}
         </div>
       </div>
+
+      {/* ── License capacity banner (company_admin) ─────────────────────────── */}
+      {isCompanyAdmin && capacity && (
+        <div className={`flex items-start gap-2 rounded-xl border px-3 py-2.5 text-xs mb-4 ${
+          noLicenses
+            ? 'bg-red-50 border-red-200 text-red-700'
+            : 'bg-slate-50 border-slate-200 text-slate-600'
+        }`}>
+          {noLicenses
+            ? <AlertCircle size={13} className="mt-0.5 shrink-0 text-red-500" />
+            : <Info size={13} className="mt-0.5 shrink-0 text-slate-400" />}
+          {noLicenses
+            ? <span>No user licenses allocated for this company. Contact the system administrator.</span>
+            : (
+              <span>
+                License capacity: <strong>{capacity.total?.used ?? 0}</strong> of <strong>{capacity.total?.limit ?? '—'}</strong> slots in use.
+                {capacity.tiers?.intermediate?.limit && <> Intermediate: {capacity.tiers.intermediate.limit} slots.</>}
+                {capacity.tiers?.premium?.limit && <> Premium: {capacity.tiers.premium.limit} slots.</>}
+              </span>
+            )
+          }
+        </div>
+      )}
 
       {/* ── Search + filter bar ─────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3.5 shadow-sm mb-4">
@@ -425,7 +502,7 @@ export default function UserListing() {
 
         {/* Role pills */}
         <div className="flex items-center gap-1 flex-wrap">
-          {['ALL', 'superadmin', 'company_admin', 'dealer_admin', 'executive', 'user'].map(r => (
+          {['ALL', 'superadmin', 'company_admin', 'dealer_admin', 'executive', 'company_user'].map(r => (
             <button
               key={r}
               onClick={() => setRoleFilter(r)}
@@ -461,7 +538,7 @@ export default function UserListing() {
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80">
                 <Th onClick={() => toggleSort('username')}>User <SortIcon field="username" /></Th>
-                <Th onClick={() => toggleSort('role')}>Role <SortIcon field="role" /></Th>
+                <Th onClick={() => toggleSort('role')}>Role</Th>
                 <Th>Company</Th>
                 <Th>Status</Th>
                 <Th onClick={() => toggleSort('last_login')}>Last Login <SortIcon field="last_login" /></Th>
@@ -506,8 +583,13 @@ export default function UserListing() {
                       </div>
                     </div>
                   </td>
-                  {/* Role */}
-                  <td className="px-4 py-3"><RoleBadge role={user.role} /></td>
+                  {/* Role + Tier */}
+                  <td className="px-4 py-3">
+                    <div className="flex flex-col gap-0.5">
+                      <RoleBadge role={user.role} />
+                      <TierBadge tier={user.tier} />
+                    </div>
+                  </td>
                   {/* Company */}
                   <td className="px-4 py-3">
                     {getCompany(user.company) ? (
@@ -605,6 +687,7 @@ export default function UserListing() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className="text-lg font-bold text-slate-900">{selectedUser.username}</p>
                   <RoleBadge role={selectedUser.role} />
+                  <TierBadge tier={selectedUser.tier} />
                 </div>
                 <p className="text-sm text-slate-500 mt-0.5">{selectedUser.email}</p>
               </div>
@@ -618,8 +701,9 @@ export default function UserListing() {
               {[
                 { label: 'User ID', value: `#${selectedUser.id}` },
                 { label: 'Status', value: selectedUser.is_active ? 'Active' : 'Inactive' },
-                { label: 'Company', value: getCompany(selectedUser.company) || 'Not assigned' },
+                ...(!isCompanyAdmin ? [{ label: 'Company', value: getCompany(selectedUser.company) || 'Not assigned' }] : []),
                 { label: 'Role', value: ROLE_CONFIG[selectedUser.role]?.label || selectedUser.role },
+                ...(selectedUser.role === 'company_user' && selectedUser.tier && selectedUser.tier !== 'none' ? [{ label: 'Tier', value: TIER_CONFIG[selectedUser.tier]?.label || selectedUser.tier }] : []),
                 ...(selectedUser.role === 'executive' ? [{ label: 'State', value: selectedUser.state || '—' }] : []),
                 { label: 'Joined', value: selectedUser.date_joined ? new Date(selectedUser.date_joined).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—' },
                 { label: 'Last Login', value: timeAgo(selectedUser.last_login) },
@@ -701,21 +785,44 @@ export default function UserListing() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="text-sm font-medium text-slate-700 flex items-center gap-1">
-                Role <span className="text-rose-500">*</span>
-              </label>
-              <select
-                name="role"
-                value={formData.role}
-                onChange={handleInputChange}
-                required
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400"
-              >
-                {allowedRoles.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-              </select>
-            </div>
-            {formData.role === 'executive' ? (
+            {/* Role selector — hidden for company_admin (always company_user) */}
+            {!isCompanyAdmin && (
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-slate-700 flex items-center gap-1">
+                  Role <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  name="role"
+                  value={formData.role}
+                  onChange={handleInputChange}
+                  required
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400"
+                >
+                  {allowedRoles.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+              </div>
+            )}
+
+            {/* Tier selector — company_user only */}
+            {(formData.role === 'company_user' || isCompanyAdmin) && (
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-slate-700 flex items-center gap-1">
+                  Tier <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  name="tier"
+                  value={formData.tier}
+                  onChange={handleInputChange}
+                  required
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400"
+                >
+                  {availableTiers.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              </div>
+            )}
+
+            {/* State — executive only */}
+            {formData.role === 'executive' && (
               <div className="space-y-1">
                 <label className="text-sm font-medium text-slate-700 flex items-center gap-1">
                   State <span className="text-rose-500">*</span>
@@ -731,19 +838,20 @@ export default function UserListing() {
                   {STATE_NAMES.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
-            ) : (
+            )}
+
+            {/* Company — not for executive, not for company_admin (scoped) */}
+            {formData.role !== 'executive' && !isCompanyAdmin && (
               <div className="space-y-1">
                 <label className="text-sm font-medium text-slate-700 flex items-center gap-1">
-                  Company
-                  {!isCompanyAdmin && <span className="text-rose-500">*</span>}
+                  Company <span className="text-rose-500">*</span>
                 </label>
                 <select
                   name="company_id"
                   value={formData.company_id}
                   onChange={handleInputChange}
-                  required={!isCompanyAdmin}
-                  disabled={isCompanyAdmin}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:bg-slate-50 disabled:cursor-not-allowed"
+                  required
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400"
                 >
                   <option value="">Select company…</option>
                   {companies.map(c => <option key={c.id} value={c.id}>{c.company_name}</option>)}
