@@ -41,6 +41,8 @@ import AuditLogPage from './pages/tools/AuditLogPage'
 import AboutPage from './pages/tools/AboutPage'
 import GlobalSettingsPage from './pages/tools/GlobalSettingsPage'
 
+import SessionsPage from './pages/tools/SessionsPage'
+
 import ForgotPassword from './pages/auth/ForgotPassword'
 import ResetPassword from './pages/auth/ResetPassword'
 
@@ -192,6 +194,10 @@ const router = createBrowserRouter([
           {
             path: 'global-settings',
             element: <GlobalSettingsPage />
+          },
+          {
+            path: 'sessions',
+            element: <SessionsPage />
           },
         ]
       }

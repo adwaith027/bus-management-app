@@ -9,7 +9,7 @@ import {
   Coins, Users2,
   Route, Truck, CalendarCog, Settings,
   Ticket, CalendarRange, IndianRupee, Cpu, MonitorDown, BusFront,
-  FileText, Settings2, Info,
+  FileText, Settings2, Info, Shield,
 } from "lucide-react";
 import api, { BASE_URL } from "../assets/js/axiosConfig";
 import cacheManager from "../assets/js/reportCache";
@@ -369,6 +369,7 @@ export default function Sidebar() {
                 </DropdownSection>
 
                 <NavItem to="/dashboard/settlements" icon={Receipt} label="Settlements" isCollapsed={isCollapsed} onClose={close} />
+                <NavItem to="/dashboard/sessions"    icon={Shield}  label="Sessions & Devices" isCollapsed={isCollapsed} onClose={close} />
               </>
             )}
 
