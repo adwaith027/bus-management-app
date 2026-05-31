@@ -15,9 +15,11 @@ const ROLE_PATHS = {
     '/dashboard/failed-payloads',
     '/dashboard/audit-logs',
     '/dashboard/global-settings',
+    '/dashboard/admin-sessions',
     '/dashboard/about',
   ],
   company_admin: [
+    '/dashboard/users',
     '/dashboard/depots',
     '/dashboard/master-data',
     '/dashboard/device-download',
@@ -25,6 +27,7 @@ const ROLE_PATHS = {
     '/dashboard/trip-data',
     '/dashboard/ticket-data',
     '/dashboard/settlements',
+    '/dashboard/sessions',
     '/dashboard/about',
   ],
   dealer_admin:  [

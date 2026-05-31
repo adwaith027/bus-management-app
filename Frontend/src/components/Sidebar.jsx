@@ -11,7 +11,7 @@ import {
   Ticket, CalendarRange, IndianRupee, Cpu, MonitorDown, BusFront,
   FileText, Settings2, Info, Shield,
 } from "lucide-react";
-import api, { BASE_URL } from "../assets/js/axiosConfig";
+import api, { BASE_URL, cancelAllPendingRequests } from "../assets/js/axiosConfig";
 import cacheManager from "../assets/js/reportCache";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -155,7 +155,8 @@ export default function Sidebar() {
   const username = user?.username || user?.name || "User";
 
   const handleLogout = async () => {
-    try { await api.post(`${BASE_URL}/logout`); } catch {}
+    cancelAllPendingRequests();
+    try { await api.post(`${BASE_URL}/logout`, undefined, { timeout: 0 }); } catch {}
     finally {
       cacheManager.invalidateAll();
       localStorage.removeItem("user");
@@ -307,6 +308,7 @@ export default function Sidebar() {
                 <NavItem to="/dashboard/failed-payloads"   icon={AlertTriangle} label="Failed Payloads"  isCollapsed={isCollapsed} onClose={close} />
                 <SectionLabel label="Settings" isCollapsed={isCollapsed} />
                 <NavItem to="/dashboard/audit-logs"       icon={FileText}     label="Audit Logs"      isCollapsed={isCollapsed} onClose={close} />
+                <NavItem to="/dashboard/admin-sessions"   icon={Shield}       label="Admin Sessions"  isCollapsed={isCollapsed} onClose={close} />
                 <NavItem to="/dashboard/global-settings"  icon={Settings2}    label="Global Settings" isCollapsed={isCollapsed} onClose={close} />
               </>
             )}
@@ -340,36 +342,38 @@ export default function Sidebar() {
             {/* Company Admin */}
             {role === "company_admin" && (
               <>
-                <SectionLabel label="Operations" isCollapsed={isCollapsed} />
+                <SectionLabel label="Setup" isCollapsed={isCollapsed} />
                 <NavItem to="/dashboard/depots" icon={Warehouse} label="Depots" isCollapsed={isCollapsed} onClose={close} />
-
                 <DropdownSection
                   icon={Database} label="Master Data"
                   isCollapsed={isCollapsed} isOpen={masterDataOpen}
                   onToggle={() => setMasterDataOpen(p => !p)}
                 >
-                  <SubLink to="/dashboard/master-data/currencies"       icon={Coins}           label="Currencies"       onClose={close} />
-                  <SubLink to="/dashboard/master-data/employees"         icon={Users2}          label="Employee"         onClose={close} />
-                  <SubLink to="/dashboard/master-data/vehicles"         icon={Truck}           label="Vehicles"         onClose={close} />
-                  <SubLink to="/dashboard/master-data/routes"           icon={Route}           label="Routes"           onClose={close} />
+                  <SubLink to="/dashboard/master-data/currencies"       icon={Coins}       label="Currencies"       onClose={close} />
+                  <SubLink to="/dashboard/master-data/employees"        icon={Users2}      label="Employee"         onClose={close} />
+                  <SubLink to="/dashboard/master-data/vehicles"         icon={Truck}       label="Vehicles"         onClose={close} />
+                  <SubLink to="/dashboard/master-data/routes"           icon={Route}       label="Routes"           onClose={close} />
                   <SubLink to="/dashboard/master-data/crew-assignments" icon={CalendarCog} label="Crew Assignments" onClose={close} />
                   <SubLink to="/dashboard/master-data/expense-master"   icon={IndianRupee} label="Expense Master"   onClose={close} />
-                  <SubLink to="/dashboard/master-data/settings"         icon={Settings}        label="Settings"         onClose={close} />
+                  <SubLink to="/dashboard/master-data/settings"         icon={Settings}    label="Settings"         onClose={close} />
                 </DropdownSection>
+                <NavItem to="/dashboard/device-download" icon={MonitorDown} label="Device Download" isCollapsed={isCollapsed} onClose={close} />
 
-                <NavItem to="/dashboard/device-download"          icon={MonitorDown} label="Device Download" isCollapsed={isCollapsed} onClose={close} />
+                <SectionLabel label="Reports & Finance" isCollapsed={isCollapsed} />
                 <DropdownSection
                   icon={BarChart2} label="Reports"
                   isCollapsed={isCollapsed} isOpen={reportsOpen}
                   onToggle={() => setReportsOpen(p => !p)}
                 >
-                  <SubLink to="/dashboard/schedule-data" icon={CalendarRange}  label="Schedule Data" onClose={close} />
-                  <SubLink to="/dashboard/trip-data"     icon={BusFront}       label="Trip Data"     onClose={close} />
-                  <SubLink to="/dashboard/ticket-data"   icon={Ticket}         label="Ticket Data"   onClose={close} />
+                  <SubLink to="/dashboard/schedule-data" icon={CalendarRange} label="Schedule Data" onClose={close} />
+                  <SubLink to="/dashboard/trip-data"     icon={BusFront}      label="Trip Data"     onClose={close} />
+                  <SubLink to="/dashboard/ticket-data"   icon={Ticket}        label="Ticket Data"   onClose={close} />
                 </DropdownSection>
-
                 <NavItem to="/dashboard/settlements" icon={Receipt} label="Settlements" isCollapsed={isCollapsed} onClose={close} />
-                <NavItem to="/dashboard/sessions"    icon={Shield}  label="Sessions & Devices" isCollapsed={isCollapsed} onClose={close} />
+
+                <SectionLabel label="Administration" isCollapsed={isCollapsed} />
+                <NavItem to="/dashboard/users"    icon={Users}  label="Users"              isCollapsed={isCollapsed} onClose={close} />
+                <NavItem to="/dashboard/sessions" icon={Shield} label="Sessions & Devices" isCollapsed={isCollapsed} onClose={close} />
               </>
             )}
 

@@ -42,6 +42,7 @@ import AboutPage from './pages/tools/AboutPage'
 import GlobalSettingsPage from './pages/tools/GlobalSettingsPage'
 
 import SessionsPage from './pages/tools/SessionsPage'
+import AdminSessionsPage from './pages/tools/AdminSessionsPage'
 
 import ForgotPassword from './pages/auth/ForgotPassword'
 import ResetPassword from './pages/auth/ResetPassword'
@@ -198,6 +199,10 @@ const router = createBrowserRouter([
           {
             path: 'sessions',
             element: <SessionsPage />
+          },
+          {
+            path: 'admin-sessions',
+            element: <AdminSessionsPage />
           },
         ]
       }

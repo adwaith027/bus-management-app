@@ -83,8 +83,8 @@ export default function SessionsPage() {
   const handleApprove = async (approvalId, username) => {
     setActioning(p => ({ ...p, [`a-${approvalId}`]: true }));
     try {
-      await api.post(`${BASE_URL}/device-approvals/${approvalId}/approve`);
-      window.alert(`Device approved for ${username}. They can now log in.`);
+      const res = await api.post(`${BASE_URL}/device-approvals/${approvalId}/approve`);
+      window.alert(res.data?.message || `Device approved for ${username}. They can now log in.`);
       fetchApprovals();
     } catch (err) {
       window.alert(err.response?.data?.error || 'Approval failed.');
@@ -206,14 +206,18 @@ export default function SessionsPage() {
                         )}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <button
-                          onClick={() => handleForceLogout(s.session_uid, s.username)}
-                          disabled={forcingOut[s.session_uid]}
-                          className="inline-flex items-center gap-1 text-[11px] font-medium text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 border border-red-200 px-2.5 py-1 rounded-md transition-colors cursor-pointer disabled:opacity-50">
-                          {forcingOut[s.session_uid]
-                            ? <><svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> …</>
-                            : <><LogOut size={11} /> Force Logout</>}
-                        </button>
+                        {s.is_current_session ? (
+                          <span className="text-[11px] text-slate-400 italic">Current session</span>
+                        ) : (
+                          <button
+                            onClick={() => handleForceLogout(s.session_uid, s.username)}
+                            disabled={forcingOut[s.session_uid]}
+                            className="inline-flex items-center gap-1 text-[11px] font-medium text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 border border-red-200 px-2.5 py-1 rounded-md transition-colors cursor-pointer disabled:opacity-50">
+                            {forcingOut[s.session_uid]
+                              ? <><svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> …</>
+                              : <><LogOut size={11} /> Force Logout</>}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

@@ -13,14 +13,19 @@ import logging
 from datetime import timedelta
 
 from django.utils import timezone
+from django.conf import settings as django_settings
+from django.core.cache import cache
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
 
 from ...models import UserSession, UserApprovedDevice, DevicePendingApproval, Company
-from .auth import get_user_from_cookie, SESSION_INACTIVITY_HOURS
+from .auth import get_user_from_cookie, _get_session_uid_from_request, SESSION_INACTIVITY_HOURS
+
+_ACCESS_TOKEN_TTL = int(django_settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME'].total_seconds())
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +35,23 @@ _STALE_THRESHOLD_HOURS = SESSION_INACTIVITY_HOURS
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _kill_session(session):
-    """Mark a UserSession inactive and blacklist its refresh token if possible."""
+    """
+    Terminate a session with three layers:
+    1. DB: is_active=False — frees the license slot immediately
+    2. Redis: revocation key — 401 on the user's very next request
+    3. simplejwt blacklist: refresh token permanently dead
+    """
     session.is_active = False
     session.save(update_fields=['is_active'])
+
+    cache.set(f'busmgmt:revoked:{session.session_uid}', 1, timeout=_ACCESS_TOKEN_TTL)
+
+    if session.refresh_jti:
+        try:
+            outstanding = OutstandingToken.objects.get(jti=session.refresh_jti)
+            BlacklistedToken.objects.get_or_create(token=outstanding)
+        except OutstandingToken.DoesNotExist:
+            logger.warning(f'OutstandingToken not found for jti={session.refresh_jti}')
 
 
 def _tier_slot_available(company, user):
@@ -81,6 +100,7 @@ def list_sessions(request):
         return Response({'error': 'Company admin access required.'}, status=status.HTTP_403_FORBIDDEN)
 
     stale_cutoff = timezone.now() - timedelta(hours=_STALE_THRESHOLD_HOURS)
+    requester_session_uid = _get_session_uid_from_request(request)
 
     sessions = UserSession.objects.filter(
         user__company=requester.company,
@@ -91,15 +111,16 @@ def list_sessions(request):
     for s in sessions:
         is_stale = s.last_seen_at and s.last_seen_at < stale_cutoff
         data.append({
-            'session_uid':   str(s.session_uid),
-            'user_id':       s.user_id,
-            'username':      s.user.username,
-            'tier':          s.user.tier,
-            'device_type':   s.device_type,
-            'device_uuid':   s.device_uuid or None,
-            'login_time':    s.created_at,
-            'last_active':   s.last_seen_at,
-            'is_stale':      bool(is_stale),
+            'session_uid':        str(s.session_uid),
+            'user_id':            s.user_id,
+            'username':           s.user.username,
+            'tier':               s.user.tier,
+            'device_type':        s.device_type,
+            'device_uuid':        s.device_uuid or None,
+            'login_time':         s.created_at,
+            'last_active':        s.last_seen_at,
+            'is_stale':           bool(is_stale),
+            'is_current_session': str(s.session_uid) == requester_session_uid,
         })
 
     return Response({'message': 'Success', 'data': data}, status=status.HTTP_200_OK)
@@ -127,6 +148,9 @@ def force_logout_session(request, session_uid):
     if session.user.company_id != requester.company_id:
         return Response({'error': 'Not authorized to manage this session.'}, status=status.HTTP_403_FORBIDDEN)
 
+    if session.user_id == requester.id:
+        return Response({'error': 'Cannot force logout your own session.'}, status=status.HTTP_400_BAD_REQUEST)
+
     _kill_session(session)
     logger.info(
         f"company_admin '{requester.username}' force-logged-out "
@@ -137,6 +161,82 @@ def force_logout_session(request, session_uid):
         status=status.HTTP_200_OK,
     )
 
+
+# ── Superadmin session management ─────────────────────────────────────────────
+
+_ADMIN_ROLES = ('superadmin', 'company_admin', 'dealer_admin', 'executive', 'production')
+
+
+@api_view(['GET'])
+def list_all_sessions(request):
+    """
+    Superadmin: list active sessions for all admin-level accounts (excludes company_user).
+    company_admin manages their own company_users via /sessions.
+    """
+    requester = get_user_from_cookie(request)
+    if not requester:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    if requester.role != 'superadmin':
+        return Response({'error': 'Superadmin access required.'}, status=status.HTTP_403_FORBIDDEN)
+
+    stale_cutoff = timezone.now() - timedelta(hours=_STALE_THRESHOLD_HOURS)
+    requester_session_uid = _get_session_uid_from_request(request)
+
+    sessions = UserSession.objects.filter(
+        is_active=True,
+        user__role__in=_ADMIN_ROLES,
+    ).select_related('user', 'user__company').order_by('-created_at')
+
+    data = []
+    for s in sessions:
+        is_stale = s.last_seen_at and s.last_seen_at < stale_cutoff
+        data.append({
+            'session_uid':        str(s.session_uid),
+            'user_id':            s.user_id,
+            'username':           s.user.username,
+            'role':               s.user.role,
+            'company_name':       s.user.company.company_name if s.user.company else None,
+            'device_type':        s.device_type,
+            'device_uuid':        s.device_uuid or None,
+            'login_time':         s.created_at,
+            'last_active':        s.last_seen_at,
+            'is_stale':           bool(is_stale),
+            'is_current_session': str(s.session_uid) == requester_session_uid,
+        })
+
+    return Response({'message': 'Success', 'data': data}, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+def force_logout_session_admin(request, session_uid):
+    """
+    Superadmin: force-logout any admin-level session.
+    """
+    requester = get_user_from_cookie(request)
+    if not requester:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    if requester.role != 'superadmin':
+        return Response({'error': 'Superadmin access required.'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        session = UserSession.objects.select_related('user').get(
+            session_uid=session_uid, is_active=True,
+        )
+    except UserSession.DoesNotExist:
+        return Response({'error': 'Session not found or already inactive.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if str(session.session_uid) == _get_session_uid_from_request(request):
+        return Response({'error': 'Cannot force logout your own session.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    _kill_session(session)
+    logger.info(
+        f"superadmin '{requester.username}' force-logged-out "
+        f"session {session_uid} for user '{session.user.username}'"
+    )
+    return Response(
+        {'message': f"Session for '{session.user.username}' has been terminated."},
+        status=status.HTTP_200_OK,
+    )
 
 # ── Device approvals ──────────────────────────────────────────────────────────
 
@@ -218,12 +318,24 @@ def approve_device(request, approval_id):
     approval.reviewed_at = timezone.now()
     approval.save(update_fields=['status', 'reviewed_by', 'reviewed_at'])
 
+    has_active_session = UserSession.objects.filter(
+        user=approval.user, is_active=True,
+    ).exists()
+
     logger.info(
         f"company_admin '{requester.username}' approved device "
         f"{approval.device_uuid[:16]}… for user '{approval.user.username}'"
     )
     return Response(
-        {'message': f"Device approved for '{approval.user.username}'. They can now log in."},
+        {
+            'message': (
+                f"Device approved for '{approval.user.username}'. "
+                "They are currently logged in elsewhere and will need to log out first."
+                if has_active_session else
+                f"Device approved for '{approval.user.username}'. They can now log in."
+            ),
+            'has_active_session': has_active_session,
+        },
         status=status.HTTP_200_OK,
     )
 
