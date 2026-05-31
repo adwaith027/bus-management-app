@@ -216,12 +216,22 @@ export default function DeviceRegistry() {
   };
 
   const handleDeactivate = async (device) => {
-    if (!window.confirm(`Deactivate device ${device.serial_number}?`)) return;
+    if (!window.confirm(`Deactivate device ${device.serial_number}? It will be removed from stock.`)) return;
     try {
       await api.post(`${BASE_URL}/etm-devices/${device.id}/deactivate`);
       fetchAll();
     } catch (err) {
       alert(err?.response?.data?.error || "Deactivate failed");
+    }
+  };
+
+  const handleReactivate = async (device) => {
+    if (!window.confirm(`Reactivate device ${device.serial_number}? It will be returned to Stock.`)) return;
+    try {
+      await api.post(`${BASE_URL}/etm-devices/${device.id}/reactivate`);
+      fetchAll();
+    } catch (err) {
+      alert(err?.response?.data?.error || "Reactivate failed");
     }
   };
 
@@ -427,13 +437,22 @@ export default function DeviceRegistry() {
                           Allocate
                         </button>
                       )}
-                      {/* Superadmin can deactivate any active device */}
-                      {isSuperadmin && device.allocation_status !== "Inactive" && (
+                      {/* Superadmin can deactivate only unassigned (Stock) devices */}
+                      {isSuperadmin && device.allocation_status === "Stock" && (
                         <button
                           onClick={() => handleDeactivate(device)}
                           className="px-2.5 py-1 rounded-lg text-xs font-medium bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 transition-colors"
                         >
                           Deactivate
+                        </button>
+                      )}
+                      {/* Superadmin can reactivate Inactive devices back to Stock */}
+                      {isSuperadmin && device.allocation_status === "Inactive" && (
+                        <button
+                          onClick={() => handleReactivate(device)}
+                          className="px-2.5 py-1 rounded-lg text-xs font-medium bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 transition-colors"
+                        >
+                          Reactivate
                         </button>
                       )}
                     </div>

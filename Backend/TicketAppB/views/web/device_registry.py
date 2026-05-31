@@ -365,7 +365,7 @@ def allocate_to_company(request, device_id):
 
 @api_view(['POST'])
 def deactivate_device(request, device_id):
-    """Mark a device Inactive. Superadmin only."""
+    """Mark a Stock device Inactive. Only Stock devices (unassigned) can be deactivated. Superadmin only."""
     user = get_user_from_cookie(request)
     if not user:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -376,6 +376,12 @@ def deactivate_device(request, device_id):
         device = ETMDevice.objects.get(pk=device_id)
     except ETMDevice.DoesNotExist:
         return Response({'error': 'Device not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if device.allocation_status != ETMDevice.AllocationStatus.STOCK:
+        return Response(
+            {'error': 'Only unassigned (Stock) devices can be deactivated. Unassign the device first.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     device.allocation_status = ETMDevice.AllocationStatus.INACTIVE
     device.save(update_fields=['allocation_status', 'updated_at'])
@@ -388,6 +394,39 @@ def deactivate_device(request, device_id):
     )
 
     return Response({'message': 'Device deactivated', 'data': ETMDeviceSerializer(device).data}, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+def reactivate_device(request, device_id):
+    """Restore an Inactive device to Stock. Superadmin only."""
+    user = get_user_from_cookie(request)
+    if not user:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    if not _is_superadmin(user):
+        return Response({'error': 'Superadmin only'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        device = ETMDevice.objects.get(pk=device_id)
+    except ETMDevice.DoesNotExist:
+        return Response({'error': 'Device not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if device.allocation_status != ETMDevice.AllocationStatus.INACTIVE:
+        return Response(
+            {'error': 'Only inactive devices can be reactivated.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    device.allocation_status = ETMDevice.AllocationStatus.STOCK
+    device.save(update_fields=['allocation_status', 'updated_at'])
+
+    log_action(
+        actor=user, action=AuditLog.ActionType.ACTIVATE,
+        target_model='ETMDevice', target_id=device.pk,
+        target_display=device.serial_number,
+        ip_address=request.META.get('REMOTE_ADDR'),
+    )
+
+    return Response({'message': 'Device reactivated and returned to stock.', 'data': ETMDeviceSerializer(device).data}, status=status.HTTP_200_OK)
 
 
 @api_view(['POST'])
