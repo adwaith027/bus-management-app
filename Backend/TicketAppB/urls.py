@@ -44,11 +44,13 @@ urlpatterns = [
     path('change_user_password/<int:user_id>',   user_views.change_user_password,  name='change_user_password'),
 
     # session management + device approvals (company_admin)
-    path('sessions',                                   session_views.list_sessions,          name='list_sessions'),
-    path('sessions/<str:session_uid>/force-logout',    session_views.force_logout_session,   name='force_logout_session'),
-    path('device-approvals',                           session_views.list_pending_approvals, name='list_pending_approvals'),
-    path('device-approvals/<int:approval_id>/approve', session_views.approve_device,         name='approve_device'),
-    path('device-approvals/<int:approval_id>/reject',  session_views.reject_device,          name='reject_device'),
+    path('sessions',                                   session_views.list_sessions,             name='list_sessions'),
+    path('sessions/<str:session_uid>/force-logout',    session_views.force_logout_session,      name='force_logout_session'),
+    path('device-approvals',                           session_views.list_pending_approvals,    name='list_pending_approvals'),
+    path('device-approvals/<int:approval_id>/approve', session_views.approve_device,            name='approve_device'),
+    path('device-approvals/<int:approval_id>/reject',  session_views.reject_device,             name='reject_device'),
+    path('admin/sessions',                             session_views.list_all_sessions,         name='list_all_sessions'),
+    path('admin/sessions/<str:session_uid>/force-logout', session_views.force_logout_session_admin, name='force_logout_session_admin'),
 
     # company data
     path('customer-data', company_views.all_company_data, name='company_data'),
@@ -197,6 +199,7 @@ urlpatterns = [
     path('etm-devices/bulk-assign-company',            device_registry_views.bulk_assign_company,        name='etm_bulk_company'),
     path('etm-devices/<int:device_id>/allocate',        device_registry_views.allocate_to_company,  name='etm_allocate'),
     path('etm-devices/<int:device_id>/deactivate',     device_registry_views.deactivate_device,   name='etm_deactivate'),
+    path('etm-devices/<int:device_id>/reactivate',    device_registry_views.reactivate_device,   name='etm_reactivate'),
     path('etm-devices/<int:device_id>/set-palmtec-id', device_registry_views.set_palmtec_id,      name='etm_set_palmtec_id'),
 
     # Palmtec device data APIs (server → APK → USB → device)
@@ -216,16 +219,16 @@ urlpatterns = [
     path('device/currency',    palmtec_views.get_currency_file),
 
     # android apk data apis
+    path('apk/buses', apk_views.apk_bus_list, name='apk_bus_list'),
     path('apk/dashboard', apk_views.apk_dashboard, name='apk_dashboard'),
+    path('apk/bus-trips', apk_views.apk_bus_trips, name='apk_bus_trips'),
+    path('apk/ticket-details', apk_views.apk_ticket_details, name='apk_ticket_details'),
+    path('apk/passenger-info', apk_views.apk_passenger_info, name='apk_passenger_info'),
     path('reports/duty', apk_views.duty_report, name='duty_report'),
     path('reports/bus-summary', apk_views.bus_summary_report, name='bus_summary_report'),
     path('reports/payment-type', apk_views.payment_type_report, name='payment_type_report'),
     path('reports/farewise', apk_views.farewise_report, name='farewise_report'),
-    path('reports/passenger-info', apk_views.passenger_info, name='passenger_info'),
-    path('reports/trip-details', apk_views.trip_details, name='trip_details'),
-    path('reports/ticket-details', apk_views.ticket_details, name='ticket_details'),
     path('reports/expense', apk_views.expense_report, name='expense_report'),
-    path('reports/stage-wise', apk_views.stage_wise_report, name='stage_wise_report'),
 
 
     # APK file uploads
