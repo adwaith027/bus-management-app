@@ -237,6 +237,10 @@ class UserSession(models.Model):
     # MAC address / hardware UUID from APK login payload. Stored for future FCM use.
     device_uuid = models.CharField(max_length=255, null=True, blank=True)
 
+    # JTI of the refresh token issued at login. Stored so force-logout can
+    # blacklist the token via simplejwt's OutstandingToken table.
+    refresh_jti = models.CharField(max_length=255, null=True, blank=True, db_index=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -34,6 +34,7 @@ from rest_framework_simplejwt.exceptions import TokenError
 from django.contrib.auth import get_user_model, authenticate
 from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
 from django.conf import settings
+from django.core.cache import cache
 
 from ...models import Company, UserSession, AuditLog, UserApprovedDevice, DevicePendingApproval
 from .audit_logs import log_action
@@ -135,39 +136,19 @@ def _user_payload(user, company):
     }
 
 
-def _build_web_token_response(user, company, access_token, refresh_token, session_uid):
-    """Web path: tokens + session_uid delivered as HttpOnly cookies."""
+def _build_token_response(user, company, session_uid):
+    """Issue tokens as HttpOnly cookies and store refresh jti for force-logout blacklisting."""
+    refresh, access_token, refresh_token = _make_tokens(user, session_uid)
+    UserSession.objects.filter(session_uid=session_uid).update(refresh_jti=str(refresh['jti']))
     response = Response({
         'message': 'Login Successful',
         'user': _user_payload(user, company),
     })
-    cookie_kwargs = dict(
-        httponly=True,
-        secure=not settings.DEBUG,
-        samesite='Lax',
-        path='/',
-    )
-    response.set_cookie('access_token',  access_token,  max_age=1800,   **cookie_kwargs)
+    cookie_kwargs = dict(httponly=True, secure=not settings.DEBUG, samesite='Lax', path='/')
+    response.set_cookie('access_token',  access_token,  max_age=900,    **cookie_kwargs)
     response.set_cookie('refresh_token', refresh_token, max_age=604800, **cookie_kwargs)
     response.set_cookie('session_uid',   session_uid,   max_age=604800, **cookie_kwargs)
     return response
-
-
-def _build_apk_token_response(user, company, access_token, refresh_token, session_uid):
-    """APK path: tokens + session_uid in response body."""
-    return Response({
-        'message':       'Login Successful',
-        'user':          _user_payload(user, company),
-        'access_token':  access_token,
-        'refresh_token': refresh_token,
-        'session_uid':   session_uid,
-    })
-
-
-def _build_token_response(user, company, session_uid, request):
-    """Issue tokens as HttpOnly cookies (same path for web and APK)."""
-    _, access_token, refresh_token = _make_tokens(user, session_uid)
-    return _build_web_token_response(user, company, access_token, refresh_token, session_uid)
 
 
 def _build_logout_response(message):
@@ -190,6 +171,9 @@ def get_user_from_cookie(request):
         return None
     try:
         token = AccessToken(access_token)
+        session_uid = token.get('session_uid')
+        if session_uid and cache.get(f'busmgmt:revoked:{session_uid}'):
+            return None
         return User.objects.get(id=token['user_id'])
     except (TokenError, User.DoesNotExist):
         return None
@@ -246,7 +230,7 @@ def _enforce_single_session(user):
             {
                 'error': (
                     'Active session detected on another device. '
-                    'Log out from there first, or contact your company admin '
+                    'Log out from there first, or contact an admin '
                     'if this was not you.'
                 ),
                 'error_code': 'ALREADY_LOGGED_IN',
@@ -383,10 +367,10 @@ def login_view(request):
 
     is_apk = _is_apk_request(request)
 
-    # ── 3: company_admin cannot log in via APK ────────────────────────────────
-    if user.role == 'company_admin' and is_apk:
+    # ── 3: web-only roles cannot log in via APK ──────────────────────────────
+    if user.role in ('superadmin', 'company_admin') and is_apk:
         return Response(
-            {'error': 'Company admin accounts can only log in via the web dashboard.'},
+            {'error': 'This account can only log in via the web dashboard.'},
             status=status.HTTP_403_FORBIDDEN,
         )
 
@@ -468,7 +452,7 @@ def login_view(request):
     user.save(update_fields=['last_login'])
 
     # ── 9: Issue tokens as cookies ────────────────────────────────────────────
-    response = _build_token_response(user, company, session_uid, request)
+    response = _build_token_response(user, company, session_uid)
 
     # ── 10: Login notifications ───────────────────────────────────────────────
     try:
@@ -494,9 +478,7 @@ def login_view(request):
 def logout_view(request):
     """
     Logout — mark the UserSession inactive and clear tokens.
-
-    Web: session_uid read from JWT cookie claim.
-    APK: session_uid read from JWT Bearer claim (or body fallback).
+    Both web and APK use cookie-based auth; session_uid read from access_token cookie.
     """
     logout_user = get_user_from_request(request)
 
@@ -548,6 +530,8 @@ def refresh_token_view(request):
         session_uid = refresh.get('session_uid') or session_uid_hint
 
         if session_uid:
+            if not UserSession.objects.filter(session_uid=session_uid, is_active=True).exists():
+                return Response({'error': 'Session has been terminated.'}, status=status.HTTP_401_UNAUTHORIZED)
             UserSession.objects.filter(
                 session_uid=session_uid, is_active=True,
             ).update(last_seen_at=timezone.now())
@@ -557,7 +541,7 @@ def refresh_token_view(request):
         response.set_cookie(
             key='access_token', value=new_access_token,
             httponly=True, secure=not settings.DEBUG,
-            samesite='Lax', max_age=1800, path='/',
+            samesite='Lax', max_age=900, path='/',
         )
         return response
 
