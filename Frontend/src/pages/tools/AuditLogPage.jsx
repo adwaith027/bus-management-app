@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
-  RefreshCw, Eye, Search, X,
+  RefreshCw, Search, X, Eye,
   ChevronLeft, ChevronRight, FileText,
 } from 'lucide-react';
 
@@ -13,7 +13,7 @@ import {
 function getActionStyle(action) {
   if (!action) return { bg: 'bg-slate-100', text: 'text-slate-600', border: 'border-slate-200' };
   const a = action.toLowerCase();
-  if (a.includes('create') || a.includes('add'))
+  if (a.includes('create') || a.includes('add') || a === 'activate')
     return { bg: 'bg-green-50', text: 'text-green-700', border: 'border-green-200' };
   if (a.includes('update') || a.includes('edit') || a.includes('change'))
     return { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200' };
@@ -323,9 +323,10 @@ export default function AuditLogPage() {
                             {log.details ? (
                               <button
                                 onClick={() => setSelected(log)}
-                                className="h-7 w-14 rounded-lg text-xs font-medium text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
+                                className="inline-flex items-center justify-center h-7 w-7 rounded-lg text-slate-400 hover:text-slate-800 hover:bg-slate-100 transition-colors"
+                                title="View details"
                               >
-                                View
+                                <Eye size={14} />
                               </button>
                             ) : (
                               <span className="text-slate-300 text-xs">—</span>

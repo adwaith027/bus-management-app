@@ -963,26 +963,26 @@ export default function DealerListing() {
 
             {/* Step 3: User Account */}
             <SectionCard step={3} active={sec2} complete={sec3} title="Dealer User Account" subtitle="Login credentials for the dealer admin.">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 gap-4 md:gap-5 md:[grid-template-columns:160px_1fr_1fr]">
                 <Field label="Username" required>
                   <div className="flex gap-0">
                     <span className="inline-flex items-center px-3 text-sm text-slate-500 bg-slate-50 border border-r-0 border-slate-300 rounded-l-lg"><User size={13} /></span>
                     <input value={form.user_username} onChange={e => set('user_username', e.target.value.toLowerCase())} placeholder="ap-ntc-01"
-                      className="flex-1 px-3 py-2 border border-slate-300 rounded-r-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
+                      className="flex-1 min-w-0 px-3 py-2 border border-slate-300 rounded-r-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
                   </div>
                 </Field>
                 <Field label="Login Email" required>
                   <div className="flex gap-0">
                     <span className="inline-flex items-center px-3 text-sm text-slate-500 bg-slate-50 border border-r-0 border-slate-300 rounded-l-lg"><Mail size={13} /></span>
                     <input type="email" value={form.user_email} onChange={e => set('user_email', e.target.value)} placeholder="login@dealer.in"
-                      className="flex-1 px-3 py-2 border border-slate-300 rounded-r-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
+                      className="flex-1 min-w-0 px-3 py-2 border border-slate-300 rounded-r-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
                   </div>
                 </Field>
                 <Field label="Temporary Password" required hint="Min 8 chars">
                   <div className="flex gap-0">
                     <span className="inline-flex items-center px-3 text-sm text-slate-500 bg-slate-50 border border-r-0 border-slate-300 rounded-l-lg"><KeyRound size={13} /></span>
                     <input type="text" value={form.user_password} onChange={e => set('user_password', e.target.value)} placeholder="—"
-                      className="flex-1 px-3 py-2 border border-slate-300 rounded-r-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
+                      className="flex-1 min-w-0 px-3 py-2 border border-slate-300 rounded-r-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
                   </div>
                 </Field>
               </div>

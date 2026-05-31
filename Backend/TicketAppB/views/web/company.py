@@ -62,6 +62,9 @@ def build_license_registration_payload(company):
         "GSTNumber":             company.gst_number or '',
         "CustomerContactPerson": company.contact_person,
         "CustomerAddress":       company.address,
+        # this is important. 
+        # ig this differentiates diff companies else it'll return some same older ID again. 
+        "DeviceIdentifier1":     company.company_name,
         "DeviceModel":           settings.DEVICE_MODEL,
         "DeviceType":            settings.DEVICE_TYPE,
         "ProjectName":           settings.PROJECT_NAME,

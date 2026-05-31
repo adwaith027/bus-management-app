@@ -524,23 +524,24 @@ export default function CompanyListing() {
         {/* Table */}
         <div className="border border-slate-200 rounded-2xl bg-white shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+            <table className="w-full text-left">
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50/80">
-                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Company</th>
-                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Contact</th>
-                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">License Units</th>
-                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
-                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">License Action</th>
-                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Actions</th>
+                <tr className="border-b-2 border-slate-200 bg-slate-50">
+                  <th className="px-5 py-3.5 text-[11px] font-semibold text-slate-400 uppercase tracking-widest whitespace-nowrap">Company ID</th>
+                  <th className="px-5 py-3.5 text-[11px] font-semibold text-slate-400 uppercase tracking-widest whitespace-nowrap">Company</th>
+                  <th className="px-5 py-3.5 text-[11px] font-semibold text-slate-400 uppercase tracking-widest whitespace-nowrap">License Units</th>
+                  <th className="px-5 py-3.5 text-[11px] font-semibold text-slate-400 uppercase tracking-widest whitespace-nowrap">Status</th>
+                  <th className="px-5 py-3.5 text-[11px] font-semibold text-slate-400 uppercase tracking-widest whitespace-nowrap">Validity</th>
+                  <th className="px-5 py-3.5 text-[11px] font-semibold text-slate-400 uppercase tracking-widest whitespace-nowrap">License Action</th>
+                  <th className="px-5 py-3.5 text-[11px] font-semibold text-slate-400 uppercase tracking-widest whitespace-nowrap text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
-                  <TableSkeleton columns={['w-40', 'w-28', 'w-16', 'w-20', 'w-24', 'w-16']} />
+                  <TableSkeleton columns={['w-40', 'w-20', 'w-16', 'w-20', 'w-24', 'w-24', 'w-16']} />
                 ) : filteredCompanies.length === 0 ? (
                   <tr>
-                    <td colSpan="6" className="px-4 py-10 text-center">
+                    <td colSpan="7" className="px-4 py-10 text-center">
                       <div className="flex flex-col items-center gap-2">
                         <Building2 size={20} className="text-slate-300" />
                         <p className="text-sm text-slate-400">{search ? 'No companies match your search' : 'No companies found'}</p>
@@ -566,8 +567,13 @@ export default function CompanyListing() {
                   const showValidating   = isValidating;
 
                   return (
-                    <tr key={company.id} className="group hover:bg-slate-50/60 transition-colors">
-                      <td className="px-4 py-3">
+                    <tr key={company.id} className="border-b border-slate-100 hover:bg-slate-50/60 transition-colors">
+                      <td className="px-5 py-4">
+                        <span className="text-base font-mono font-semibold text-slate-800 pl-2">
+                          {company.company_id ?? <span className="text-slate-400 font-sans font-normal text-sm">—</span>}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4">
                         <div className="flex items-center gap-2.5">
                           <div className="h-8 w-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
                             <span className="text-[11px] font-bold text-slate-600">{initials}</span>
@@ -578,20 +584,15 @@ export default function CompanyListing() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5">
-                          <IdCard size={12} className="text-slate-400 shrink-0" />
-                          <span className="text-sm text-slate-600 truncate">{company.contact_person}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
-                          {company.number_of_licences || 0} units
+                      <td className="px-5 py-4">
+                        <span className="text-sm font-medium text-slate-700">
+                          {company.number_of_licences || 0}
+                          <span className="text-xs text-slate-400 font-normal ml-1">units</span>
                         </span>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-5 py-4">
                         <div className="flex flex-col gap-1">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium border w-fit ${
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium border w-fit ${
                             company.is_active
                               ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                               : 'bg-slate-50 text-slate-500 border-slate-200'
@@ -599,31 +600,39 @@ export default function CompanyListing() {
                             <span className={`w-1.5 h-1.5 rounded-full ${company.is_active ? 'bg-emerald-500' : 'bg-slate-400'}`} />
                             {company.is_active ? 'Active' : 'Inactive'}
                           </span>
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium border w-fit ${getStatusStyle(authStatus)}`}>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border w-fit ${getStatusStyle(authStatus)}`}>
                             {authStatus || 'Pending'}
                           </span>
-                          {isApproved && company.product_to_date && (
-                            <p className={`text-[10px] ${expired ? 'text-red-600 font-semibold' : 'text-slate-400'}`}>
-                              {expired ? 'Expired ' : 'Valid till '}
-                              {new Date(company.product_to_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                            </p>
-                          )}
                           {hasConfigErr && (
-                            <p className="text-[10px] text-amber-700 font-medium">⚠ Config error</p>
+                            <p className="text-xs text-amber-700 font-medium">⚠ Config error</p>
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-5 py-4">
+                        {company.product_from_date && company.product_to_date ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-xs text-slate-500">
+                              {new Date(company.product_from_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            </span>
+                            <span className={`text-sm font-medium ${expired ? 'text-red-600' : 'text-slate-700'}`}>
+                              {new Date(company.product_to_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-slate-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-4">
                         <div className="flex flex-col gap-1">
                           {showRegister && (
                             <button onClick={() => handleRegisterLicense(company.id)} disabled={registering}
-                              className="text-[11px] font-medium bg-slate-900 text-white px-2.5 py-1 rounded-md hover:bg-slate-700 transition disabled:opacity-50 cursor-pointer">
+                              className="text-xs font-medium bg-slate-900 text-white px-4 py-2 rounded-lg hover:bg-slate-700 transition disabled:opacity-50 cursor-pointer">
                               {registering ? 'Registering…' : 'Register'}
                             </button>
                           )}
                           {showAuthenticate && (
                             <button onClick={() => handleValidateLicense(company.id)} disabled={validating}
-                              className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition disabled:opacity-50 cursor-pointer ${
+                              className={`text-xs font-medium px-4 py-2 rounded-lg transition disabled:opacity-50 cursor-pointer ${
                                 expired ? 'bg-red-600 hover:bg-red-700 text-white' :
                                 hasConfigErr ? 'bg-amber-600 hover:bg-amber-700 text-white' :
                                 'bg-slate-900 hover:bg-slate-700 text-white'
@@ -633,12 +642,18 @@ export default function CompanyListing() {
                           )}
                           {showSync && (
                             <button onClick={() => handleSyncLicense(company)} disabled={syncing}
-                              className="inline-flex items-center gap-1 text-[11px] font-medium bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 rounded-md transition disabled:opacity-50 cursor-pointer">
-                              {syncing ? <><svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Fetching…</> : <><RefreshCw size={11} /> Sync License</>}
+                              className="inline-flex items-center gap-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition disabled:opacity-50 cursor-pointer">
+                              {syncing ? <><svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Fetching…</> : <><RefreshCw size={13} /> Sync License</>}
                             </button>
                           )}
                           {showValidating && (
-                            <span className="text-[11px] text-slate-400 animate-pulse">Validating…</span>
+                            <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md bg-amber-50 border border-amber-200 text-amber-700 text-xs font-semibold animate-pulse">
+                              <svg className="h-3 w-3 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                              </svg>
+                              Validating…
+                            </span>
                           )}
                           {isApproved && !showSync && !isValidating && !expired && company.client_type !== 'direct' && (
                             <span className="flex items-center gap-1 text-[11px] text-emerald-600 font-medium">
@@ -652,8 +667,8 @@ export default function CompanyListing() {
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <td className="px-5 py-4">
+                        <div className="flex items-center justify-end gap-0.5">
                           <button onClick={() => openView(company)} title="View"
                             className="p-1.5 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors">
                             <Eye size={14} />
@@ -1079,26 +1094,26 @@ export default function CompanyListing() {
 
               {/* Step 3: User Account */}
               <SectionCard step={3} active={sec2} complete={sec3} title="Admin User Account" subtitle="Login credentials for the company admin.">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 gap-4 md:gap-5 md:[grid-template-columns:160px_1fr_1fr]">
                   <Field label="Username" required>
                     <div className="flex gap-0">
                       <span className="inline-flex items-center px-3 text-sm text-slate-500 bg-slate-50 border border-r-0 border-slate-300 rounded-l-lg"><User size={13} /></span>
                       <input value={form.user_username} onChange={e => set('user_username', e.target.value.toLowerCase())} placeholder="acme-admin"
-                        className="flex-1 px-3 py-2 border border-slate-300 rounded-r-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
+                        className="flex-1 min-w-0 px-3 py-2 border border-slate-300 rounded-r-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
                     </div>
                   </Field>
                   <Field label="Login Email" required>
                     <div className="flex gap-0">
                       <span className="inline-flex items-center px-3 text-sm text-slate-500 bg-slate-50 border border-r-0 border-slate-300 rounded-l-lg"><Mail size={13} /></span>
                       <input type="email" value={form.user_email} onChange={e => set('user_email', e.target.value)} placeholder="admin@acme.in"
-                        className="flex-1 px-3 py-2 border border-slate-300 rounded-r-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
+                        className="flex-1 min-w-0 px-3 py-2 border border-slate-300 rounded-r-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
                     </div>
                   </Field>
                   <Field label="Temporary Password" required hint="Min 8 chars">
                     <div className="flex gap-0">
                       <span className="inline-flex items-center px-3 text-sm text-slate-500 bg-slate-50 border border-r-0 border-slate-300 rounded-l-lg"><KeyRound size={13} /></span>
                       <input type="text" value={form.user_password} onChange={e => set('user_password', e.target.value)} placeholder="—"
-                        className="flex-1 px-3 py-2 border border-slate-300 rounded-r-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
+                        className="flex-1 min-w-0 px-3 py-2 border border-slate-300 rounded-r-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
                     </div>
                   </Field>
                 </div>

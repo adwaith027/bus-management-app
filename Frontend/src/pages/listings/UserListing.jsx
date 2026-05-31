@@ -170,6 +170,7 @@ export default function UserListing() {
   // ── Filter / sort / paginate state ───────────────────────────────────────────
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('ALL');
+  const [tierFilter, setTierFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [sortField, setSortField] = useState('date_joined');
   const [sortDir, setSortDir] = useState('desc');
@@ -258,7 +259,8 @@ export default function UserListing() {
       const q = search.toLowerCase();
       list = list.filter(u => u.username?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q));
     }
-    if (roleFilter !== 'ALL') list = list.filter(u => u.role === roleFilter);
+    if (!isCompanyAdmin && roleFilter !== 'ALL') list = list.filter(u => u.role === roleFilter);
+    if (isCompanyAdmin && tierFilter !== 'ALL') list = list.filter(u => u.tier === tierFilter);
     if (statusFilter !== 'ALL') list = list.filter(u => statusFilter === 'active' ? u.is_active : !u.is_active);
     list.sort((a, b) => {
       let va = a[sortField], vb = b[sortField];
@@ -272,9 +274,9 @@ export default function UserListing() {
       return 0;
     });
     return list;
-  }, [users, search, roleFilter, statusFilter, sortField, sortDir]);
+  }, [users, search, roleFilter, tierFilter, statusFilter, sortField, sortDir]);
 
-  useEffect(() => setPage(1), [search, roleFilter, statusFilter]);
+  useEffect(() => setPage(1), [search, roleFilter, tierFilter, statusFilter]);
 
   const totalPages = Math.ceil(filtered.length / perPage);
   const paged = filtered.slice((page - 1) * perPage, page * perPage);
@@ -476,8 +478,8 @@ export default function UserListing() {
             : (
               <span>
                 License capacity: <strong>{capacity.total?.used ?? 0}</strong> of <strong>{capacity.total?.limit ?? '—'}</strong> slots in use.
-                {capacity.tiers?.intermediate?.limit && <> Intermediate: {capacity.tiers.intermediate.limit} slots.</>}
-                {capacity.tiers?.premium?.limit && <> Premium: {capacity.tiers.premium.limit} slots.</>}
+                {capacity.tiers?.intermediate?.limit > 0 && <> Intermediate: <strong>{capacity.tiers.intermediate.used ?? 0}</strong> of <strong>{capacity.tiers.intermediate.limit}</strong> used.</>}
+                {capacity.tiers?.premium?.limit > 0 && <> Premium: <strong>{capacity.tiers.premium.used ?? 0}</strong> of <strong>{capacity.tiers.premium.limit}</strong> used.</>}
               </span>
             )
           }
@@ -500,18 +502,37 @@ export default function UserListing() {
 
         <div className="w-px h-5 bg-slate-200 hidden sm:block" />
 
-        {/* Role pills */}
-        <div className="flex items-center gap-1 flex-wrap">
-          {['ALL', 'superadmin', 'company_admin', 'dealer_admin', 'executive', 'company_user'].map(r => (
-            <button
-              key={r}
-              onClick={() => setRoleFilter(r)}
-              className={`px-2.5 py-1 rounded-md text-[13px] font-medium transition-colors cursor-pointer whitespace-nowrap ${roleFilter === r ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
-            >
-              {r === 'ALL' ? 'All' : ROLE_CONFIG[r]?.label || r}
-            </button>
-          ))}
-        </div>
+        {/* Filter pills — tier for company_admin, role for everyone else */}
+        {isCompanyAdmin ? (
+          <div className="flex items-center gap-1 flex-wrap">
+            {[
+              { value: 'ALL',          label: 'All' },
+              { value: 'basic',        label: 'Basic' },
+              { value: 'intermediate', label: 'Intermediate' },
+              { value: 'premium',      label: 'Premium' },
+            ].map(({ value, label }) => (
+              <button
+                key={value}
+                onClick={() => setTierFilter(value)}
+                className={`px-2.5 py-1 rounded-md text-[13px] font-medium transition-colors cursor-pointer whitespace-nowrap ${tierFilter === value ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="flex items-center gap-1 flex-wrap">
+            {['ALL', 'superadmin', 'company_admin', 'dealer_admin', 'executive', 'company_user'].map(r => (
+              <button
+                key={r}
+                onClick={() => setRoleFilter(r)}
+                className={`px-2.5 py-1 rounded-md text-[13px] font-medium transition-colors cursor-pointer whitespace-nowrap ${roleFilter === r ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+              >
+                {r === 'ALL' ? 'All' : ROLE_CONFIG[r]?.label || r}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="w-px h-5 bg-slate-200 hidden sm:block" />
 

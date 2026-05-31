@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Warehouse, Plus, Eye, Pencil, Search, X, Route as RouteIcon, ArrowRight } from 'lucide-react';
+import { Warehouse, Plus, Eye, Pencil, Search, X, Route as RouteIcon, ArrowRight, Info } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import api, { BASE_URL } from '../../assets/js/axiosConfig';
 import {
@@ -299,6 +299,13 @@ export default function DepotListing() {
                 <DesignInput value={form.zip_code} onChange={v => setF('zip_code', v)} placeholder="Zip" />
               </FormField>
             </div>
+
+            {modalMode === 'create' && (
+              <div className="flex items-start gap-2 rounded-lg bg-blue-50 border border-blue-100 px-3 py-2.5 text-xs text-blue-700">
+                <Info size={13} className="shrink-0 mt-0.5" />
+                <span>To connect a route to this depot, open the route from <strong>Route Management</strong> and set the depot mapping there.</span>
+              </div>
+            )}
 
             <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
               <Btn variant="secondary" type="button" onClick={closeModal}>Cancel</Btn>
