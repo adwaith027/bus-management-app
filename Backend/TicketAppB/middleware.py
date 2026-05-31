@@ -14,11 +14,11 @@ LicenseExpiryMiddleware
       - The user's company is inactive or its license has expired.
       - The user's dealer is inactive.
     Superadmin and superuser accounts are fully exempt.
-    Exempt paths (login, refresh, logout, signup) are always skipped.
+    Exempt paths (login, refresh, logout) are always skipped.
 """
 
-from datetime import date
 from django.core.cache import cache
+from django.utils import timezone
 from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework_simplejwt.exceptions import TokenError
 from django.contrib.auth import get_user_model
@@ -27,7 +27,6 @@ from django.http import JsonResponse
 EXEMPT_PATHS = {
     '/login',
     '/token/refresh',
-    '/signup',
     '/logout',
     '/auth/forgot-password',
     '/auth/reset-password',
@@ -106,7 +105,7 @@ class LicenseExpiryMiddleware:
                             {'error': 'Company account is deactivated. Contact Administrator.'},
                             status=403,
                         )
-                    if company.product_to_date and date.today() > company.product_to_date:
+                    if company.product_to_date and timezone.now().date() > company.product_to_date:
                         return JsonResponse(
                             {'error': f'License Expired (ID: {company.company_id}). Contact Administrator.'},
                             status=403,

@@ -26,7 +26,6 @@ from .views import setup_data as setup_data_views
 
 urlpatterns = [
     # authentication
-    path('signup', auth_views.signup_view, name='signup'),
     path('login', auth_views.login_view, name='login'),
     path('token/refresh', auth_views.refresh_token_view, name='token_refresh'),
     path('logout', auth_views.logout_view, name='logout'),
