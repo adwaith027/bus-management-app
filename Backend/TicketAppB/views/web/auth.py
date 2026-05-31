@@ -20,8 +20,9 @@ Session enforcement:
 
 import uuid
 import logging
-from datetime import date, timedelta
+from datetime import timedelta
 
+from django.db import transaction
 from django.utils import timezone
 from django.core.mail import send_mail
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
@@ -257,46 +258,6 @@ def _create_session(user, request, device_uuid=None):
 # ── Views ─────────────────────────────────────────────────────────────────────
 
 @api_view(['POST'])
-def signup_view(request):
-    """
-    Quick-create for initial setup. Not exposed in production UI.
-    Web only — does not set up a session.
-    """
-    if not request.data:
-        return Response({'error': 'Invalid Input'}, status=status.HTTP_400_BAD_REQUEST)
-
-    username  = request.data.get('username')
-    email     = request.data.get('mailid')
-    role      = request.data.get('role', 'company_user')
-    password  = request.data.get('password')
-    cpassword = request.data.get('cpassword')
-
-    if not username or not email or not password or not cpassword:
-        return Response({'error': 'Fill out all the fields'}, status=status.HTTP_400_BAD_REQUEST)
-
-    if password != cpassword:
-        return Response({'error': 'Passwords do not match'}, status=status.HTTP_400_BAD_REQUEST)
-
-    if User.objects.filter(username=username).exists():
-        return Response({'error': 'Username already exists'}, status=status.HTTP_400_BAD_REQUEST)
-
-    if User.objects.filter(email=email).exists():
-        return Response({'error': 'Email already exists'}, status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        user = User.objects.create_user(
-            username=username, email=email,
-            password=password, role=role, is_verified=True,
-        )
-        return Response({
-            'message': 'Account created successfully.',
-            'user': {'username': user.username, 'email': user.email, 'role': user.role},
-        }, status=status.HTTP_201_CREATED)
-    except Exception:
-        return Response({'error': 'Failed to create user'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(['POST'])
 def login_view(request):
     """
     Login — full check order:
@@ -347,7 +308,7 @@ def login_view(request):
                 {'error': 'Company account is deactivated. Contact administrator.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        if company.product_to_date and date.today() > company.product_to_date:
+        if company.product_to_date and timezone.now().date() > company.product_to_date:
             return Response(
                 {'error': f'License expired (ID: {company.company_id}). Contact administrator.'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -381,72 +342,88 @@ def login_view(request):
             request.data.get('uuid') or request.data.get('device_uuid') or ''
         ).strip() or None
 
-        if device_uuid:
-            approved = UserApprovedDevice.objects.filter(
-                user=user, device_uuid=device_uuid, is_revoked=False
-            ).exists()
-            if not approved:
-                DevicePendingApproval.objects.get_or_create(
-                    user=user,
-                    device_uuid=device_uuid,
-                    defaults={
-                        'device_type': str(_detect_device_type(request)),
-                        'status': DevicePendingApproval.Status.PENDING,
-                    },
-                )
-                return Response(
-                    {
-                        'error': (
-                            'Initial login on this device. '
-                            'Contact your company admin for approval.'
-                        ),
-                        'error_code': 'DEVICE_PENDING',
-                    },
-                    status=status.HTTP_403_FORBIDDEN,
-                )
+        if not device_uuid:
+            return Response(
+                {
+                    'error': 'Device identifier required for mobile login. Please update your app.',
+                    'error_code': 'DEVICE_UUID_MISSING',
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
-    # ── 5: Auto-expire stale sessions (>24h) ─────────────────────────────────
-    _expire_stale_sessions(user)
+        approved = UserApprovedDevice.objects.filter(
+            user=user, device_uuid=device_uuid, is_revoked=False
+        ).exists()
+        if not approved:
+            DevicePendingApproval.objects.get_or_create(
+                user=user,
+                device_uuid=device_uuid,
+                defaults={
+                    'device_type': str(_detect_device_type(request)),
+                    'status': DevicePendingApproval.Status.PENDING,
+                },
+            )
+            return Response(
+                {
+                    'error': (
+                        'Initial login on this device. '
+                        'Contact your company admin for approval.'
+                    ),
+                    'error_code': 'DEVICE_PENDING',
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
-    # ── 6: Active session elsewhere ───────────────────────────────────────────
-    block = _enforce_single_session(user)
-    if block:
-        return block
+    # ── 5-8: Session check + creation (atomic — prevents concurrent-login race) ─
+    # select_for_update acquires a row-level lock on this user row so that two
+    # simultaneous logins for the same username are serialised: the second waits
+    # at the lock until the first commits (or rolls back), then re-runs the check
+    # and finds an active session already present.
+    with transaction.atomic():
+        User.objects.select_for_update().get(pk=user.pk)
 
-    # ── 7: Concurrent session cap (company_user only, superadmin exempt) ──────
-    if user.role == 'company_user' and company:
-        if company.total_user_count > 0:
-            active_count = UserSession.objects.filter(
-                user__company=company, is_active=True,
-            ).count()
-            if active_count >= company.total_user_count:
-                return Response(
-                    {'error': 'All login slots are in use. Another user must log out first.'},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
+        # ── 5: Auto-expire stale sessions (>24h) ──────────────────────────────
+        _expire_stale_sessions(user)
 
-        if user.tier == 'premium' and company.premium_user_count > 0:
-            premium_active = UserSession.objects.filter(
-                user__company=company, user__tier='premium', is_active=True,
-            ).count()
-            if premium_active >= company.premium_user_count:
-                return Response(
-                    {'error': 'All premium tier slots are in use. Another premium user must log out first.'},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
+        # ── 6: Active session elsewhere ───────────────────────────────────────
+        block = _enforce_single_session(user)
+        if block:
+            return block
 
-        if user.tier == 'intermediate' and company.intermediate_user_count > 0:
-            intermediate_active = UserSession.objects.filter(
-                user__company=company, user__tier='intermediate', is_active=True,
-            ).count()
-            if intermediate_active >= company.intermediate_user_count:
-                return Response(
-                    {'error': 'All intermediate tier slots are in use. Another intermediate user must log out first.'},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
+        # ── 7: Concurrent session cap (company_user only, superadmin exempt) ──
+        if user.role == 'company_user' and company:
+            if company.total_user_count > 0:
+                active_count = UserSession.objects.filter(
+                    user__company=company, is_active=True,
+                ).count()
+                if active_count >= company.total_user_count:
+                    return Response(
+                        {'error': 'All login slots are in use. Another user must log out first.'},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
 
-    # ── 8: Create session ─────────────────────────────────────────────────────
-    session_uid = _create_session(user, request, device_uuid=device_uuid)
+            if user.tier == 'premium' and company.premium_user_count > 0:
+                premium_active = UserSession.objects.filter(
+                    user__company=company, user__tier='premium', is_active=True,
+                ).count()
+                if premium_active >= company.premium_user_count:
+                    return Response(
+                        {'error': 'All premium tier slots are in use. Another premium user must log out first.'},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+            if user.tier == 'intermediate' and company.intermediate_user_count > 0:
+                intermediate_active = UserSession.objects.filter(
+                    user__company=company, user__tier='intermediate', is_active=True,
+                ).count()
+                if intermediate_active >= company.intermediate_user_count:
+                    return Response(
+                        {'error': 'All intermediate tier slots are in use. Another intermediate user must log out first.'},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+        # ── 8: Create session ──────────────────────────────────────────────────
+        session_uid = _create_session(user, request, device_uuid=device_uuid)
 
     user.last_login = timezone.now()
     user.save(update_fields=['last_login'])
@@ -487,20 +464,41 @@ def logout_view(request):
         # Fallback: APK may pass session_uid in body
         session_uid = request.data.get('session_uid') if hasattr(request, 'data') else None
 
+    session_obj = None
     if session_uid:
+        session_obj = UserSession.objects.filter(session_uid=session_uid).first()
         UserSession.objects.filter(session_uid=session_uid).update(is_active=False)
 
-    # Blacklist the refresh token (async to avoid blocking the response)
+    # Blacklist the refresh token so it cannot be used for /token/refresh after logout.
+    #
+    # Primary path — token string (cookie or APK body):
+    #   RefreshToken(str).blacklist() is simplejwt's own method; it creates the
+    #   OutstandingToken record if missing, then writes BlacklistedToken. Works
+    #   even when the access token is already expired (no session_uid needed).
+    #
+    # Fallback path — JTI from the session record:
+    #   Used when the refresh cookie/body is absent. Requires OutstandingToken to
+    #   already exist (created at login time by simplejwt).
     refresh_token_str = (
         request.COOKIES.get('refresh_token')
         or (request.data.get('refresh_token') if hasattr(request, 'data') else None)
     )
     if refresh_token_str:
         try:
-            from TicketAppB.tasks import blacklist_refresh_token
-            blacklist_refresh_token.delay(refresh_token_str)
-        except Exception:
-            pass
+            RefreshToken(refresh_token_str).blacklist()
+        except Exception as exc:
+            logger.warning(f'Could not blacklist refresh token on logout: {exc}')
+    elif session_obj and session_obj.refresh_jti:
+        try:
+            from rest_framework_simplejwt.token_blacklist.models import (
+                OutstandingToken, BlacklistedToken,
+            )
+            outstanding = OutstandingToken.objects.get(jti=session_obj.refresh_jti)
+            BlacklistedToken.objects.get_or_create(token=outstanding)
+        except OutstandingToken.DoesNotExist:
+            logger.warning(f'OutstandingToken not found for jti={session_obj.refresh_jti} on logout')
+        except Exception as exc:
+            logger.error(f'Failed to blacklist refresh token on logout (JTI path): {exc}')
 
     if logout_user:
         log_action(
