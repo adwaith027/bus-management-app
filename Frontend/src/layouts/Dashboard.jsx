@@ -9,27 +9,26 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const timerRef = useRef(null);
 
-  useEffect(() => {
-    const logout = async () => {
-      try { await api.post(`${BASE_URL}/logout`); } catch {}
-      localStorage.removeItem('user');
-      navigate('/login');
-    };
-
-    const reset = () => {
-      clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(logout, IDLE_MS);
-    };
-
-    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
-    events.forEach(e => window.addEventListener(e, reset, { passive: true }));
-    reset();
-
-    return () => {
-      events.forEach(e => window.removeEventListener(e, reset));
-      clearTimeout(timerRef.current);
-    };
-  }, [navigate]);
+  // AUTO-LOGOUT DISABLED — ghost session issue, see pending-implementations.txt
+  // Re-enable once backend idle check + per-device-type thresholds are implemented.
+  // useEffect(() => {
+  //   const logout = async () => {
+  //     try { await api.post(`${BASE_URL}/logout`, undefined, { timeout: 0 }); } catch {}
+  //     localStorage.removeItem('user');
+  //     navigate('/login');
+  //   };
+  //   const reset = () => {
+  //     clearTimeout(timerRef.current);
+  //     timerRef.current = setTimeout(logout, IDLE_MS);
+  //   };
+  //   const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+  //   events.forEach(e => window.addEventListener(e, reset, { passive: true }));
+  //   reset();
+  //   return () => {
+  //     events.forEach(e => window.removeEventListener(e, reset));
+  //     clearTimeout(timerRef.current);
+  //   };
+  // }, [navigate]);
 
   return (
     <div className="flex min-h-screen overflow-x-hidden bg-slate-100 text-slate-900">

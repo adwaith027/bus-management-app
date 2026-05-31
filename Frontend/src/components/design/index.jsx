@@ -168,7 +168,7 @@ export function DesignModal({ open, onClose, title, icon: Icon, children, width 
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
-      <div className={`bg-white rounded-2xl shadow-2xl w-full ${width} max-h-[85vh] overflow-y-auto`}>
+      <div className={`bg-white rounded-2xl shadow-2xl w-full ${width} max-h-[85vh] overflow-y-auto overflow-x-hidden`}>
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
           <div className="flex items-center gap-2 text-slate-800">
             {Icon && <Icon size={16} className="text-slate-600" />}
