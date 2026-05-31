@@ -175,14 +175,6 @@ class TransactionData(models.Model):
     def __str__(self):
         return f"{self.ticket_number} - {self.palmtec_id}"
 
-    @property
-    def calculate_total_tickets(self):
-        return sum([
-            self.full_count or 0, self.half_count or 0,
-            self.st_count or 0,   self.phy_count or 0,
-            self.lugg_count or 0,
-        ])
-
 
 class ScheduleData(models.Model):
     """Merged schedule open+close. Created on ShdOpn; close fields populated on ShdCls."""
@@ -271,7 +263,6 @@ class ScheduleData(models.Model):
     # ── Raw data ──────────────────────────────────────────────────────────────
     open_raw_payload  = models.TextField(null=True, blank=True)
     close_raw_payload = models.TextField(null=True, blank=True)
-    received_at       = models.DateTimeField(auto_now_add=True)
     created_at        = models.DateTimeField(auto_now_add=True)
     updated_at        = models.DateTimeField(auto_now=True)
 
@@ -386,7 +377,6 @@ class TripData(models.Model):
     # ── Raw data ──────────────────────────────────────────────────────────────
     open_raw_payload  = models.TextField(null=True, blank=True)
     close_raw_payload = models.TextField(null=True, blank=True)
-    received_at       = models.DateTimeField(auto_now_add=True)
     created_at        = models.DateTimeField(auto_now_add=True)
     updated_at        = models.DateTimeField(auto_now=True)
 
