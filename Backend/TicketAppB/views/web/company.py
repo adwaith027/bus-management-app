@@ -8,6 +8,7 @@ import threading
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from django.conf import settings
+from django.utils import timezone
 from rest_framework import status
 from django.db import transaction
 from django.http import JsonResponse
@@ -37,18 +38,19 @@ _STATES_DISTRICTS = json.loads(
 def check_datetime(date_str):
     try:
         if not date_str:
-            return None  # FIX: explicit None handling
-
+            return None
         if isinstance(date_str, str):
-            # FIX: match incoming format WITH time
             return datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S')
-
-        return date_str  # FIX: already a datetime/date, return as-is
-
+        return date_str
     except Exception:
-        return None  # FIX: never return raw invalid value
+        return None
 
-    
+
+def _parse_license_date(raw):
+    """Return the date part of a license server datetime string, or None on any failure."""
+    dt = check_datetime(raw)
+    return dt.date() if dt is not None else None
+
 
 def build_license_registration_payload(company):
     """
@@ -282,8 +284,8 @@ def background_license_polling(company_id):
 
             company.product_registration_id = auth_data.get('ProductRegistrationId')
             company.unique_identifier        = auth_data.get('UniqueIDentifier')
-            company.product_from_date = check_datetime(product_from_date).date() if product_from_date else None
-            company.product_to_date   = check_datetime(product_to_date).date()   if product_to_date   else None
+            company.product_from_date = _parse_license_date(product_from_date)
+            company.product_to_date   = _parse_license_date(product_to_date)
 
             def _safe_int(val, default=0):
                 try:
@@ -580,7 +582,7 @@ def get_company_by_company_id(request, company_id):
     if product_to_date:
         try:
             expiry = check_datetime(product_to_date)
-            expired = expiry is not None and datetime.now() > expiry
+            expired = expiry is not None and expiry.date() < timezone.now().date()
         except Exception:
             pass
 
@@ -596,7 +598,8 @@ def get_company_by_company_id(request, company_id):
                 'authentication_status': auth_status,
                 'product_from_date':     product_from_date,
                 'product_to_date':       product_to_date,
-                'palmtec_count':         int(auth_data.get('PalmtecCount') or auth_data.get('NumberOfLicence', 0)),
+                'number_of_licences':    int(auth_data.get('NumberOfLicence', 0)),
+                'palmtec_count':         int(auth_data.get('PalmtecCount', 0)),
                 'total_user_count':      int(auth_data.get('TotalUserCount', 0)),
                 'premium_user_count':    int(auth_data.get('PremiumUserCount', 0)),
                 'intermediate_user_count': int(auth_data.get('IntermediateUserCount', 0)),
@@ -709,7 +712,6 @@ def import_company(request):
         return Response({'message': 'Company name is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
     # ── Create Company record ────────────────────────────────────────────────
-    # TODO: update license server field names from NumberOfLicence → PalmtecCount etc.
     company = Company.objects.create(
         **form_data,
         authentication_status   = mapped_status,
@@ -717,7 +719,8 @@ def import_company(request):
         unique_identifier       = auth_data.get('UniqueIDentifier', ''),
         product_from_date       = product_from_date,
         product_to_date         = product_to_date,
-        palmtec_count           = safe_int(auth_data.get('PalmtecCount') or auth_data.get('NumberOfLicence'), 0),
+        number_of_licences      = safe_int(auth_data.get('NumberOfLicence'), 0),
+        palmtec_count           = safe_int(auth_data.get('PalmtecCount'), 0),
         total_user_count        = safe_int(auth_data.get('TotalUserCount'), 0),
         premium_user_count      = safe_int(auth_data.get('PremiumUserCount'), 0),
         intermediate_user_count = safe_int(auth_data.get('IntermediateUserCount'), 0),
@@ -777,9 +780,10 @@ def all_company_data(request):
         companies = Company.objects.filter(client_type='direct').order_by('-id')
 
     elif _is_executive(user):
-        # Executive sees companies they personally created.
-        # TODO Phase 4: also filter by executive's state (CustomUser.state) if set.
-        companies = Company.objects.filter(created_by=user, is_active=True).order_by('-id')
+        qs = Company.objects.filter(created_by=user, is_active=True)
+        if user.state:
+            qs = qs.filter(state=user.state)
+        companies = qs.order_by('-id')
 
     elif _is_dealer_admin(user):
         if not user.dealer_id:
@@ -1152,19 +1156,23 @@ def update_company_details(request, pk):
     """
     user = get_user_from_cookie(request)
     if not user:
-        return Response(
-            {'error': 'Authentication required'}, 
-            status=status.HTTP_401_UNAUTHORIZED
-        )
-    
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if not any([_is_superadmin(user), _is_executive(user), _is_dealer_admin(user)]):
+        return Response({'error': 'Not authorized to update company details.'}, status=status.HTTP_403_FORBIDDEN)
+
     try:
         company = Company.objects.get(pk=pk)
     except Company.DoesNotExist:
         logger.error(f"Company not found for update with ID: {pk}")
-        return Response(
-            {"message": "Company not found"}, 
-            status=status.HTTP_404_NOT_FOUND
-        )
+        return Response({"message": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    if _is_executive(user):
+        if company.created_by_id != user.id:
+            return Response({'error': 'You can only update companies you created.'}, status=status.HTTP_403_FORBIDDEN)
+    elif _is_dealer_admin(user):
+        if company.dealer_id != user.dealer_id:
+            return Response({'error': 'You can only update companies under your dealership.'}, status=status.HTTP_403_FORBIDDEN)
     
     serializer = CompanySerializer(company, data=request.data, partial=True)
     
@@ -1490,6 +1498,8 @@ def get_admin_dashboard_data(request):
     user = get_user_from_cookie(request)
     if not user:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    if not _is_superadmin(user):
+        return Response({'error': 'Superadmin access required.'}, status=status.HTTP_403_FORBIDDEN)
 
     try:
         company_counts = Company.objects.aggregate(
@@ -1573,8 +1583,8 @@ def _build_company_sync_diff(company, auth_data):
 
     raw_from = auth_data.get('ProductFromDate')
     raw_to   = auth_data.get('ProductToDate')
-    incoming_from = check_datetime(raw_from).date() if raw_from else None
-    incoming_to   = check_datetime(raw_to).date()   if raw_to   else None
+    incoming_from = _parse_license_date(raw_from)
+    incoming_to   = _parse_license_date(raw_to)
 
     return {
         'current': {
@@ -1721,8 +1731,8 @@ def sync_company_license_confirm(request, pk):
     company.total_user_count        = _si(auth_data.get('TotalUserCount'))
     company.premium_user_count      = _si(auth_data.get('PremiumUserCount'))
     company.intermediate_user_count = _si(auth_data.get('IntermediateUserCount'))
-    company.product_from_date = check_datetime(raw_from).date() if raw_from else company.product_from_date
-    company.product_to_date   = check_datetime(raw_to).date()   if raw_to   else company.product_to_date
+    company.product_from_date = _parse_license_date(raw_from) or company.product_from_date
+    company.product_to_date   = _parse_license_date(raw_to)   or company.product_to_date
     company.authentication_status   = new_auth_status
     company.product_registration_id = _si(auth_data.get('ProductRegistrationId'))
     company.unique_identifier       = auth_data.get('UniqueIDentifier', '') or company.unique_identifier
