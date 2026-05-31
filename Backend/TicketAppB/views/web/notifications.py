@@ -7,7 +7,7 @@ Kept in a separate module so they're cheap to test and extend.
 Severity levels: 'error' | 'warning' | 'info'
 """
 
-from datetime import date
+from django.utils import timezone
 
 from ...models import ETMDevice, Route, RouteDepot
 
@@ -24,7 +24,7 @@ def get_login_notifications(user, company):
 
     # ── 1. Company license expiry ─────────────────────────────────────────────
     if company and company.product_to_date:
-        days = (company.product_to_date - date.today()).days
+        days = (company.product_to_date - timezone.now().date()).days
         if days < 0:
             alerts.append({
                 'type':     'license_expired',
@@ -48,7 +48,7 @@ def get_login_notifications(user, company):
     # ── 2. Dealer license expiry (for dealer_admin users) ────────────────────
     dealer = getattr(user, 'dealer', None)
     if dealer and dealer.product_to_date:
-        days = (dealer.product_to_date - date.today()).days
+        days = (dealer.product_to_date - timezone.now().date()).days
         if days < 0:
             alerts.append({
                 'type':     'dealer_license_expired',

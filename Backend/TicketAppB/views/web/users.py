@@ -12,7 +12,7 @@ Permission matrix:
   nobody        → create: superadmin / production (blocked)
 """
 
-from datetime import datetime
+from django.utils import timezone
 
 from django.contrib.auth import get_user_model
 from django.db.models import Q as models_Q
@@ -529,7 +529,7 @@ def change_user_password(request, user_id):
             'data': {
                 'user_id':             target.id,
                 'username':            target.username,
-                'password_changed_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'password_changed_at': timezone.now().strftime('%Y-%m-%d %H:%M:%S'),
             },
         }, status=status.HTTP_200_OK)
     except Exception:

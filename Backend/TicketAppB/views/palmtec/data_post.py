@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from django.db import IntegrityError, transaction
 from django.http import HttpResponse
+from django.utils.timezone import make_aware
 from django.views.decorators.csrf import csrf_exempt
 
 from ...models import RawDataLog, OdometerData, ExpenseData, Employee, VehicleType, TripData, ScheduleData, ExpenseMaster
@@ -397,10 +398,10 @@ def getOdometerDataFromDevice(request):
 
         start_date     = datetime.strptime(_p(6), "%Y-%m-%d").date() if _p(6) else None
         start_time     = datetime.strptime(_p(7), "%H:%M:%S").time() if _p(7) else None
-        start_datetime = datetime.combine(start_date, start_time) if start_date and start_time else None
+        start_datetime = make_aware(datetime.combine(start_date, start_time)) if start_date and start_time else None
         end_date       = datetime.strptime(_p(8), "%Y-%m-%d").date() if _p(8) else None
         end_time       = datetime.strptime(_p(9), "%H:%M:%S").time() if _p(9) else None
-        end_datetime   = datetime.combine(end_date, end_time) if end_date and end_time else None
+        end_datetime   = make_aware(datetime.combine(end_date, end_time)) if end_date and end_time else None
 
         schedule_no = int(_p(4)) if _p(4) else None
         trip_no     = int(_p(5)) if _p(5) else None
@@ -493,7 +494,7 @@ def getExpenseDataFromDevice(request):
 
         expense_date     = datetime.strptime(_p(6), "%Y-%m-%d").date() if _p(6) else None
         expense_time     = datetime.strptime(_p(7), "%H:%M:%S").time() if _p(7) else None
-        expense_datetime = datetime.combine(expense_date, expense_time) if expense_date and expense_time else None
+        expense_datetime = make_aware(datetime.combine(expense_date, expense_time)) if expense_date and expense_time else None
 
         schedule_no = int(_p(4)) if _p(4) else None
         trip_no     = int(_p(5)) if _p(5) else None

@@ -151,7 +151,7 @@ def mosambee_settlement_data(request):
             # Parse time: "19:43:03" → time object
             transaction_time = datetime.strptime(transaction_time_str, '%H:%M:%S').time()
             # Combine into full datetime
-            transaction_datetime = datetime.combine(transaction_date, transaction_time)
+            transaction_datetime = tz.make_aware(datetime.combine(transaction_date, transaction_time))
             
         except ValueError as e:
             logger_txn.error("Invalid date/time format: %s | request: %s", e, data)

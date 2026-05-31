@@ -49,7 +49,7 @@ def _parse_expense_dat(file_path, company_instance, palmtec_id=None):
         try:
             exp_date     = date(year + 2000, month, day)
             exp_time     = dt_time(hour, minutes)
-            exp_datetime = datetime.combine(exp_date, exp_time)
+            exp_datetime = timezone.make_aware(datetime.combine(exp_date, exp_time))
         except ValueError:
             continue
 
@@ -134,10 +134,10 @@ def _parse_odometer_dat(file_path, company_instance, palmtec_id=None):
         try:
             start_date     = date(syear + 2000, smonth, sday)
             start_time     = dt_time(shour, smin)
-            start_datetime = datetime.combine(start_date, start_time)
+            start_datetime = timezone.make_aware(datetime.combine(start_date, start_time))
             end_date       = date(eyear + 2000, emonth, eday) if eyear else None
             end_time       = dt_time(ehour, emin) if eyear else None
-            end_datetime   = datetime.combine(end_date, end_time) if end_date and end_time else None
+            end_datetime   = timezone.make_aware(datetime.combine(end_date, end_time)) if end_date and end_time else None
         except ValueError:
             continue
 

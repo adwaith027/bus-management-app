@@ -325,7 +325,7 @@ def process_trip_open_data(self, log_id):
             trip_no             = int(_p(7))
             start_date          = _parse_date(_p(13))
             start_time          = _parse_time(_p(14))
-            start_datetime      = datetime.combine(start_date, start_time) if start_date and start_time else None
+            start_datetime      = timezone.make_aware(datetime.combine(start_date, start_time)) if start_date and start_time else None
             battery             = int(_p(15)) if _p(15) else None
 
             # ── Resolve FKs ───────────────────────────────────────────────────
@@ -462,8 +462,8 @@ def process_trip_close_data(self, log_id):
             start_time          = _parse_time(_p(10))
             end_date            = _parse_date(_p(11))
             end_time            = _parse_time(_p(12))
-            start_datetime      = datetime.combine(start_date, start_time) if start_date and start_time else None
-            end_datetime        = datetime.combine(end_date,   end_time)   if end_date   and end_time   else None
+            start_datetime      = timezone.make_aware(datetime.combine(start_date, start_time)) if start_date and start_time else None
+            end_datetime        = timezone.make_aware(datetime.combine(end_date, end_time)) if end_date and end_time else None
 
             full_count     = int(_p(18, 0))
             half_count     = int(_p(19, 0))
@@ -613,7 +613,7 @@ def process_schedule_open_data(self, log_id):
             schedule_no    = int(_p(4))
             start_date     = _parse_date(_p(5))
             start_time     = _parse_time(_p(6))
-            start_datetime = datetime.combine(start_date, start_time) if start_date and start_time else None
+            start_datetime = timezone.make_aware(datetime.combine(start_date, start_time)) if start_date and start_time else None
             battery        = int(_p(10)) if _p(10) else None
 
             # ── Resolve FKs ───────────────────────────────────────────────────
@@ -744,7 +744,7 @@ def process_schedule_close_data(self, log_id):
             schedule_start_time = _parse_time(_p(7))
             end_date            = _parse_date(_p(8))
             end_time            = _parse_time(_p(9))
-            end_datetime        = datetime.combine(end_date, end_time) if end_date and end_time else None
+            end_datetime        = timezone.make_aware(datetime.combine(end_date, end_time)) if end_date and end_time else None
 
             # ── Resolve FKs ───────────────────────────────────────────────────
             driver_obj    = _resolve_employee(_p(10), company.id)
@@ -825,7 +825,7 @@ def process_schedule_close_data(self, log_id):
                             start_date  = schedule_start_date,
                             start_time  = schedule_start_time,
                             start_datetime = (
-                                datetime.combine(schedule_start_date, schedule_start_time)
+                                timezone.make_aware(datetime.combine(schedule_start_date, schedule_start_time))
                                 if schedule_start_date and schedule_start_time else None
                             ),
                             auto_opened  = True,
@@ -893,8 +893,8 @@ def process_trip_close_summary_data(self, log_id):
             start_time          = _parse_time(_p(10))
             end_date            = _parse_date(_p(11))
             end_time            = _parse_time(_p(12))
-            start_datetime      = datetime.combine(start_date, start_time) if start_date and start_time else None
-            end_datetime        = datetime.combine(end_date,   end_time)   if end_date   and end_time   else None
+            start_datetime      = timezone.make_aware(datetime.combine(start_date, start_time)) if start_date and start_time else None
+            end_datetime        = timezone.make_aware(datetime.combine(end_date, end_time)) if end_date and end_time else None
 
             full_count     = int(_p(18, 0))
             half_count     = int(_p(19, 0))
@@ -1059,7 +1059,7 @@ def process_schedule_close_summary_data(self, log_id):
             schedule_start_time = _parse_time(_p(7))
             end_date            = _parse_date(_p(8))
             end_time            = _parse_time(_p(9))
-            end_datetime        = datetime.combine(end_date, end_time) if end_date and end_time else None
+            end_datetime        = timezone.make_aware(datetime.combine(end_date, end_time)) if end_date and end_time else None
 
             # ── Idempotency guard ─────────────────────────────────────────────
             existing = ScheduleData.objects.filter(
@@ -1143,7 +1143,7 @@ def process_schedule_close_summary_data(self, log_id):
                             start_date  = schedule_start_date,
                             start_time  = schedule_start_time,
                             start_datetime = (
-                                datetime.combine(schedule_start_date, schedule_start_time)
+                                timezone.make_aware(datetime.combine(schedule_start_date, schedule_start_time))
                                 if schedule_start_date and schedule_start_time else None
                             ),
                             auto_opened  = True,
