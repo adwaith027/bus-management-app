@@ -13,7 +13,6 @@ from ...serializers.payments import MosambeeTransactionSerializer, SettlementVer
 import json
 from rest_framework.decorators import api_view
 from django.db.models import Count, Sum, Q
-import hashlib
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
@@ -24,7 +23,7 @@ def get_payout_data(request):
     if not user:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
 
-    if user.role not in ['company_admin', 'depot_admin', 'admin', 'super_admin']:
+    if user.role != 'company_admin':
         return Response({'error': 'Insufficient permissions'}, status=status.HTTP_403_FORBIDDEN)
 
     try:
@@ -107,8 +106,7 @@ def get_settlement_data(request):
     if not user:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
     
-    # Check if user has permission (manager/admin only)
-    if user.role not in ['company_admin','depot_admin', 'admin', 'super_admin']:
+    if user.role != 'company_admin':
         return Response({'error': 'Insufficient permissions'}, status=status.HTTP_403_FORBIDDEN)
     
     try:
@@ -182,8 +180,7 @@ def verify_settlement(request):
             'error': 'Authentication required'
         }, status=status.HTTP_401_UNAUTHORIZED)
     
-    # Check permissions
-    if user.role not in ['company_admin', 'depot_admin','admin', 'super_admin']:
+    if user.role != 'company_admin':
         return Response({'error': 'Insufficient permissions'}, status=status.HTTP_403_FORBIDDEN)
     
     try:
@@ -245,7 +242,7 @@ def get_settlement_summary(request):
     if not user:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
     
-    if user.role not in ['company_admin','depot_admin', 'admin', 'super_admin']:
+    if user.role != 'company_admin':
         return Response({'error': 'Insufficient permissions'}, status=status.HTTP_403_FORBIDDEN)
     
     try:
