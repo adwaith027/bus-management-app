@@ -21,6 +21,7 @@ const ROLE_PATHS = {
   company_admin: [
     '/dashboard/users',
     '/dashboard/depots',
+    '/dashboard/palmtec-devices',
     '/dashboard/master-data',
     '/dashboard/device-download',
     '/dashboard/schedule-data',

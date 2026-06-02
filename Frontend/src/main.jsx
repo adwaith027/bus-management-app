@@ -42,6 +42,7 @@ import AboutPage from './pages/tools/AboutPage'
 import GlobalSettingsPage from './pages/tools/GlobalSettingsPage'
 
 import SessionsPage from './pages/tools/SessionsPage'
+import PalmtecDevicesPage from './pages/operations/PalmtecDevicesPage'
 import AdminSessionsPage from './pages/tools/AdminSessionsPage'
 
 import ForgotPassword from './pages/auth/ForgotPassword'
@@ -175,6 +176,10 @@ const router = createBrowserRouter([
           {
             path: 'master-data/settings',
             element: <SettingsPage />
+          },
+          {
+            path: 'palmtec-devices',
+            element: <PalmtecDevicesPage />
           },
           {
             path: 'device-download',

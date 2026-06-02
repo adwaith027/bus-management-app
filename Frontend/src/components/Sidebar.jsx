@@ -343,7 +343,8 @@ export default function Sidebar() {
             {role === "company_admin" && (
               <>
                 <SectionLabel label="Setup" isCollapsed={isCollapsed} />
-                <NavItem to="/dashboard/depots" icon={Warehouse} label="Depots" isCollapsed={isCollapsed} onClose={close} />
+                <NavItem to="/dashboard/depots"           icon={Warehouse} label="Depots"           isCollapsed={isCollapsed} onClose={close} />
+                <NavItem to="/dashboard/palmtec-devices" icon={Cpu}       label="Palmtec Devices" isCollapsed={isCollapsed} onClose={close} />
                 <DropdownSection
                   icon={Database} label="Master Data"
                   isCollapsed={isCollapsed} isOpen={masterDataOpen}
