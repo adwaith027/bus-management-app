@@ -20,7 +20,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from ...models import Company, CustomUser, AuditLog
+from ...models import Company, CustomUser, AuditLog, UserRole
 from ...serializers.auth import UserSerializer
 from .auth import get_user_from_cookie
 from ..utils import _is_superadmin, _is_dealer_admin, _is_company_admin
@@ -82,15 +82,15 @@ def create_user(request):
     if not all([username, email, role, password]):
         return Response({'error': 'username, email, role, and password are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    if role in ('superadmin', 'production'):
+    if role in (UserRole.SUPERADMIN, UserRole.PRODUCTION):
         return Response({'error': 'Creating superadmin or production accounts is not allowed.'}, status=status.HTTP_403_FORBIDDEN)
 
     company_instance = None
 
     if _is_superadmin(requester):
-        if role not in ('executive', 'company_admin', 'dealer_admin'):
+        if role not in (UserRole.EXECUTIVE, UserRole.COMPANY_ADMIN, UserRole.DEALER_ADMIN):
             return Response({'error': 'Superadmin can only create executive, dealer_admin, or company_admin users.'}, status=status.HTTP_403_FORBIDDEN)
-        if role == 'company_admin':
+        if role == UserRole.COMPANY_ADMIN:
             if not company_id:
                 return Response({'error': 'company_id is required for company_admin.'}, status=status.HTTP_400_BAD_REQUEST)
             try:
@@ -99,7 +99,7 @@ def create_user(request):
                 return Response({'error': 'Company not found.'}, status=status.HTTP_404_NOT_FOUND)
 
     elif _is_dealer_admin(requester):
-        if role != 'company_admin':
+        if role != UserRole.COMPANY_ADMIN:
             return Response({'error': 'Dealer admin can only create company_admin users.'}, status=status.HTTP_403_FORBIDDEN)
         if not company_id:
             return Response({'error': 'company_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -113,7 +113,7 @@ def create_user(request):
             return Response({'error': 'Company not found.'}, status=status.HTTP_404_NOT_FOUND)
 
     elif _is_company_admin(requester):
-        if role != 'company_user':
+        if role != UserRole.COMPANY_USER:
             return Response({'error': 'Company admin can only create company_user accounts.'}, status=status.HTTP_403_FORBIDDEN)
         if not requester.company:
             return Response({'error': 'No company linked to this account.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -128,10 +128,10 @@ def create_user(request):
         return Response({'error': 'Email already exists.'}, status=status.HTTP_400_BAD_REQUEST)
 
     # Determine tier and apply creation-time checks.
-    if role == 'company_admin':
+    if role == UserRole.COMPANY_ADMIN:
         # Exactly 1 company_admin per company. Tier is always none (role-based access).
         if company_instance and User.objects.filter(
-            company=company_instance, role='company_admin', is_active=True,
+            company=company_instance, role=UserRole.COMPANY_ADMIN, is_active=True,
         ).exists():
             return Response(
                 {'error': 'This company already has an active company admin account.'},
@@ -139,7 +139,7 @@ def create_user(request):
             )
         tier = 'none'
 
-    elif role == 'company_user':
+    elif role == UserRole.COMPANY_USER:
         tier = requested_tier if requested_tier in _VALID_TIERS else 'basic'
         ok, err = _check_tier_availability(company_instance, tier)
         if not ok:
@@ -150,7 +150,7 @@ def create_user(request):
 
     # company_admin is pre-verified (trusted account created by superadmin/dealer).
     # company_user starts unverified — first APK login requires device approval.
-    is_verified = role == 'company_admin'
+    is_verified = role == UserRole.COMPANY_ADMIN
 
     try:
         new_user = User.objects.create_user(
@@ -186,9 +186,9 @@ def get_all_users(request):
     if _is_superadmin(requester):
         direct_company_ids = Company.objects.filter(client_type='direct').values_list('id', flat=True)
         users = CustomUser.objects.filter(
-            models_Q(role='company_admin', company_id__in=direct_company_ids) |
-            models_Q(role='executive') |
-            models_Q(role='dealer_admin')
+            models_Q(role=UserRole.COMPANY_ADMIN, company_id__in=direct_company_ids) |
+            models_Q(role=UserRole.EXECUTIVE) |
+            models_Q(role=UserRole.DEALER_ADMIN)
         ).order_by('id')
 
     elif _is_dealer_admin(requester):
@@ -198,14 +198,14 @@ def get_all_users(request):
             dealer_id=requester.dealer_id, is_active=True,
         ).values_list('id', flat=True)
         users = CustomUser.objects.filter(
-            role='company_admin', company_id__in=dealer_company_ids,
+            role=UserRole.COMPANY_ADMIN, company_id__in=dealer_company_ids,
         ).order_by('id')
 
     elif _is_company_admin(requester):
         if not requester.company:
             return Response({'error': 'No company linked.'}, status=status.HTTP_400_BAD_REQUEST)
         users = CustomUser.objects.filter(
-            role='company_user', company=requester.company,
+            role=UserRole.COMPANY_USER, company=requester.company,
         ).order_by('id')
 
     else:
@@ -241,21 +241,21 @@ def update_user(request, user_id):
 
     # ── Authorization scope ───────────────────────────────────────────────────
     if _is_superadmin(requester):
-        if target.role == 'superadmin':
+        if target.role == UserRole.SUPERADMIN:
             return Response({'error': 'Cannot edit another superadmin.'}, status=status.HTTP_403_FORBIDDEN)
 
     elif _is_dealer_admin(requester):
         if not requester.dealer_id:
             return Response({'error': 'No dealer linked.'}, status=status.HTTP_400_BAD_REQUEST)
         # Can only edit company_admin users under their dealer
-        if target.role != 'company_admin':
+        if target.role != UserRole.COMPANY_ADMIN:
             return Response({'error': 'Dealer admin can only edit company_admin users.'}, status=status.HTTP_403_FORBIDDEN)
         if not target.company or target.company.dealer_id != requester.dealer_id:
             return Response({'error': 'User is not under your dealer.'}, status=status.HTTP_403_FORBIDDEN)
 
     elif _is_company_admin(requester):
         # Can only edit company_user accounts within own company
-        if target.role != 'company_user':
+        if target.role != UserRole.COMPANY_USER:
             return Response({'error': 'Company admin can only edit company_user accounts.'}, status=status.HTTP_403_FORBIDDEN)
         if not requester.company or target.company_id != requester.company_id:
             return Response({'error': 'User is not in your company.'}, status=status.HTTP_403_FORBIDDEN)
@@ -279,7 +279,7 @@ def update_user(request, user_id):
     # ── Tier change (company_user only — company_admin always has tier=none) ────
     old_tier = target.tier
     tier_changed = False
-    if new_tier and target.role == 'company_user':
+    if new_tier and target.role == UserRole.COMPANY_USER:
         if new_tier not in _VALID_TIERS:
             return Response({'error': f'Invalid tier. Choose from: {", ".join(_VALID_TIERS)}'}, status=status.HTTP_400_BAD_REQUEST)
         if new_tier != target.tier:
@@ -341,15 +341,15 @@ def toggle_user_active(request, user_id):
 
     # ── Authorization ─────────────────────────────────────────────────────────
     if _is_superadmin(requester):
-        if target.role == 'superadmin':
+        if target.role == UserRole.SUPERADMIN:
             return Response({'error': 'Cannot deactivate another superadmin.'}, status=status.HTTP_403_FORBIDDEN)
 
     elif _is_dealer_admin(requester):
-        if target.role != 'company_admin' or not target.company or target.company.dealer_id != requester.dealer_id:
+        if target.role != UserRole.COMPANY_ADMIN or not target.company or target.company.dealer_id != requester.dealer_id:
             return Response({'error': 'Not authorized to toggle this user.'}, status=status.HTTP_403_FORBIDDEN)
 
     elif _is_company_admin(requester):
-        if target.role != 'company_user' or target.company_id != requester.company_id:
+        if target.role != UserRole.COMPANY_USER or target.company_id != requester.company_id:
             return Response({'error': 'Not authorized to toggle this user.'}, status=status.HTTP_403_FORBIDDEN)
 
     else:
@@ -362,9 +362,9 @@ def toggle_user_active(request, user_id):
     # ── Deactivation guards ───────────────────────────────────────────────────
     if target.is_active:
         # Cannot deactivate the last active company_admin — company would be locked out.
-        if target.role == 'company_admin' and target.company:
+        if target.role == UserRole.COMPANY_ADMIN and target.company:
             remaining = User.objects.filter(
-                company=target.company, role='company_admin', is_active=True,
+                company=target.company, role=UserRole.COMPANY_ADMIN, is_active=True,
             ).exclude(pk=target.pk).count()
             if remaining == 0:
                 return Response(
@@ -448,7 +448,7 @@ def user_capacity(request):
     from django.db.models import Count, Case, When, IntegerField, Value
     stats = User.objects.filter(
         company=company, is_active=True,
-        role='company_user',
+        role=UserRole.COMPANY_USER,
     ).aggregate(
         total       = Count('id'),
         basic_count = Count(Case(When(tier='basic',        then=Value(1)), output_field=IntegerField())),

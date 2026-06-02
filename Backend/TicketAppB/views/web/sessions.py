@@ -22,7 +22,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
 
-from ...models import UserSession, UserApprovedDevice, DevicePendingApproval, Company
+from ...models import UserSession, UserApprovedDevice, DevicePendingApproval, Company, UserRole
 from .auth import get_user_from_cookie, _get_session_uid_from_request, SESSION_INACTIVITY_HOURS
 
 _ACCESS_TOKEN_TTL = int(django_settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME'].total_seconds())
@@ -164,7 +164,7 @@ def force_logout_session(request, session_uid):
 
 # ── Superadmin session management ─────────────────────────────────────────────
 
-_ADMIN_ROLES = ('superadmin', 'company_admin', 'dealer_admin', 'executive', 'production')
+_ADMIN_ROLES = (UserRole.SUPERADMIN, UserRole.COMPANY_ADMIN, UserRole.DEALER_ADMIN, UserRole.EXECUTIVE, UserRole.PRODUCTION)
 
 
 @api_view(['GET'])

@@ -22,7 +22,7 @@ from rest_framework.response import Response
 from rest_framework.decorators import api_view
 from django.contrib.auth import get_user_model
 
-from ...models import Dealer, Company, ETMDevice, AuditLog
+from ...models import Dealer, Company, ETMDevice, AuditLog, UserRole
 from ...serializers.dealers import DealerSerializer
 from ...serializers.company import CompanySerializer
 from .auth import get_user_from_cookie
@@ -256,7 +256,7 @@ def create_dealer(request):
         username=username,
         email=email,
         password=password,
-        role='dealer_admin',
+        role=UserRole.DEALER_ADMIN,
         tier='none',
         dealer=dealer,
         is_verified=True,

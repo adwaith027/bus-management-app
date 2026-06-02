@@ -1,12 +1,13 @@
 from rest_framework import status
 from rest_framework.response import Response
 from django.core.cache import cache
+from ..models.auth import UserRole
 
-# ── Role constants ────────────────────────────────────────────────────────────
-ROLE_SUPERADMIN   = 'superadmin'
-ROLE_EXECUTIVE    = 'executive'
-ROLE_DEALER_ADMIN = 'dealer_admin'
-ROLE_COMPANY_ADMIN = 'company_admin'
+# ── Role constants (aliases for the canonical enum) ───────────────────────────
+ROLE_SUPERADMIN    = UserRole.SUPERADMIN
+ROLE_EXECUTIVE     = UserRole.EXECUTIVE
+ROLE_DEALER_ADMIN  = UserRole.DEALER_ADMIN
+ROLE_COMPANY_ADMIN = UserRole.COMPANY_ADMIN
 
 # ── Role checkers ─────────────────────────────────────────────────────────────
 def _is_superadmin(user):
@@ -30,13 +31,9 @@ _TIER_ERROR = {"error": "This report requires Intermediate tier or above."}
 
 def _meets_tier(user, minimum: str) -> bool:
     """True if user's tier is >= minimum. Non-company roles are always allowed."""
-    if user.role not in ('company_admin', 'company_user'):
+    if user.role not in (UserRole.COMPANY_ADMIN, UserRole.COMPANY_USER):
         return True
     return _TIER_ORDER.get(user.tier or 'basic', 0) >= _TIER_ORDER.get(minimum, 0)
-
-def _can_manage_devices(user):
-    """Superadmin and executive can approve/reject ETM devices."""
-    return _is_superadmin_or_executive(user)
 
 
 def _get_company(company_id):
@@ -58,7 +55,7 @@ def _get_authenticated_company_admin(request):
             {'error': 'Authentication required'},
             status=status.HTTP_401_UNAUTHORIZED
         )
-    if user.role != 'company_admin':
+    if user.role != UserRole.COMPANY_ADMIN:
         return None, None, Response(
             {'error': 'Only company admins can access this.'},
             status=status.HTTP_403_FORBIDDEN

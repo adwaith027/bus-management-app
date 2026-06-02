@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework.decorators import api_view
 from django.contrib.auth import get_user_model
 
-from ...models import Company
+from ...models import Company, UserRole
 from ...serializers.company import CompanySerializer
 from .auth import get_user_from_cookie
 from ..utils import _is_superadmin
@@ -71,11 +71,11 @@ def executive_dashboard(request):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         try:
-            target_user = User.objects.get(id=exec_id, role='executive')
+            target_user = User.objects.get(id=exec_id, role=UserRole.EXECUTIVE)
         except User.DoesNotExist:
             return Response({'error': 'Executive user not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    elif user.role == 'executive':
+    elif user.role == UserRole.EXECUTIVE:
         target_user = user
 
     else:

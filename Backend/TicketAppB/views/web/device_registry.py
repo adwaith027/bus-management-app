@@ -25,7 +25,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ...models import ETMDevice, Company, Dealer, AuditLog
+from ...models import ETMDevice, Company, Dealer, AuditLog, UserRole
 from ...serializers.devices import ETMDeviceSerializer
 from .auth import get_user_from_cookie
 from ..utils import (
@@ -48,7 +48,7 @@ def _device_qs_for_user(user):
     if _is_superadmin(user):
         return qs
 
-    if user.role == 'production':
+    if user.role == UserRole.PRODUCTION:
         # Production users see only the devices they uploaded
         return qs.filter(created_by=user)
 
@@ -90,7 +90,7 @@ class DeviceUploadView(APIView):
         user = get_user_from_cookie(request)
         if not user:
             return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-        if not (_is_superadmin(user) or user.role == 'production'):
+        if not (_is_superadmin(user) or user.role == UserRole.PRODUCTION):
             return Response({'error': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
 
         excel_file = request.FILES.get('file')

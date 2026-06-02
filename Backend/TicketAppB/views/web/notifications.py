@@ -9,7 +9,7 @@ Severity levels: 'error' | 'warning' | 'info'
 
 from django.utils import timezone
 
-from ...models import ETMDevice, Route, RouteDepot
+from ...models import ETMDevice, Route, RouteDepot, UserRole
 
 # Days before expiry at which we start warning
 _EXPIRY_WARNING_DAYS = 30
@@ -64,7 +64,7 @@ def get_login_notifications(user, company):
             })
 
     # ── 3. ETM devices allocated but missing Palmtec ID ──────────────────────
-    if company:
+    if company and user.role == UserRole.COMPANY_ADMIN:
         unmapped_devices = ETMDevice.objects.filter(
             company=company,
             allocation_status=ETMDevice.AllocationStatus.ALLOCATED,
@@ -82,7 +82,7 @@ def get_login_notifications(user, company):
             })
 
     # ── 4. Routes with no depot assigned ─────────────────────────────────────
-    if company:
+    if company and user.role == UserRole.COMPANY_ADMIN:
         mapped_route_ids = RouteDepot.objects.filter(
             route__company=company,
         ).values_list('route_id', flat=True)
@@ -98,7 +98,7 @@ def get_login_notifications(user, company):
                 'severity': 'info',
                 'message':  (
                     f'{routes_without_depot} route(s) have no depot assigned. '
-                    'Assign depots in Route Management.'
+                    'Assign depot to routes to establish route-depot connection.'
                 ),
                 'count': routes_without_depot,
             })

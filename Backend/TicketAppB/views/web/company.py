@@ -20,7 +20,7 @@ from django.contrib.auth import get_user_model
 from rest_framework.decorators import api_view
 from django.db.utils import OperationalError, ProgrammingError
 from django.db.models import Sum, Q, Count, Case, When, IntegerField
-from ...models import Company, TransactionData, TripData, Route, VehicleType, MosambeeTransaction, Dealer, ETMDevice, UserSession
+from ...models import Company, TransactionData, TripData, Route, VehicleType, MosambeeTransaction, Dealer, ETMDevice, UserSession, UserRole
 from ..utils import _is_superadmin, _is_executive, _is_dealer_admin, _is_company_admin
 from .audit_logs import log_action
 from ...models import AuditLog
@@ -733,7 +733,7 @@ def import_company(request):
         username=imp_user_username,
         email=imp_user_email,
         password=imp_user_password,
-        role='company_admin',
+        role=UserRole.COMPANY_ADMIN,
         company=company,
         is_verified=True,
     )
@@ -958,7 +958,7 @@ def create_company(request):
         username=user_username,
         email=user_email_field,
         password=user_password,
-        role='company_admin',
+        role=UserRole.COMPANY_ADMIN,
         tier='none',
         company=company,
         is_verified=True,

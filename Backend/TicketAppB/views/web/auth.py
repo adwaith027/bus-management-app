@@ -37,7 +37,7 @@ from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
 from django.conf import settings
 from django.core.cache import cache
 
-from ...models import Company, UserSession, AuditLog, UserApprovedDevice, DevicePendingApproval
+from ...models import Company, UserSession, AuditLog, UserApprovedDevice, DevicePendingApproval, UserRole
 from .audit_logs import log_action
 
 logger = logging.getLogger(__name__)
@@ -223,7 +223,7 @@ def _enforce_single_session(user):
     Superadmin is exempt. Stale sessions must be expired first via _expire_stale_sessions().
     Returns an error Response or None if the login may proceed.
     """
-    if user.role == 'superadmin':
+    if user.role == UserRole.SUPERADMIN:
         return None
 
     if UserSession.objects.filter(user=user, is_active=True).exists():
@@ -329,7 +329,7 @@ def login_view(request):
     is_apk = _is_apk_request(request)
 
     # ── 3: web-only roles cannot log in via APK ──────────────────────────────
-    if user.role in ('superadmin', 'company_admin') and is_apk:
+    if user.role in (UserRole.SUPERADMIN, UserRole.COMPANY_ADMIN) and is_apk:
         return Response(
             {'error': 'This account can only log in via the web dashboard.'},
             status=status.HTTP_403_FORBIDDEN,
@@ -337,7 +337,7 @@ def login_view(request):
 
     # ── 4: Device approval check (APK, company_user only) ────────────────────
     device_uuid = None
-    if is_apk and user.role == 'company_user':
+    if is_apk and user.role == UserRole.COMPANY_USER:
         device_uuid = (
             request.data.get('uuid') or request.data.get('device_uuid') or ''
         ).strip() or None
@@ -391,7 +391,7 @@ def login_view(request):
             return block
 
         # ── 7: Concurrent session cap (company_user only, superadmin exempt) ──
-        if user.role == 'company_user' and company:
+        if user.role == UserRole.COMPANY_USER and company:
             if company.total_user_count > 0:
                 active_count = UserSession.objects.filter(
                     user__company=company, is_active=True,
