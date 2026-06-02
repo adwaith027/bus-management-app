@@ -134,8 +134,8 @@ class TransactionData(models.Model):
         default=PaymentMode.CASH, null=True, blank=True
     )
     #----------------
-    # indicate if upi payment verification manual/not (to be used later)
-    auto_upi    = models.BooleanField(
+    # indicate if upi payment verification manual/not
+    manual_verified_upi    = models.BooleanField(
         # default=None translates to null
         default=None,null=True,blank=True
     )

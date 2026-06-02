@@ -145,8 +145,8 @@ def getTicketDataFromDevice(request):
 
     parts = raw.split("|")
 
-    # Need at least parts[46] (license_code/company); parts[44]=ticket_status, parts[45]=bqr_merchant_id
-    if len(parts) < 47:
+    # Need at least parts[47] (upi_manual_check); parts[46]=license_code, parts[44]=ticket_status
+    if len(parts) < 48:
         return HttpResponse("MISSING_DATA", status=400, content_type="text/plain")
 
     if parts[0] != 'Ticket':

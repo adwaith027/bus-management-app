@@ -104,7 +104,7 @@ def _resolve_vehicle(bus_reg_num, company_id):
 #   [36]=full_total  [37]=half_total  [38]=phy_total  [39]=ladies_total
 #   [40]=senior_total  [41]=lugg_total  [42]=st_total
 #   [43]=transaction_id  [44]=ticket_status  [45]=bqr_merchant_id
-#   [46]=license_code(company)
+#   [46]=license_code(company)  [47]=upi_manual_check (1=manual, 0=auto)  [48]=checksum
 # ─────────────────────────────────────────────────────────────────────────────
 @shared_task(bind=True, max_retries=3)
 def process_transaction_data(self, log_id):
@@ -252,6 +252,7 @@ def process_transaction_data(self, log_id):
                         transaction_id       = _p(43),
                         ticket_status        = ticket_status,
                         bqr_merchant_id      = _p(45),
+                        manual_verified_upi  = (int(_p(47)) == 1) if _p(47) is not None else None,
                         company_code         = company,
                         raw_payload          = log.raw_payload,
                     )

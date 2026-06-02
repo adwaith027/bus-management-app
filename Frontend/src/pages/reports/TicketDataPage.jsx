@@ -115,10 +115,15 @@ function TicketRow({ ticket: t, onView, isNew }) {
     <tr className={`transition-colors hover:bg-slate-50/70 group ${isNew ? 'bg-slate-100/60' : ''}`}>
       {/* Payment icon */}
       <td className="px-4 py-3.5">
-        <div className={`h-9 w-9 rounded-xl flex items-center justify-center ${
-          isUpi ? 'bg-blue-50 text-blue-600' : 'bg-amber-50 text-amber-600'
-        }`}>
-          {isUpi ? <CreditCard size={15} /> : <Banknote size={15} />}
+        <div className="relative inline-flex">
+          <div className={`h-9 w-9 rounded-xl flex items-center justify-center ${
+            isUpi ? 'bg-blue-50 text-blue-600' : 'bg-amber-50 text-amber-600'
+          }`}>
+            {isUpi ? <CreditCard size={15} /> : <Banknote size={15} />}
+          </div>
+          {isUpi && t.manual_verified_upi === true && (
+            <span className="absolute -top-1 -right-1 text-[9px] font-bold bg-blue-600 text-white rounded px-1 leading-4">MV</span>
+          )}
         </div>
       </td>
 
@@ -298,9 +303,14 @@ function TicketDetailModal({ ticket: t, onClose }) {
 
           {/* UPI reference — only when payment is UPI */}
           {isUpi && (
-            <FieldGroup title="UPI Reference" columns={2}>
+            <FieldGroup title="UPI Reference" columns={3}>
               <FieldBlock label="Transaction ID"   value={t.transaction_id || '—'} />
               <FieldBlock label="Reference Number" value={t.reference_number || '—'} />
+              <FieldBlock
+                label="UPI Verification"
+                value={t.manual_verified_upi === true ? 'Manual' : t.manual_verified_upi === false ? 'Auto' : '—'}
+                accent={t.manual_verified_upi === true ? 'blue' : t.manual_verified_upi === false ? 'emerald' : undefined}
+              />
             </FieldGroup>
           )}
 
@@ -616,11 +626,15 @@ export default function TicketDataPage() {
       { header: 'Transaction ID',  key: 'transaction_id',        width: 22 },
       { header: 'Reference No',    key: 'reference_number',      width: 20 },
       { header: 'BQR Merchant ID', key: 'bqr_merchant_id',       width: 22 },
+      { header: 'UPI Verification', key: 'manual_verified_upi',  width: 16 },
       { header: 'Battery %',       key: 'battery_percentage',    width: 12 },
       { header: 'Pass ID',         key: 'pass_id',               width: 18 },
       { header: 'Refund Status',   key: 'refund_status',         width: 14 },
     ];
-    filteredData.forEach(t => ws.addRow(t));
+    filteredData.forEach(t => ws.addRow({
+      ...t,
+      manual_verified_upi: t.manual_verified_upi === true ? 'Manual' : t.manual_verified_upi === false ? 'Auto' : '',
+    }));
     ws.getRow(1).font = { bold: true };
     ws.views = [{ state: 'frozen', ySplit: 1 }];
     const buffer = await wb.xlsx.writeBuffer();

@@ -67,6 +67,7 @@ class TicketDataSerializer(serializers.ModelSerializer):
             'senior_count',
             'transaction_id',
             'ticket_status',
+            'manual_verified_upi',
             'reference_number',
             'bqr_merchant_id',
             'up_down_trip',
