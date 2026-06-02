@@ -228,6 +228,7 @@ export default function MdbImport() {
                   imported:      event.total_imported,
                   existing:      event.total_existing,
                   skipped:       event.total_skipped,
+                  replaced:      event.total_replaced ?? 0,
                   table_results: tableProgressRef.current,
                   errors:        event.errors,
                   read_errors:   event.read_errors,

@@ -24,7 +24,9 @@
 */
 
 export default function ImportResults({ result, onReset }) {
+  const replaced = result.replaced ?? 0;
   const total = (result.imported ?? 0) + (result.existing ?? 0) + (result.skipped ?? 0);
+  const hasReplaced = replaced > 0 || (result.table_results ?? []).some(t => (t.replaced ?? 0) > 0);
   const hasErrors = result.errors && result.errors.length > 0;
   const isFullSuccess = result.skipped === 0;
 
@@ -61,14 +63,14 @@ export default function ImportResults({ result, onReset }) {
             {isFullSuccess ? 'Import completed successfully!' : 'Import completed with some issues'}
           </p>
           <p className={`text-sm mt-0.5 ${isFullSuccess ? 'text-emerald-600' : 'text-amber-600'}`}>
-            {result.imported} new, {result.existing ?? 0} already existed, {result.skipped} skipped
+            {result.imported} new, {result.existing ?? 0} existing, {replaced} replaced, {result.skipped} skipped
           </p>
         </div>
       </div>
 
       {/* ---- Stats Grid ---- */}
-      {/* 4-number summary: total / new / existing / skipped */}
-      <div className="grid grid-cols-4 gap-3">
+      {/* 4 or 5-number summary depending on whether any table used full-refresh */}
+      <div className={`grid gap-3 ${hasReplaced ? 'grid-cols-5' : 'grid-cols-4'}`}>
         <div className="bg-slate-50 rounded-lg p-3 text-center border border-slate-200">
           <p className="text-2xl font-bold text-slate-800">{total}</p>
           <p className="text-xs text-slate-500 mt-0.5">Total</p>
@@ -81,6 +83,12 @@ export default function ImportResults({ result, onReset }) {
           <p className="text-2xl font-bold text-slate-700">{result.existing ?? 0}</p>
           <p className="text-xs text-slate-500 mt-0.5">Existing</p>
         </div>
+        {hasReplaced && (
+          <div className="bg-blue-50 rounded-lg p-3 text-center border border-blue-200">
+            <p className="text-2xl font-bold text-blue-700">{replaced}</p>
+            <p className="text-xs text-blue-600 mt-0.5">Replaced</p>
+          </div>
+        )}
         <div className="bg-red-50 rounded-lg p-3 text-center border border-red-200">
           <p className="text-2xl font-bold text-red-700">{result.skipped}</p>
           <p className="text-xs text-red-600 mt-0.5">Skipped</p>
@@ -99,6 +107,7 @@ export default function ImportResults({ result, onReset }) {
                   <th className="px-3 py-2 text-left font-medium text-slate-600">Table</th>
                   <th className="px-3 py-2 text-right font-medium text-slate-600">New</th>
                   <th className="px-3 py-2 text-right font-medium text-slate-600">Existing</th>
+                  {hasReplaced && <th className="px-3 py-2 text-right font-medium text-blue-600">Replaced</th>}
                   <th className="px-3 py-2 text-right font-medium text-slate-600">Skipped</th>
                 </tr>
               </thead>
@@ -108,6 +117,11 @@ export default function ImportResults({ result, onReset }) {
                     <td className="px-3 py-2 text-slate-700 font-medium">{t.table}</td>
                     <td className="px-3 py-2 text-right text-emerald-700">{t.imported}</td>
                     <td className="px-3 py-2 text-right text-slate-500">{t.existing ?? 0}</td>
+                    {hasReplaced && (
+                      <td className={`px-3 py-2 text-right ${(t.replaced ?? 0) > 0 ? 'text-blue-600 font-medium' : 'text-slate-300'}`}>
+                        {t.replaced ?? 0}
+                      </td>
+                    )}
                     <td className={`px-3 py-2 text-right ${t.skipped > 0 ? 'text-red-600' : 'text-slate-400'}`}>
                       {t.skipped}
                     </td>

@@ -212,6 +212,8 @@ class MdbImportService:
             ('InspectorDetails', 'INSPECTORDET',  MdbImportService._process_inspector_details),
         ]
 
+        total_replaced = 0
+
         for table_name, raw_key, processor_fn in processors:
             rows = raw_tables.get(raw_key, [])
 
@@ -223,18 +225,25 @@ class MdbImportService:
                 # Each table gets its OWN atomic block (savepoint).
                 # If THIS table fails, only THIS table rolls back.
                 with transaction.atomic():
-                    imported, existing, skipped, errors = processor_fn(rows, company, user, lookups)
+                    result = processor_fn(rows, company, user, lookups)
+                    if len(result) == 5:
+                        imported, existing, skipped, errors, replaced = result
+                    else:
+                        imported, existing, skipped, errors = result
+                        replaced = 0
             except Exception as e:
                 # Entire table processor crashed — mark all rows skipped and continue
                 imported = 0
                 existing = 0
                 skipped  = len(rows)
+                replaced = 0
                 errors   = [f"Table {table_name} failed entirely: {str(e)}"]
 
             all_errors.extend(errors)
             total_imported += imported
             total_existing += existing
             total_skipped  += skipped
+            total_replaced += replaced
 
             # Yield one event per table as it completes — frontend gets live updates
             yield {
@@ -243,6 +252,7 @@ class MdbImportService:
                 'imported': imported,
                 'existing': existing,
                 'skipped':  skipped,
+                'replaced': replaced,
                 'errors':   errors,
             }
 
@@ -269,12 +279,13 @@ class MdbImportService:
 
         # Final summary event — frontend transitions to results view on this
         yield {
-            'type':           'done',
-            'total_imported': total_imported,
-            'total_existing': total_existing,
-            'total_skipped':  total_skipped,
-            'errors':         all_errors,
-            'read_errors':    read_errors,
+            'type':            'done',
+            'total_imported':  total_imported,
+            'total_existing':  total_existing,
+            'total_skipped':   total_skipped,
+            'total_replaced':  total_replaced,
+            'errors':          all_errors,
+            'read_errors':     read_errors,
         }
 
 
@@ -885,20 +896,21 @@ class MdbImportService:
         if to_create:
             # Delete existing fares only for routes present in this batch so
             # that routes not covered by the MDB are left untouched.
-            existing_count = Fare.objects.filter(
+            replaced = Fare.objects.filter(
                 company=company, route_id__in=routes_in_batch
             ).count()
             Fare.objects.filter(
                 company=company, route_id__in=routes_in_batch
             ).delete()
-            existing = existing_count  # report how many were replaced
 
             # ignore_conflicts=True guards against duplicate Number values
             # within the same batch (MDB quirk) without aborting the whole insert.
             Fare.objects.bulk_create(to_create, ignore_conflicts=True)
-            imported = len(to_create)
+            # Only count as "imported/new" if there was nothing before (first import).
+            # On re-import the replaced counter carries the story — not imported.
+            imported = 0 if replaced > 0 else len(to_create)
 
-        return imported, existing, skipped, errors
+        return imported, existing, skipped, errors, replaced
 
 
     @staticmethod
@@ -980,9 +992,6 @@ class MdbImportService:
                 'header3':       str(row.get('Header3',      '') or '').strip() or None,
                 'footer1':       str(row.get('Footer1',      '') or '').strip() or None,
                 'footer2':       str(row.get('Footer2',      '') or '').strip() or None,
-
-                # Device ID
-                'palmtec_id': str(row.get('PalmtecID', '') or '').strip() or None,
 
                 # Boolean flags (MDB stores as SMALLINT 0/1)
                 'roundoff':             MdbImportService._to_bool(row.get('Roundoff')),
