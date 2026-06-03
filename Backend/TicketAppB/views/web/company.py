@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 User = get_user_model()
 
 _STATES_DISTRICTS = json.loads(
-    (Path(__file__).resolve().parent.parent.parent / 'data' / 'states_districts.json').read_text()
+    (Path(__file__).resolve().parent.parent.parent / 'utils' / 'indiaStatesDistricts.json').read_text()
 )
 
 
@@ -1092,7 +1092,7 @@ def delete_company(request, pk):
     user = get_user_from_cookie(request)
     if not user:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    if user.role != 'superadmin':
+    if user.role != UserRole.SUPERADMIN:
         return Response({'error': 'Superadmin only'}, status=status.HTTP_403_FORBIDDEN)
 
     try:
