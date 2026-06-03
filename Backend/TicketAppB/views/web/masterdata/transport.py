@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.views import APIView
 
-from ....models import BusType, Stage, Route, VehicleType, RouteStage, RouteBusType, RouteDepot, Fare, Depot
+from ....models import BusType, Stage, Route, VehicleType, RouteStage, RouteBusType, RouteDepot, Fare, Depot, UserRole
 from django.db.models import Count
 from ....serializers.masterdata import BusTypeSerializer, StageSerializer, RouteSerializer, RouteListSerializer, VehicleTypeSerializer
 from ...utils import _get_authenticated_company_admin, _get_object_or_404
@@ -776,7 +776,7 @@ class RouteExcelImportView(APIView):
         user = get_user_from_cookie(request)
         if not user:
             return Response({'message': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
-        if user.role != 'company_admin':
+        if user.role != UserRole.COMPANY_ADMIN:
             return Response({'message': 'Only company admins can import routes.'}, status=status.HTTP_403_FORBIDDEN)
         company = user.company
         if not company:

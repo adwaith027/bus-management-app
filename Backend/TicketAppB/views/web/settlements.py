@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from django.utils import timezone as tz
 from rest_framework import status
-from ...models import TransactionData, Company, MosambeeTransaction, MosambeePayoutCallback
+from ...models import TransactionData, Company, MosambeeTransaction, MosambeePayoutCallback, UserRole
 from django.http import HttpResponse, JsonResponse
 from .auth import get_user_from_cookie
 from rest_framework.response import Response
@@ -23,7 +23,7 @@ def get_payout_data(request):
     if not user:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
 
-    if user.role != 'company_admin':
+    if user.role != UserRole.COMPANY_ADMIN:
         return Response({'error': 'Insufficient permissions'}, status=status.HTTP_403_FORBIDDEN)
 
     try:
@@ -106,7 +106,7 @@ def get_settlement_data(request):
     if not user:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
     
-    if user.role != 'company_admin':
+    if user.role != UserRole.COMPANY_ADMIN:
         return Response({'error': 'Insufficient permissions'}, status=status.HTTP_403_FORBIDDEN)
     
     try:
@@ -180,7 +180,7 @@ def verify_settlement(request):
             'error': 'Authentication required'
         }, status=status.HTTP_401_UNAUTHORIZED)
     
-    if user.role != 'company_admin':
+    if user.role != UserRole.COMPANY_ADMIN:
         return Response({'error': 'Insufficient permissions'}, status=status.HTTP_403_FORBIDDEN)
     
     try:
@@ -242,7 +242,7 @@ def get_settlement_summary(request):
     if not user:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
     
-    if user.role != 'company_admin':
+    if user.role != UserRole.COMPANY_ADMIN:
         return Response({'error': 'Insufficient permissions'}, status=status.HTTP_403_FORBIDDEN)
     
     try:

@@ -499,7 +499,7 @@ def change_user_password(request, user_id):
     requester = get_user_from_cookie(request)
     if not requester:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    if requester.role != 'superadmin':
+    if requester.role != UserRole.SUPERADMIN:
         return Response({'error': 'Only superadmin can reset another user\'s password.'}, status=status.HTTP_403_FORBIDDEN)
 
     new_password = (request.data.get('new_password') or '').strip()

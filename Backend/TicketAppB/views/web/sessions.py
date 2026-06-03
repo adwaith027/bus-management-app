@@ -96,7 +96,7 @@ def list_sessions(request):
     requester = get_user_from_cookie(request)
     if not requester:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    if requester.role != 'company_admin' or not requester.company:
+    if requester.role != UserRole.COMPANY_ADMIN or not requester.company:
         return Response({'error': 'Company admin access required.'}, status=status.HTTP_403_FORBIDDEN)
 
     stale_cutoff = timezone.now() - timedelta(hours=_STALE_THRESHOLD_HOURS)
@@ -135,7 +135,7 @@ def force_logout_session(request, session_uid):
     requester = get_user_from_cookie(request)
     if not requester:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    if requester.role != 'company_admin' or not requester.company:
+    if requester.role != UserRole.COMPANY_ADMIN or not requester.company:
         return Response({'error': 'Company admin access required.'}, status=status.HTTP_403_FORBIDDEN)
 
     try:
@@ -176,7 +176,7 @@ def list_all_sessions(request):
     requester = get_user_from_cookie(request)
     if not requester:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    if requester.role != 'superadmin':
+    if requester.role != UserRole.SUPERADMIN:
         return Response({'error': 'Superadmin access required.'}, status=status.HTTP_403_FORBIDDEN)
 
     stale_cutoff = timezone.now() - timedelta(hours=_STALE_THRESHOLD_HOURS)
@@ -215,7 +215,7 @@ def force_logout_session_admin(request, session_uid):
     requester = get_user_from_cookie(request)
     if not requester:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    if requester.role != 'superadmin':
+    if requester.role != UserRole.SUPERADMIN:
         return Response({'error': 'Superadmin access required.'}, status=status.HTTP_403_FORBIDDEN)
 
     try:
@@ -249,7 +249,7 @@ def list_pending_approvals(request):
     requester = get_user_from_cookie(request)
     if not requester:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    if requester.role != 'company_admin' or not requester.company:
+    if requester.role != UserRole.COMPANY_ADMIN or not requester.company:
         return Response({'error': 'Company admin access required.'}, status=status.HTTP_403_FORBIDDEN)
 
     pending = DevicePendingApproval.objects.filter(
@@ -282,7 +282,7 @@ def approve_device(request, approval_id):
     requester = get_user_from_cookie(request)
     if not requester:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    if requester.role != 'company_admin' or not requester.company:
+    if requester.role != UserRole.COMPANY_ADMIN or not requester.company:
         return Response({'error': 'Company admin access required.'}, status=status.HTTP_403_FORBIDDEN)
 
     try:
@@ -346,7 +346,7 @@ def reject_device(request, approval_id):
     requester = get_user_from_cookie(request)
     if not requester:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    if requester.role != 'company_admin' or not requester.company:
+    if requester.role != UserRole.COMPANY_ADMIN or not requester.company:
         return Response({'error': 'Company admin access required.'}, status=status.HTTP_403_FORBIDDEN)
 
     try:

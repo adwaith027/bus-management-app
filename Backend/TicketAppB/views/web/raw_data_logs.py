@@ -5,7 +5,7 @@ from django.db.models import Q
 from django.utils import timezone as tz
 import datetime
 
-from ...models import RawDataLog
+from ...models import RawDataLog, UserRole
 from ...tasks import (
     process_transaction_data, process_trip_open_data, process_trip_close_data,
     process_trip_close_summary_data, process_schedule_open_data,
@@ -29,7 +29,7 @@ def get_failed_payloads(request):
     user = get_user_from_cookie(request)
     if not user:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    if user.role != 'superadmin':
+    if user.role != UserRole.SUPERADMIN:
         return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
 
     qs = RawDataLog.objects.select_related('company_code').filter(
@@ -110,7 +110,7 @@ def retry_failed_payload(request, log_id):
     user = get_user_from_cookie(request)
     if not user:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    if user.role != 'superadmin':
+    if user.role != UserRole.SUPERADMIN:
         return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
 
     try:
