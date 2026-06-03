@@ -58,17 +58,19 @@ def mosambee_settlement_data(request):
         address_line1 = data.get('addressLine1')
         address_line2 = data.get('addressLine2')
         
-        # Location fields
-        transaction_lat = data.get('transactionLat')
-        transaction_long = data.get('transactionLong')
+        # Location fields — convert empty string to None for DecimalField
+        transaction_lat = data.get('transactionLat') or None
+        transaction_long = data.get('transactionLong') or None
         
         # Other transaction details
         transaction_stan = data.get('transactionSTAN')
         transaction_auth_code = data.get('transactionAuthCode')
-        transaction_batch_number = data.get('transactionBatchNumber')
+        raw_batch = data.get('transactionBatchNumber')
+        transaction_batch_number = None if raw_batch == '' else raw_batch
         currency_id = data.get('currencyId', '1')
         narration = data.get('narration')
-        transaction_type_id = data.get('transactionTypeId', 0)
+        raw_type_id = data.get('transactionTypeId', 0)
+        transaction_type_id = 0 if raw_type_id == '' else raw_type_id
         transaction_type_name = data.get('transactionTypeName')
         
         # Bank/Gateway fields
@@ -255,6 +257,7 @@ def mosambee_settlement_data(request):
         return JsonResponse(response_data,status=status.HTTP_200_OK)
 
     except Exception as e:
+        logger.exception("Unhandled exception in mosambee_settlement_data: %s", e)
         logger_txn.exception("Unhandled exception in mosambee_settlement_data: %s", e)
         return JsonResponse({'status': 500,'message': 'Data Entry failed'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
