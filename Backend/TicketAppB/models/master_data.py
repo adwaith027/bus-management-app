@@ -656,7 +656,7 @@ class SettingsProfile(models.Model):
         related_name='settings_profiles',
     )
     name = models.CharField(max_length=100)
-    palmtec_id = models.PositiveIntegerField(null=True, blank=True, help_text="Client-assigned device identifier (max 6 digits)")
+    palmtec_id = models.PositiveIntegerField(help_text="Client-assigned device identifier (max 6 digits)")
 
     # ── Passwords ────────────────────────────────────────────────────────────
     user_pwd   = models.CharField(max_length=255, null=True, blank=True)

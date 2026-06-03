@@ -10,6 +10,8 @@ from django.http import HttpResponse
 import os
 
 # ---- etm initial data send ----
+# ---- we need to add some sort of flag to the etmdevice so that we know which all fetched intial setup data.we can set its status active ----
+# ---- another is checking if max device limit reached for a company of active devices. ----
 @csrf_exempt
 @api_view(['GET'])
 def get_etm_intial_data(request):
@@ -18,7 +20,7 @@ def get_etm_intial_data(request):
     serialNumber = request.GET.get('serialnumber')
     if not serialNumber:
         return Response({"message": "Serial number is required"}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     try:
         etm_object = ETMDevice.objects.get(serial_number=serialNumber)
     except ETMDevice.DoesNotExist:
@@ -29,6 +31,10 @@ def get_etm_intial_data(request):
     
     # get company details from Company table
     customerCode = company_obj.company_id
+    try:
+        customerCode = int(customerCode)
+    except ValueError:
+        pass
     companyName = company_obj.company_name
     customerName = company_obj.contact_person
 
@@ -47,7 +53,7 @@ def get_etm_intial_data(request):
         "versionDetails": version,
         "devicetype": devicetype,
         "company": companyName,
-        "date": timezone.now().strftime("%Y-%m-%d %H:%M:%S")
+        "date": timezone.now().strftime("%d-%m-%Y %H:%M:%S")
     }
 
     return Response({"status": "success", "statusCode": status.HTTP_200_OK, "message": "Device Details Fetch Succesfully!", "data": data})

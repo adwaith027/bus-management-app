@@ -287,6 +287,12 @@ class SettingsProfileSerializer(serializers.ModelSerializer):
     created_by = serializers.PrimaryKeyRelatedField(read_only=True)
     updated_by = serializers.PrimaryKeyRelatedField(read_only=True)
     company    = serializers.PrimaryKeyRelatedField(read_only=True)
+    palmtec_id = serializers.IntegerField(required=True, min_value=1)
+
+    def validate_palmtec_id(self, value):
+        if not value:
+            raise serializers.ValidationError("Palmtec ID is required.")
+        return value
 
     class Meta:
         model  = SettingsProfile

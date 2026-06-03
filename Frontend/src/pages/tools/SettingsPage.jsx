@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Settings, Smartphone, Ticket, BadgeDollarSign,
   ToggleRight, Save, CheckCircle2, ChevronDown, Building2,
@@ -60,6 +60,79 @@ const ConstrainedField = ({ label, name, value, onChange, maxLen, allowDecimal =
     </div>
   );
 };
+
+function DevicePalmtecSelect({ label, value, onChange }) {
+  const [devices, setDevices]   = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [open, setOpen]         = useState(false);
+  const ref                     = useRef(null);
+
+  useEffect(() => {
+    api.get(`${BASE_URL}/etm-devices`)
+      .then(res => setDevices(res.data?.data ?? []))
+      .catch(() => setDevices([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const select = (palmtecId) => {
+    onChange({ target: { name: 'palmtec_id', value: palmtecId } });
+    setOpen(false);
+  };
+
+  const assignedDevices = devices.filter(d => d.palmtec_id);
+  const displayValue   = value ? String(value) : null;
+
+  return (
+    <div className="space-y-1.5" ref={ref}>
+      <label className="text-sm font-semibold text-slate-700">{label} <span className="text-red-500">*</span></label>
+      {loading ? (
+        <div className="w-full h-10 bg-slate-100 rounded-xl animate-pulse" />
+      ) : (
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setOpen(p => !p)}
+            className="w-full flex items-center justify-between px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-slate-500 text-sm bg-white transition-all text-left"
+          >
+            <span className={displayValue ? 'text-slate-800 font-mono' : 'text-slate-400'}>
+              {displayValue ?? '— Select device —'}
+            </span>
+            <ChevronDown size={16} className={`text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+          </button>
+
+          {open && (
+            <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg max-h-52 overflow-y-auto">
+              <div
+                className="px-4 py-2.5 text-sm text-slate-400 hover:bg-slate-50 cursor-pointer"
+                onClick={() => select('')}
+              >
+                — Select device —
+              </div>
+              {assignedDevices.length === 0 ? (
+                <div className="px-4 py-3 text-xs text-slate-400 italic">No devices with Palmtec ID assigned</div>
+              ) : assignedDevices.map(d => (
+                <div
+                  key={d.id}
+                  onClick={() => select(String(d.palmtec_id))}
+                  className={`px-4 py-2.5 text-sm cursor-pointer flex items-center justify-between hover:bg-slate-50 ${String(d.palmtec_id) === displayValue ? 'bg-slate-100 font-medium' : ''}`}
+                >
+                  <span className="text-slate-500 font-mono text-xs">{d.serial_number}</span>
+                  <span className="font-mono text-slate-800 text-xs font-semibold">{d.palmtec_id}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const SelectField = ({ label, name, value, onChange, options, loading = false }) => (
   <div className="space-y-1.5">
@@ -141,7 +214,7 @@ const EMPTY_COMPANY_FORM = {
 };
 
 // ── Shared Settings Form Sections ─────────────────────────────────────────────
-// Used by CompanySettingsTab, DeviceSettingsTab form, and profile editor.
+// Used by CompanySettingsTab and profile editor.
 
 function SettingsFormFields({ formData, onChange, loading = false, isDevice = true }) {
   // Helper to adapt SettToggle (no-arg callback) to the standard event-based onChange
@@ -247,7 +320,7 @@ function SettingsFormFields({ formData, onChange, loading = false, isDevice = tr
 
 // ── Company Settings Tab ──────────────────────────────────────────────────────
 
-function CompanySettingsTab() {
+function CompanySettingsTab({ setHeaderAction }) {
   const [formData, setFormData] = useState(EMPTY_COMPANY_FORM);
   const [loading, setLoading]   = useState(true);
   const [saving, setSaving]     = useState(false);
@@ -264,7 +337,7 @@ function CompanySettingsTab() {
     setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
   };
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     setSaving(true);
     try {
       const res = await api.put(`${BASE_URL}/masterdata/settings`, formData);
@@ -278,13 +351,18 @@ function CompanySettingsTab() {
       window.alert((data.errors ? Object.values(data.errors)[0][0] : data.message) || 'Save failed');
     } finally { setSaving(false); }
     return false;
-  };
+  }, [formData]);
+
+  useEffect(() => {
+    setHeaderAction(
+      <SaveButton onSave={handleSave} saving={saving} loading={loading} disabled={false} />
+    );
+  }, [handleSave, saving, loading, setHeaderAction]);
+
+  useEffect(() => () => setHeaderAction(null), [setHeaderAction]);
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-end">
-        <SaveButton onSave={handleSave} saving={saving} loading={loading} disabled={false} />
-      </div>
       <SettingsFormFields formData={formData} onChange={handleChange} loading={loading} isDevice={false} />
       <div className="flex justify-end pt-2">
         <SaveButton onSave={handleSave} saving={saving} loading={loading} disabled={false} bottom />
@@ -295,7 +373,7 @@ function CompanySettingsTab() {
 
 // ── Profiles Tab ──────────────────────────────────────────────────────────────
 
-function ProfilesTab() {
+function ProfilesTab({ setHeaderAction }) {
   const [profiles, setProfiles]       = useState([]);
   const [loadingList, setLoadingList] = useState(true);
   const [editingId, setEditingId]     = useState(null);  // null = closed, 'new' = create, <id> = edit
@@ -313,7 +391,7 @@ function ProfilesTab() {
 
   useEffect(() => { fetchProfiles(); }, []);
 
-  const openNew = async () => {
+  const openNew = useCallback(async () => {
     setFormData({ ...EMPTY_DEVICE_FORM, name: '' });
     setEditingId('new');
     try {
@@ -322,7 +400,24 @@ function ProfilesTab() {
         setFormData(prev => ({ ...EMPTY_DEVICE_FORM, ...res.data.data, name: prev.name }));
       }
     } catch { /* fall back to empty form */ }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (editingId === null) {
+      setHeaderAction(
+        <button
+          type="button" onClick={openNew}
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-slate-900 hover:bg-slate-700 rounded-xl shadow-sm transition-colors"
+        >
+          <Plus size={15} /> New Profile
+        </button>
+      );
+    } else {
+      setHeaderAction(null);
+    }
+  }, [editingId, openNew, setHeaderAction]);
+
+  useEffect(() => () => setHeaderAction(null), [setHeaderAction]);
 
   const openEdit = (profile) => {
     setFormData({ ...EMPTY_DEVICE_FORM, ...profile });
@@ -336,6 +431,7 @@ function ProfilesTab() {
 
   const handleSave = async () => {
     if (!formData.name?.trim()) { window.alert('Profile name is required.'); return false; }
+    if (!formData.palmtec_id)   { window.alert('Palmtec ID is required. Select a device.'); return false; }
     setSaving(true);
     try {
       let res;
@@ -394,12 +490,10 @@ function ProfilesTab() {
             onChange={handleChange}
             placeholder="e.g. City Route Default"
           />
-          <ConstrainedField
+          <DevicePalmtecSelect
             label="Palmtec ID"
-            name="palmtec_id"
             value={formData.palmtec_id}
             onChange={handleChange}
-            maxLen={6}
           />
         </div>
 
@@ -421,17 +515,9 @@ function ProfilesTab() {
   // Profile list
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-slate-500">
-          {loadingList ? 'Loading…' : `${profiles.length} profile${profiles.length !== 1 ? 's' : ''}`}
-        </p>
-        <button
-          type="button" onClick={openNew}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-slate-900 hover:bg-slate-700 rounded-xl shadow-sm transition-colors"
-        >
-          <Plus size={15} /> New Profile
-        </button>
-      </div>
+      <p className="text-sm text-slate-500">
+        {loadingList ? 'Loading…' : `${profiles.length} profile${profiles.length !== 1 ? 's' : ''}`}
+      </p>
 
       {loadingList ? (
         <div className="space-y-3">
@@ -480,166 +566,15 @@ function ProfilesTab() {
   );
 }
 
-// ── Device Settings Tab ───────────────────────────────────────────────────────
-
-function DeviceSettingsTab() {
-  const [devices, setDevices]               = useState([]);
-  const [devicesLoading, setDevicesLoading] = useState(true);
-  const [selectedDevice, setSelectedDevice] = useState(null);
-
-  const [profiles, setProfiles]             = useState([]);
-  const [applyingProfile, setApplyingProfile] = useState(false);
-
-  const [formData, setFormData] = useState(EMPTY_DEVICE_FORM);
-  const [loading, setLoading]   = useState(false);
-  const [saving, setSaving]     = useState(false);
-
-  useEffect(() => {
-    api.get(`${BASE_URL}/masterdata/device-settings/devices`)
-      .then(res => setDevices(res.data?.data || []))
-      .catch(err => console.error('Error fetching devices:', err))
-      .finally(() => setDevicesLoading(false));
-    api.get(`${BASE_URL}/masterdata/settings-profiles`)
-      .then(res => setProfiles(res.data?.data || []))
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    if (!selectedDevice) return;
-    setLoading(true);
-    api.get(`${BASE_URL}/masterdata/device-settings/${selectedDevice.id}`)
-      .then(res => setFormData(res.data?.data ? { ...EMPTY_DEVICE_FORM, ...res.data.data } : { ...EMPTY_DEVICE_FORM }))
-      .catch(() => setFormData({ ...EMPTY_DEVICE_FORM }))
-      .finally(() => setLoading(false));
-  }, [selectedDevice]);
-
-  const handleChange = (e) => {
-    const { name, value, type, checked } = e.target;
-    setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
-  };
-
-  const handleSave = async () => {
-    if (!selectedDevice) return false;
-    setSaving(true);
-    try {
-      const res = await api.put(`${BASE_URL}/masterdata/device-settings/${selectedDevice.id}`, formData);
-      if (res?.status === 200) {
-        setFormData(prev => ({ ...EMPTY_DEVICE_FORM, ...res.data?.data, ...prev, ...res.data?.data }));
-        return true;
-      }
-    } catch (err) {
-      if (!err.response) { window.alert('Server unreachable. Try later.'); return false; }
-      const { data } = err.response;
-      window.alert((data.errors ? Object.values(data.errors)[0][0] : data.message) || 'Save failed');
-    } finally { setSaving(false); }
-    return false;
-  };
-
-  const applyProfile = async (profileId) => {
-    if (!selectedDevice) return;
-    setApplyingProfile(true);
-    try {
-      const res = await api.post(
-        `${BASE_URL}/masterdata/settings-profiles/${profileId}/apply/${selectedDevice.id}`
-      );
-      if (res?.status === 200) {
-        setFormData(prev => ({ ...EMPTY_DEVICE_FORM, ...res.data?.data, ...prev, ...res.data?.data }));
-      }
-    } catch (err) {
-      window.alert('Failed to apply profile.');
-    } finally { setApplyingProfile(false); }
-  };
-
-  return (
-    <div className="space-y-6">
-
-      {/* Device Picker */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-        <h2 className="text-base font-bold text-slate-800 mb-4 pb-3 border-b border-slate-100 flex items-center gap-2">
-          <Smartphone size={16} className="text-slate-600" /> Select Device
-        </h2>
-
-        {devicesLoading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {[1, 2, 3].map(i => <div key={i} className="h-16 bg-slate-100 rounded-xl animate-pulse" />)}
-          </div>
-        ) : devices.length === 0 ? (
-          <p className="text-slate-500 text-sm">No devices registered to your company.</p>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {devices.map(device => (
-              <button
-                key={device.id} type="button" onClick={() => setSelectedDevice(device)}
-                className={`text-left p-4 rounded-xl border-2 transition-all ${
-                  selectedDevice?.id === device.id ? 'border-slate-800 bg-slate-50' : 'border-slate-200 hover:border-slate-400'
-                }`}
-              >
-                <div className="font-semibold text-sm text-slate-800">{device.display_name}</div>
-                <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
-                  <span>{device.serial_number}</span>
-                  {device.has_settings && (
-                    <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-xs">configured</span>
-                  )}
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {selectedDevice && (
-        <>
-          {/* Apply Profile bar */}
-          {profiles.length > 0 && (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 px-5 py-4 flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                <BookMarked size={15} className="text-slate-500" />
-                Apply profile:
-              </div>
-              {profiles.map(p => (
-                <button
-                  key={p.id} type="button" disabled={applyingProfile}
-                  onClick={() => applyProfile(p.id)}
-                  className="px-3 py-1.5 text-xs font-medium border border-slate-200 rounded-lg hover:border-slate-500 hover:bg-slate-50 transition-all disabled:opacity-50"
-                >
-                  {applyingProfile ? '…' : p.name}
-                </button>
-              ))}
-              <span className="text-xs text-slate-400">Settings will load into the form — review and save.</span>
-            </div>
-          )}
-
-          <div className="flex justify-end">
-            <SaveButton onSave={handleSave} saving={saving} loading={loading} disabled={!selectedDevice} />
-          </div>
-
-          <SettingsFormFields formData={formData} onChange={handleChange} loading={loading} isDevice />
-
-          <div className="flex justify-end pt-2">
-            <SaveButton onSave={handleSave} saving={saving} loading={loading} disabled={!selectedDevice} bottom />
-          </div>
-        </>
-      )}
-
-      {!selectedDevice && !devicesLoading && devices.length > 0 && (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-12 text-center">
-          <Smartphone size={40} className="mx-auto text-slate-300 mb-3" />
-          <p className="text-slate-500 text-sm">Select a device above to view and edit its settings.</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState('company');
+  const [activeTab, setActiveTab]     = useState('company');
+  const [headerAction, setHeaderAction] = useState(null);
 
   const tabs = [
     { id: 'company',  label: 'Company Settings', icon: Building2  },
     { id: 'profiles', label: 'Profiles',          icon: BookMarked },
-    { id: 'device',   label: 'Device Settings',   icon: Smartphone },
   ];
 
   return (
@@ -651,28 +586,30 @@ export default function SettingsPage() {
         subtitle="Manage company defaults, profiles, and per-device ETM settings"
       />
 
-      <div className="flex gap-1 bg-white border border-slate-200 rounded-xl p-1 mb-6 w-fit">
-        {tabs.map(tab => {
-          const Icon = tab.icon;
-          return (
-            <button
-              key={tab.id} type="button" onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                activeTab === tab.id
-                  ? 'bg-slate-900 text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-800 hover:bg-slate-50'
-              }`}
-            >
-              <Icon size={15} />
-              {tab.label}
-            </button>
-          );
-        })}
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex gap-1 bg-white border border-slate-200 rounded-xl p-1 w-fit">
+          {tabs.map(tab => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id} type="button" onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  activeTab === tab.id
+                    ? 'bg-slate-900 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-800 hover:bg-slate-50'
+                }`}
+              >
+                <Icon size={15} />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+        {headerAction}
       </div>
 
-      {activeTab === 'company'  && <CompanySettingsTab />}
-      {activeTab === 'profiles' && <ProfilesTab />}
-      {activeTab === 'device'   && <DeviceSettingsTab />}
+      {activeTab === 'company'  && <CompanySettingsTab  setHeaderAction={setHeaderAction} />}
+      {activeTab === 'profiles' && <ProfilesTab         setHeaderAction={setHeaderAction} />}
     </div>
   );
 }
