@@ -1,7 +1,9 @@
 import React from 'react';
 
-const Modal = ({ isOpen, onClose, title, children, wide = false }) => {
+const Modal = ({ isOpen, onClose, title, children, wide = false, narrow = false }) => {
   if (!isOpen) return null;
+
+  const sizeClass = wide ? 'max-w-5xl' : narrow ? 'max-w-sm' : 'max-w-2xl';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
@@ -14,7 +16,7 @@ const Modal = ({ isOpen, onClose, title, children, wide = false }) => {
 
       {/* Modal Content */}
       <div
-        className={`relative w-full ${wide ? 'max-w-5xl' : 'max-w-2xl'} bg-white rounded-2xl shadow-2xl flex flex-col max-h-[90vh] animate-modal-pop border border-slate-100 pointer-events-auto`}
+        className={`relative w-full ${sizeClass} bg-white rounded-2xl shadow-2xl flex flex-col max-h-[90vh] animate-modal-pop border border-slate-100 pointer-events-auto`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

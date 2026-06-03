@@ -252,23 +252,7 @@ export function DesignInput({ value, onChange, type = 'text', placeholder, disab
   );
 }
 
-export function DesignSelect({ value, onChange, options, placeholder, disabled }) {
-  return (
-    <select
-      value={value ?? ''}
-      onChange={e => onChange(e.target.value)}
-      disabled={disabled}
-      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-slate-400 disabled:bg-slate-50 disabled:cursor-not-allowed"
-    >
-      {placeholder && <option value="">{placeholder}</option>}
-      {options.map(o => (
-        typeof o === 'string'
-          ? <option key={o} value={o}>{o}</option>
-          : <option key={o.value} value={o.value}>{o.label}</option>
-      ))}
-    </select>
-  );
-}
+
 
 export function DesignTextarea({ value, onChange, placeholder, rows = 3, readOnly, name }) {
   return (

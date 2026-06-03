@@ -97,7 +97,7 @@ class MosambeeTransaction(models.Model):
     first_received_at = models.DateTimeField(auto_now_add=True)
     last_received_at = models.DateTimeField(auto_now=True)
     
-    name = models.CharField(max_length=45)
+    name = models.CharField(max_length=100)
     merchantId = models.CharField(max_length=45, db_index=True)
     businessName = models.CharField(max_length=100, null=True, blank=True)
     addressLine1 = models.CharField(max_length=255, null=True, blank=True)
@@ -123,21 +123,21 @@ class MosambeeTransaction(models.Model):
     transactionStatus = models.CharField(max_length=100)
     transactionAuthCode = models.CharField(max_length=60, null=True, blank=True)
     
-    transactionCardNumber = models.CharField(max_length=16)
+    transactionCardNumber = models.CharField(max_length=50)
     cardHolderName = models.CharField(max_length=150, null=True, blank=True)
     cardType = models.CharField(max_length=45)
     creditDebitCardType = models.CharField(max_length=15, null=True, blank=True)
     
-    transactionTerminalId = models.CharField(max_length=20, db_index=True)
+    transactionTerminalId = models.CharField(max_length=30, db_index=True)
     transactionBatchNumber = models.IntegerField(null=True, blank=True)
-    appVersion = models.CharField(max_length=10, null=True, blank=True)
+    appVersion = models.CharField(max_length=20, null=True, blank=True)
     
     invoiceNumber = models.CharField(max_length=100, null=True, blank=True, db_index=True)
     billNumber = models.CharField(max_length=100, null=True, blank=True)
     refTxnId = models.CharField(max_length=45, null=True, blank=True)
     
     transactionTypeId = models.IntegerField()
-    transactionTypeName = models.CharField(max_length=25, null=True, blank=True)
+    transactionTypeName = models.CharField(max_length=50, null=True, blank=True)
     currencyId = models.CharField(max_length=5)
     acquirerName = models.CharField(max_length=50)
     narration = models.CharField(max_length=100, null=True, blank=True)
@@ -153,7 +153,7 @@ class MosambeeTransaction(models.Model):
     cvm = models.CharField(max_length=6, null=True, blank=True)
     
     tipProcessing = models.BooleanField(default=False)
-    transactionMode = models.CharField(max_length=10, null=True, blank=True)
+    transactionMode = models.CharField(max_length=20, null=True, blank=True)
     MsrAndPinVerification = models.BooleanField(default=False)
     
     raw_request_data = models.JSONField()
@@ -243,13 +243,13 @@ class MosambeeTransaction(models.Model):
 
 
 class MosambeePayoutCallback(models.Model):
-    statementId = models.CharField(max_length=100, unique=True, db_index=True)
+    statementId = models.CharField(max_length=150, unique=True, db_index=True)
     payoutAmount = models.DecimalField(max_digits=15, decimal_places=2)
-    utrNumber = models.CharField(max_length=100, db_index=True)
+    utrNumber = models.CharField(max_length=150, db_index=True)
     payoutDate = models.DateTimeField()
-    payoutAccount = models.CharField(max_length=50)
-    payoutBank = models.CharField(max_length=100)
-    payoutStatus = models.CharField(max_length=50)
+    payoutAccount = models.CharField(max_length=100)
+    payoutBank = models.CharField(max_length=150)
+    payoutStatus = models.CharField(max_length=100)
 
     # Array fields stored as JSON
     transactions = models.JSONField(default=list)

@@ -1094,7 +1094,7 @@ export default function CompanyListing() {
 
               {/* Step 3: User Account */}
               <SectionCard step={3} active={sec2} complete={sec3} title="Admin User Account" subtitle="Login credentials for the company admin.">
-                <div className="grid grid-cols-1 gap-4 md:gap-5 md:[grid-template-columns:160px_1fr_1fr]">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:items-end">
                   <Field label="Username" required>
                     <div className="flex gap-0">
                       <span className="inline-flex items-center px-3 text-sm text-slate-500 bg-slate-50 border border-r-0 border-slate-300 rounded-l-lg"><User size={13} /></span>
