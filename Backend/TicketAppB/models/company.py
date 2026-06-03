@@ -242,7 +242,7 @@ class Dealer(models.Model):
     # ── Remaining pool (available to allocate to new client companies) ────────
     # Decremented when a company is created under this dealer.
     # Restored when a company is deleted or its allocation is reduced.
-    remaining_palmtec_count           = models.IntegerField(default=0)
+
     remaining_total_user_count        = models.IntegerField(default=0)
     remaining_premium_user_count      = models.IntegerField(default=0)
     remaining_intermediate_user_count = models.IntegerField(default=0)
