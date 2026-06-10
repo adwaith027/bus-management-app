@@ -11,9 +11,9 @@ COMPANY_MODELS = ['Company', 'Depot', 'Dealer', 'ETMDevice']
 
 
 # Audit / System models
-from .audit import GlobalSettings, AuditLog
+from .audit import GlobalSettings, AuditLog, DeviceRejectionLog
 
-AUDIT_MODELS = ['GlobalSettings', 'AuditLog']
+AUDIT_MODELS = ['GlobalSettings', 'AuditLog', 'DeviceRejectionLog']
 
 
 # Master data models

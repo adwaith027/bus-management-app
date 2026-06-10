@@ -140,3 +140,38 @@ class AuditLog(models.Model):
             f'[{ts}] {self.actor_username_snapshot} '
             f'{self.action} {self.target_model} #{self.target_id}'
         )
+
+
+# ── DeviceRejectionLog ────────────────────────────────────────────────────────
+
+class DeviceRejectionLog(models.Model):
+    """
+    Immutable log of device requests rejected by the server.
+    Written by tasks.py and setup_data.py. Never deleted.
+    """
+
+    class RejectionReason(models.TextChoices):
+        DEVICE_NOT_REGISTERED = 'device_not_registered', 'Device not registered to company'
+        NOT_ALLOCATED         = 'not_allocated',         'Device not in allocated status'
+        DEVICE_INACTIVE       = 'device_inactive',       'Device is deactivated'
+        LIMIT_EXCEEDED        = 'limit_exceeded',        'Company device limit exceeded'
+        NO_COMPANY            = 'no_company',            'Device has no company assigned'
+
+    palmtec_id_claimed    = models.PositiveIntegerField(null=True, blank=True, db_index=True)
+    company_id_claimed    = models.CharField(max_length=100, blank=True, null=True, db_index=True)
+    serial_number_claimed = models.CharField(max_length=100, blank=True, null=True)
+    rejection_reason      = models.CharField(max_length=30, choices=RejectionReason.choices, db_index=True)
+    raw_payload           = models.TextField(blank=True, null=True)
+    source                = models.CharField(max_length=50, blank=True, null=True)
+    ip_address            = models.GenericIPAddressField(null=True, blank=True)
+    created_at            = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'device_rejection_log'
+        indexes = [
+            models.Index(fields=['palmtec_id_claimed', 'created_at']),
+            models.Index(fields=['company_id_claimed', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f'Rejected palmtec={self.palmtec_id_claimed} reason={self.rejection_reason} @ {self.created_at}'

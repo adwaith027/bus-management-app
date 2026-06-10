@@ -5,7 +5,8 @@ from django.dispatch import receiver
 from decimal import Decimal, ROUND_HALF_UP
 from django.db.models.signals import post_save, pre_save
 from django.contrib.auth import get_user_model
-from .models import MosambeeTransaction, TransactionData, Route, Fare, Company, Dealer, ETMDevice
+from .models import MosambeeTransaction, TransactionData, Route, Fare, Company, Dealer, ETMDevice, UserSession
+from .authentication import delete_session_cache, set_session_revoked
 
 
 # COMPANY / DEALER ACTIVE STATUS CASCADE
@@ -17,6 +18,22 @@ def cascade_company_active_status(sender, instance, created, **kwargs):
     User = get_user_model()
     User.objects.filter(company=instance).update(is_active=instance.is_active)
 
+    # Fix 3: when a company is deactivated, immediately kill all active sessions
+    # for its users. Without this, those users get a 403 (LicensePermission) on
+    # every request for up to 20 minutes until their Redis TTL expires, but their
+    # sessions still appear as active in the admin session listing and can generate
+    # confusing audit noise. Killing them here makes deactivation clean and instant.
+    if not instance.is_active:
+        active_sessions = UserSession.objects.filter(
+            user__company=instance, is_active=True,
+        )
+        session_uids = list(active_sessions.values_list('session_uid', flat=True))
+        active_sessions.update(is_active=False)
+        for uid in session_uids:
+            uid_str = str(uid)
+            set_session_revoked(uid_str)
+            delete_session_cache(uid_str)
+
 
 @receiver(post_save, sender=Dealer)
 def cascade_dealer_active_status(sender, instance, created, **kwargs):
@@ -24,6 +41,18 @@ def cascade_dealer_active_status(sender, instance, created, **kwargs):
         return
     User = get_user_model()
     User.objects.filter(dealer=instance).update(is_active=instance.is_active)
+
+    # Fix 3: same as company cascade — kill sessions immediately on deactivation.
+    if not instance.is_active:
+        active_sessions = UserSession.objects.filter(
+            user__dealer=instance, is_active=True,
+        )
+        session_uids = list(active_sessions.values_list('session_uid', flat=True))
+        active_sessions.update(is_active=False)
+        for uid in session_uids:
+            uid_str = str(uid)
+            set_session_revoked(uid_str)
+            delete_session_cache(uid_str)
 
 
 # MOSAMBEE TRANSACTION SIGNALS
