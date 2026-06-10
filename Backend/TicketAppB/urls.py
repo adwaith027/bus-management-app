@@ -17,7 +17,7 @@ from .views.web.masterdata import crew as crew_views
 from .views.web.masterdata import settings as settings_views
 from .views.web.imports import mdb as mdb_views
 from .views.web.imports import routes as route_import_views
-from .views.palmtec import master_send as palmtec_views
+from .views.apk import master_send as palmtec_views
 from .views.palmtec import data_post as palmtec_ingest
 from .views.webhooks import mosambee as mosambee_webhooks
 from .views.apk import reports as apk_views
@@ -27,10 +27,9 @@ from .views import setup_data as setup_data_views
 urlpatterns = [
     # authentication
     path('login', auth_views.login_view, name='login'),
-    path('token/refresh', auth_views.refresh_token_view, name='token_refresh'),
     path('logout', auth_views.logout_view, name='logout'),
-    path('protected', auth_views.protected_view, name='protected'),
     path('verify-auth', auth_views.verify_auth, name='verify_auth'),
+    path('session/keepalive', auth_views.session_keepalive, name='session_keepalive'),
     # self-service password reset (no auth required)
     path('auth/forgot-password', auth_views.forgot_password, name='forgot_password'),
     path('auth/reset-password',  auth_views.reset_password,  name='reset_password'),
@@ -189,7 +188,6 @@ urlpatterns = [
     path('masterdata/settings-profiles/create', settings_views.create_profile),
     path('masterdata/settings-profiles/<int:profile_id>', settings_views.profile_detail),
 
-
     # ETM Device Registry
     path('etm-devices/upload',                         device_registry_views.DeviceUploadView.as_view(), name='etm_upload'),
     path('etm-devices',                                device_registry_views.list_devices,               name='etm_list'),
@@ -199,11 +197,12 @@ urlpatterns = [
     path('etm-devices/<int:device_id>/allocate',        device_registry_views.allocate_to_company,  name='etm_allocate'),
     path('etm-devices/<int:device_id>/deactivate',     device_registry_views.deactivate_device,   name='etm_deactivate'),
     path('etm-devices/<int:device_id>/reactivate',    device_registry_views.reactivate_device,   name='etm_reactivate'),
-    path('etm-devices/<int:device_id>/set-palmtec-id', device_registry_views.set_palmtec_id,      name='etm_set_palmtec_id'),
+    path('etm-devices/<int:device_id>/unmap',          device_registry_views.unmap_device,         name='etm_unmap'),
+    path('etm-devices/<int:device_id>/return-to-stock', device_registry_views.return_device_to_stock, name='etm_return_stock'),
+    path('etm-devices/<int:device_id>/set-palmtec-id',   device_registry_views.set_palmtec_id,   name='etm_set_palmtec_id'),
+    path('etm-devices/<int:device_id>/set-mosambee-tid', device_registry_views.set_mosambee_tid, name='etm_set_mosambee_tid'),
 
     # Palmtec device data APIs (server → APK → USB → device)
-    path('device/getEtmVersion', setup_data_views.get_etm_device_version_for_apk),
-    
     path('device/routes',      palmtec_views.get_routes_list),
     path('device/settings',    palmtec_views.get_settings_file),
     path('device/crew',        palmtec_views.get_crew_file),
@@ -216,21 +215,4 @@ urlpatterns = [
     path('device/rtedat',      palmtec_views.get_rtedat_file),
     # Settings group
     path('device/currency',    palmtec_views.get_currency_file),
-
-    # android apk data apis
-    path('apk/buses', apk_views.apk_bus_list, name='apk_bus_list'),
-    path('apk/dashboard', apk_views.apk_dashboard, name='apk_dashboard'),
-    path('apk/bus-trips', apk_views.apk_bus_trips, name='apk_bus_trips'),
-    path('apk/ticket-details', apk_views.apk_ticket_details, name='apk_ticket_details'),
-    path('apk/passenger-info', apk_views.apk_passenger_info, name='apk_passenger_info'),
-    path('reports/duty', apk_views.duty_report, name='duty_report'),
-    path('reports/bus-summary', apk_views.bus_summary_report, name='bus_summary_report'),
-    path('reports/payment-type', apk_views.payment_type_report, name='payment_type_report'),
-    path('reports/farewise', apk_views.farewise_report, name='farewise_report'),
-    path('reports/expense', apk_views.expense_report, name='expense_report'),
-
-
-    # APK file uploads
-    path('apk/upload/odometer-dat', apk_upload_views.uploadOdometerDat, name='upload_odometer_dat'),
-    path('apk/upload/expense-dat', apk_upload_views.uploadExpenseDat, name='upload_expense_dat'),
 ]
