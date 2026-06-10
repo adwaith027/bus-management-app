@@ -31,8 +31,6 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',             
-    'rest_framework_simplejwt',
-    'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'django_celery_beat',
     'TicketAppB',
@@ -48,8 +46,6 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'TicketAppB.middleware.UserOnlineMiddleware',
-    'TicketAppB.middleware.LicenseExpiryMiddleware',
 ]
 
 ROOT_URLCONF = 'Backend.urls'
@@ -357,20 +353,18 @@ CORS_ALLOW_CREDENTIALS = True
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'TicketAppB.authentication.SessionAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+        'TicketAppB.permissions.LicensePermission',
     ],
 }
 
+# Session idle timeout in seconds. Read from env.
+SESSION_IDLE_TIMEOUT = int(env('SESSION_IDLE_TIMEOUT', default=1200))
+SESSION_IDLE_TIMEOUT_APK = int(env('SESSION_IDLE_TIMEOUT_APK', default=43200))
 
-SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
-    'ROTATE_REFRESH_TOKENS': True,
-    'BLACKLIST_AFTER_ROTATION': True,
-    'ALGORITHM': 'HS256',
-    'SIGNING_KEY': SECRET_KEY,
-    'AUTH_HEADER_TYPES': ('Bearer',),
-}
 
 # Cookie Settings for HTTP Testing
 SESSION_COOKIE_SECURE = not DEBUG
@@ -378,6 +372,8 @@ CSRF_COOKIE_SECURE = not DEBUG
 
 SESSION_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SAMESITE = 'Lax'
+
+
 
 # License Server Configuration
 LICENSE_SERVER_BASE_URL = env('LICENSE_SERVER_BASE_URL')
@@ -436,6 +432,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'TicketAppB.tasks.cleanup_processed_raw_logs',
         # every day @ 2 AM
         'schedule': crontab(hour=2, minute=0),
+    },
+    'sweep-stale-sessions': {
+        'task': 'TicketAppB.tasks.sweep_stale_sessions',
+        'schedule': 600,  # every 10 minutes
     },
 }
 

@@ -187,18 +187,17 @@ class CustomUser(AbstractUser):
 class UserSession(models.Model):
     """
     Tracks one active session per user across all platforms (web and APK).
-    Replaces UserDeviceMapping.
 
     One session per user enforced at login:
-      - If is_active=True and last_seen_at within TTL → reject new login (403 ALREADY_LOGGED_IN).
+      - If an is_active=True session exists → reject new login (403 SESSION_CONFLICT).
+      - If force_login=True → kill old session, create new one.
       - Superadmin is exempt from this limit.
 
-    Web:  session_uid stored as HttpOnly cookie.
-    APK:  session_uid returned in login response body, stored in SharedPreferences,
-          sent in POST body on every token refresh call.
+    Web:  session stored as HttpOnly cookie (pqr_session).
+    APK:  same cookie; no token refresh cycle. A 401 means the session is dead.
 
-    The session_uid is embedded as a claim inside the JWT access token.
-    Middleware validates it on every authenticated request.
+    Session validity is checked on every request via SessionAuthentication
+    (Redis cache → DB fallback). No JWTs. No token refresh.
     """
 
     class DeviceType(models.TextChoices):
@@ -230,16 +229,11 @@ class UserSession(models.Model):
     # Middleware rejects requests where is_active=False (session was killed).
     is_active = models.BooleanField(default=True, db_index=True)
 
-    # Updated on every token refresh call.
-    # Stale sessions (app crash / force-kill) auto-expire via TTL check on next login.
+    # Updated on every authenticated request (debounced — at most once per 5 min).
     last_seen_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     # MAC address / hardware UUID from APK login payload. Stored for future FCM use.
     device_uuid = models.CharField(max_length=255, null=True, blank=True)
-
-    # JTI of the refresh token issued at login. Stored so force-logout can
-    # blacklist the token via simplejwt's OutstandingToken table.
-    refresh_jti = models.CharField(max_length=255, null=True, blank=True, db_index=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
