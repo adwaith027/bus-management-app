@@ -1,12 +1,13 @@
 import struct
 import logging
 from django.http import HttpResponse, JsonResponse
-from ...models import Settings, Route, Employee, VehicleType, ExpenseMaster, Stage, Fare, Currency, RouteStage, Company
-from ..web.auth import get_user_from_request as get_user_from_cookie  # device/APK: Bearer header
+from ...models import Settings, Route, Employee, VehicleType, ExpenseMaster, Stage, Fare, Currency, RouteStage, Company, SettingsProfile, ETMDevice
 from django.views.decorators.csrf import csrf_exempt
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+from ...permissions import LicensePermission
 import secrets
 
 logger = logging.getLogger(__name__)
@@ -344,26 +345,19 @@ def _pack_currencydat(currencies):
 # ─── Auth helper ───────────────────────────────────────────────────────────────
 
 def _get_company(request):
-    """Return company from JWT cookie, or None if unauthenticated."""
-    try:
-        user = get_user_from_cookie(request)
-        if user and hasattr(user, 'company') and user.company:
-            return user.company
-        return None
-    except Exception:
-        return None
+    """Return the authenticated user's company, or None (e.g. for superadmin)."""
+    return getattr(request.user, 'company', None)
 
 
 # ─── Views ─────────────────────────────────────────────────────────────────────
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def get_routes_list(request):
     """
     GET /device/routes/
     Returns JSON list of {route_code, route_name} for APK route selection popup.
     """
-    if request.method != 'GET':
-        return JsonResponse({'message': 'Method not allowed'}, status=405)
-
     company = _get_company(request)
     if not company:
         return JsonResponse({'message': 'Unauthorized'}, status=401)
@@ -378,21 +372,26 @@ def get_routes_list(request):
 
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def get_settings_file(request):
     """
     GET /device/settings/
     Returns BUS.DAT binary (704 bytes).
     """
-    if request.method != 'GET':
-        return HttpResponse('METHOD_NOT_ALLOWED', status=405)
-
     company = _get_company(request)
     if not company:
         return HttpResponse('UNAUTHORIZED', status=401)
 
+    serialnumber = request.GET.get('serialnumber')
+    if not serialnumber:
+        return HttpResponse('SERIAL_NUMBER_NOT_PROVIDED', status=401)
+
     try:
-        s = Settings.objects.get(company=company)
-    except Settings.DoesNotExist:
+        palmtec_id = ETMDevice.objects.get(company=company,serialnumber=serialnumber).palmtec_id
+        # s = Settings.objects.get(company=company)
+        s = SettingsProfile.objects.get(company=company,palmtec_id=palmtec_id)
+    except SettingsProfile.DoesNotExist:
         return HttpResponse('SETTINGS_NOT_FOUND', status=404)
 
     binary = _pack_busdat(s)
@@ -401,14 +400,13 @@ def get_settings_file(request):
     return response
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def get_crew_file(request):
     """
     GET /device/crew/
     Returns CREW.DAT binary (32 bytes per employee).
     """
-    if request.method != 'GET':
-        return HttpResponse('METHOD_NOT_ALLOWED', status=405)
-
     company = _get_company(request)
     if not company:
         return HttpResponse('UNAUTHORIZED', status=401)
@@ -425,14 +423,13 @@ def get_crew_file(request):
     return response
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def get_vehicles_file(request):
     """
     GET /device/vehicles/
     Returns VEHICLE.DAT binary (33 bytes per vehicle).
     """
-    if request.method != 'GET':
-        return HttpResponse('METHOD_NOT_ALLOWED', status=405)
-
     company = _get_company(request)
     if not company:
         return HttpResponse('UNAUTHORIZED', status=401)
@@ -449,14 +446,13 @@ def get_vehicles_file(request):
     return response
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def get_expenses_file(request):
     """
     GET /device/expenses/
     Returns EXPENSEDET.DAT binary (31 bytes per expense).
     """
-    if request.method != 'GET':
-        return HttpResponse('METHOD_NOT_ALLOWED', status=405)
-
     company = _get_company(request)
     if not company:
         return HttpResponse('UNAUTHORIZED', status=401)
@@ -472,15 +468,14 @@ def get_expenses_file(request):
     return response
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def get_routelst_file(request):
     """
     GET /device/routelst[?route_codes=R01,R02]
     Returns ROUTELST.LST binary — 64 bytes per route.
     If route_codes provided, only those routes are included.
     """
-    if request.method != 'GET':
-        return HttpResponse('METHOD_NOT_ALLOWED', status=405)
-
     company = _get_company(request)
     if not company:
         return HttpResponse('UNAUTHORIZED', status=401)
@@ -522,15 +517,14 @@ def _get_ordered_route_stages(company, route_codes=None):
     return list(qs.order_by('pk'))
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def get_stagelst_file(request):
     """
     GET /device/stagelst[?route_codes=R01,R02]
     Returns STAGE.LST binary — RouteStage entries, 16 bytes each.
     If route_codes provided, only stages for those routes are included.
     """
-    if request.method != 'GET':
-        return HttpResponse('METHOD_NOT_ALLOWED', status=405)
-
     company = _get_company(request)
     if not company:
         return HttpResponse('UNAUTHORIZED', status=401)
@@ -542,15 +536,14 @@ def get_stagelst_file(request):
     return response
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def get_languagedat_file(request):
     """
     GET /device/languagedat[?route_codes=R01,R02]
     Returns LANGUAGE.DAT binary — 24 bytes per entry, same order as STAGE.LST.
     If route_codes provided, only entries for those routes are included.
     """
-    if request.method != 'GET':
-        return HttpResponse('METHOD_NOT_ALLOWED', status=405)
-
     company = _get_company(request)
     if not company:
         return HttpResponse('UNAUTHORIZED', status=401)
@@ -562,6 +555,8 @@ def get_languagedat_file(request):
     return response
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def get_rtedat_file(request):
     """
     GET /device/rtedat[?route_codes=R01,R02]
@@ -570,9 +565,6 @@ def get_rtedat_file(request):
     stage_index is built from the same filtered route_stages to stay consistent
     with the STAGE.LST that would be generated for the same route_codes.
     """
-    if request.method != 'GET':
-        return HttpResponse('METHOD_NOT_ALLOWED', status=405)
-
     company = _get_company(request)
     if not company:
         return HttpResponse('UNAUTHORIZED', status=401)
@@ -594,14 +586,13 @@ def get_rtedat_file(request):
     return response
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def get_currency_file(request):
     """
     GET /device/currency
     Returns CURRENCY.DAT binary — 8 bytes per currency entry.
     """
-    if request.method != 'GET':
-        return HttpResponse('METHOD_NOT_ALLOWED', status=405)
-
     company = _get_company(request)
     if not company:
         return HttpResponse('UNAUTHORIZED', status=401)
