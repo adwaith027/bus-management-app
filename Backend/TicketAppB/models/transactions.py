@@ -54,7 +54,6 @@ class TransactionData(models.Model):
 
     # ── Identity ─────────────────────────────────────────────────────────────
     unique_code = models.CharField(max_length=30, null=True, blank=True, db_index=True)
-    # later to be implemented as foreign key related to the particular company's etm device
     palmtec_id  = models.CharField(max_length=20)
 
     # ── Route / Trip ─────────────────────────────────────────────────────────
@@ -100,13 +99,13 @@ class TransactionData(models.Model):
 
     # ── Vehicle / Crew / Schedule (raw strings from device) ──────────────────
     bus_no = models.CharField(max_length=30, null=True, blank=True)
-    # bus_id = models.ForeignKey('Vehicle', on_delete=models.SET_NULL, null=True, blank=True, related_name='transactions')
+    bus_id = models.ForeignKey('VehicleType', on_delete=models.SET_NULL, null=True, blank=True, related_name='transactions')
 
     driver = models.CharField(max_length=50, null=True, blank=True)
-    # driver_id = models.ForeignKey('Employee', on_delete=models.SET_NULL, null=True, blank=True, related_name='driven_transactions')
+    driver_id = models.ForeignKey('Employee', on_delete=models.SET_NULL, null=True, blank=True, related_name='driven_transactions')
 
     conductor = models.CharField(max_length=50, null=True, blank=True)
-    # conductor_id = models.ForeignKey('Employee', on_delete=models.SET_NULL, null=True, blank=True, related_name='conducted_transactions')
+    conductor_id = models.ForeignKey('Employee', on_delete=models.SET_NULL, null=True, blank=True, related_name='conducted_transactions')
 
     up_down_trip = models.CharField(max_length=4, choices=Direction.choices, null=True, blank=True)
 
@@ -169,7 +168,16 @@ class TransactionData(models.Model):
             models.UniqueConstraint(
                 fields=['palmtec_id', 'company_code', 'ticket_number', 'ticket_date', 'ticket_time'],
                 name='uniq_device_ticket_datetime'
-            )
+            ),
+            # Composite unique constraint scoped per device.
+            # MariaDB allows multiple NULLs in a composite unique index
+            # (NULL != NULL in index comparisons), so this correctly enforces
+            # uniqueness for devices that send a unique_code while allowing
+            # multiple rows with unique_code=NULL from older devices.
+            models.UniqueConstraint(
+                fields=['palmtec_id', 'unique_code'],
+                name='uniq_device_unique_code'
+            ),
         ]
 
     def __str__(self):
@@ -393,7 +401,7 @@ class TripData(models.Model):
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=['palmtec_id', 'company_code', 'trip_no', 'start_date'],
+                fields=['palmtec_id', 'company_code', 'schedule_no', 'trip_no', 'start_date'],
                 name='uniq_trip_data'
             )
         ]
