@@ -1,53 +1,511 @@
 import datetime
-from django.http import JsonResponse
+from rest_framework.response import Response
 from django.db.models import Q, Sum, Count
-from rest_framework.decorators import api_view
-from ...models import TransactionData, TripData, Stage, ExpenseData, Route, RouteStage, VehicleType
-from ..web.auth import get_user_from_cookie
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from ...models import TransactionData, TripData, ScheduleData, Stage, ExpenseData, Route, RouteStage, VehicleType
+from ...permissions import LicensePermission
 from ..utils import _meets_tier, _TIER_ERROR
 
 PAYMENT_LABELS = {'Cash': 'Cash', 'UPI': 'UPI', 'Card': 'Card'}
 
 
-def _build_stage_map(company):
-    stages = Stage.objects.filter(company=company, is_deleted=False).values('stage_code', 'stage_name')
-    stage_map = {}
-    for s in stages:
-        try:
-            stage_map[int(s['stage_code'])] = s['stage_name']
-        except (ValueError, TypeError):
-            pass
-    return stage_map
+# GET /apk/buses
+# Returns all active bus registration numbers for the company.
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
+def apk_bus_list(request):
+    user = request.user
+
+    buses = list(
+        VehicleType.objects.filter(company=user.company, is_deleted=False)
+        .order_by('bus_reg_num')
+        .values('id', 'bus_reg_num')
+    )
+    return Response({'buses': buses})
 
 
-def _route_stage_map(company, route_code):
-    """Returns {sequence_no: stage_name} for the given route, falling back to stage_code map."""
-    try:
-        route = Route.objects.get(company=company, route_code=route_code)
-        return {
-            rs.sequence_no: rs.stage.stage_name
-            for rs in RouteStage.objects.filter(route=route).select_related('stage')
+# GET /apk/schedules
+# Returns schedule numbers (with open/closed status) for a bus on a date.
+# Params: bus_no, date (YYYY-MM-DD)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
+def apk_schedules(request):
+    user = request.user
+    if not _meets_tier(user, 'intermediate'):
+        return Response(_TIER_ERROR, status=403)
+
+    bus_no = request.GET.get('bus_no')
+    date_str = request.GET.get('date')
+
+    if not bus_no or not date_str:
+        return Response({'error': 'bus_no and date are required'}, status=400)
+
+    schedules = ScheduleData.objects.filter(
+        company_code=user.company,
+        bus_no=bus_no,
+        start_date=date_str,
+    ).order_by('schedule_no').values('schedule_no', 'is_closed')
+
+    data = [
+        {
+            'schedule_no': s['schedule_no'],
+            'status': 'closed' if s['is_closed'] else 'open',
         }
-    except Route.DoesNotExist:
-        return _build_stage_map(company)
+        for s in schedules
+    ]
+
+    return Response({
+        'data': data,
+        'schedules': [s['schedule_no'] for s in data],
+    })
+
+
+# GET /apk/dashboard
+# APK home dashboard: revenue header, weekly chart (Mon–Sun), per-bus list with status.
+# Params: date (YYYY-MM-DD)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
+def apk_dashboard(request):
+    user = request.user
+    if not _meets_tier(user, 'intermediate'):
+        return Response(_TIER_ERROR, status=403)
+
+    date_str = request.GET.get('date')
+    if not date_str:
+        return Response({'error': 'date is required'}, status=400)
+
+    company = user.company
+    anchor = datetime.date.fromisoformat(date_str)
+
+    # ── Revenue header: closed trips from TripData + open trips from TransactionData ──
+    closed_day = TripData.objects.filter(
+        company_code=company,
+        start_date=date_str,
+        is_closed=True,
+    ).aggregate(total=Sum('total_collection'), upi=Sum('upi_ticket_amount'))
+
+    open_day = TransactionData.objects.filter(
+        company_code=company,
+        ticket_date=date_str,
+        trip_id__is_closed=False,
+    ).aggregate(
+        total=Sum('ticket_amount'),
+        upi=Sum('ticket_amount', filter=Q(ticket_status='UPI')),
+    )
+
+    total_revenue = (closed_day['total'] or 0) + (open_day['total'] or 0)
+    total_upi = (closed_day['upi'] or 0) + (open_day['upi'] or 0)
+
+    # ── Per-bus revenue: closed from TripData, open from TransactionData ──────
+    closed_bus_rows = {
+        row['bus_no']: row
+        for row in TripData.objects.filter(
+            company_code=company,
+            start_date=date_str,
+            is_closed=True,
+            bus_no__isnull=False,
+        ).values('bus_no').annotate(
+            revenue=Sum('total_collection'),
+            upi_amt=Sum('upi_ticket_amount'),
+        )
+    }
+
+    open_bus_rows = {
+        row['bus_no']: row
+        for row in TransactionData.objects.filter(
+            company_code=company,
+            ticket_date=date_str,
+            trip_id__is_closed=False,
+            bus_no__isnull=False,
+        ).values('bus_no').annotate(
+            revenue=Sum('ticket_amount'),
+            upi_amt=Sum('ticket_amount', filter=Q(ticket_status='UPI')),
+        )
+    }
+
+    running_buses = set(
+        TripData.objects.filter(
+            company_code=company,
+            start_date=date_str,
+            is_closed=False,
+            bus_no__isnull=False,
+        ).values_list('bus_no', flat=True).distinct()
+    )
+
+    buses_with_data = set(closed_bus_rows.keys()) | set(open_bus_rows.keys()) | running_buses
+
+    bus_list = []
+    running_count = len(running_buses)
+    for bus_no in buses_with_data:
+        closed = closed_bus_rows.get(bus_no, {})
+        open_rev = open_bus_rows.get(bus_no, {})
+        revenue = (closed.get('revenue') or 0) + (open_rev.get('revenue') or 0)
+        upi_amt = (closed.get('upi_amt') or 0) + (open_rev.get('upi_amt') or 0)
+        cash_amt = revenue - upi_amt
+        status = 'running' if bus_no in running_buses else 'idle'
+        bus_list.append({
+            'bus_no': bus_no,
+            'status': status,
+            'revenue': str(revenue),
+            'cash_amt': str(cash_amt),
+            'upi_amt': str(upi_amt),
+        })
+
+    for reg_num in VehicleType.objects.filter(company=company, is_deleted=False).values_list('bus_reg_num', flat=True):
+        if reg_num not in buses_with_data:
+            bus_list.append({
+                'bus_no': reg_num,
+                'status': 'offline',
+                'revenue': '0.00',
+                'cash_amt': '0.00',
+                'upi_amt': '0.00',
+            })
+
+    # ── Weekly chart (Mon–Sun): closed from TripData + open from TransactionData ──
+    week_start = anchor - datetime.timedelta(days=anchor.weekday())
+    week_end = week_start + datetime.timedelta(days=6)
+
+    closed_weekly = {
+        str(r['start_date']): {'total': r['total'] or 0, 'upi': r['upi'] or 0}
+        for r in TripData.objects.filter(
+            company_code=company,
+            start_date__range=[week_start, week_end],
+            is_closed=True,
+        ).values('start_date').annotate(
+            total=Sum('total_collection'),
+            upi=Sum('upi_ticket_amount'),
+        )
+    }
+
+    open_weekly = {
+        str(r['ticket_date']): {'total': r['total'] or 0, 'upi': r['upi'] or 0}
+        for r in TransactionData.objects.filter(
+            company_code=company,
+            ticket_date__range=[week_start, week_end],
+            trip_id__is_closed=False,
+        ).values('ticket_date').annotate(
+            total=Sum('ticket_amount'),
+            upi=Sum('ticket_amount', filter=Q(ticket_status='UPI')),
+        )
+    }
+
+    all_week_dates = sorted(set(closed_weekly.keys()) | set(open_weekly.keys()))
+    weekly_chart = []
+    for date in all_week_dates:
+        rev = (closed_weekly.get(date, {}).get('total', 0)) + (open_weekly.get(date, {}).get('total', 0))
+        upi = (closed_weekly.get(date, {}).get('upi', 0)) + (open_weekly.get(date, {}).get('upi', 0))
+        weekly_chart.append({
+            'date': date,
+            'total': str(rev),
+            'cash': str(rev - upi),
+            'upi': str(upi),
+        })
+
+    return Response({
+        'date': date_str,
+        'total_revenue': str(total_revenue),
+        'total_cash': str(total_revenue - total_upi),
+        'total_upi': str(total_upi),
+        'bus_on_road': running_count,
+        'weekly_chart': weekly_chart,
+        'bus_list': bus_list,
+    })
+
+
+# GET /apk/trips
+# Trips for a bus on a specific schedule and date.
+# Params: bus_no, schedule_no, date (YYYY-MM-DD)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
+def apk_trips(request):
+    user = request.user
+    if not _meets_tier(user, 'intermediate'):
+        return Response(_TIER_ERROR, status=403)
+
+    bus_no = request.GET.get('bus_no')
+    schedule_no = request.GET.get('schedule_no')
+    date_str = request.GET.get('date')
+
+    if not bus_no or not schedule_no or not date_str:
+        return Response({'error': 'bus_no, schedule_no and date are required'}, status=400)
+
+    trips = TripData.objects.filter(
+        company_code=user.company,
+        bus_no=bus_no,
+        schedule_no=int(schedule_no),
+        start_date=date_str,
+    ).select_related('route_id').order_by('trip_no')
+
+    trip_list = []
+    for t in trips:
+        if t.is_closed:
+            revenue = t.total_collection or 0
+            upi_amt = t.upi_ticket_amount or 0
+        else:
+            live = TransactionData.objects.filter(
+                company_code=user.company,
+                trip_id=t,
+            ).aggregate(
+                total=Sum('ticket_amount'),
+                upi=Sum('ticket_amount', filter=Q(ticket_status='UPI')),
+            )
+            revenue = live['total'] or 0
+            upi_amt = live['upi'] or 0
+
+        cash_amt = revenue - upi_amt
+        trip_list.append({
+            'trip_no': t.trip_no,
+            'status': 'open' if not t.is_closed else 'closed',
+            'route_name': t.route_id.route_name if t.route_id else None,
+            'route_code': t.route_id.route_code if t.route_id else None,
+            'start_time': str(t.start_time) if t.start_time else None,
+            'end_time': str(t.end_time) if t.end_time else None,
+            'revenue': str(revenue),
+            'cash_amt': str(cash_amt),
+            'upi_amt': str(upi_amt),
+        })
+
+    return Response({
+        'bus_no': bus_no,
+        'schedule_no': schedule_no,
+        'date': date_str,
+        'trips': trip_list,
+    })
+
+
+# GET /apk/tickets
+# Tickets for a specific trip with passenger type totals.
+# Params: bus_no, schedule_no, trip_no, date (YYYY-MM-DD)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
+def apk_tickets(request):
+    user = request.user
+    if not _meets_tier(user, 'intermediate'):
+        return Response(_TIER_ERROR, status=403)
+
+    bus_no = request.GET.get('bus_no')
+    schedule_no = request.GET.get('schedule_no')
+    trip_no = request.GET.get('trip_no')
+    date_str = request.GET.get('date')
+
+    if not bus_no or not schedule_no or not trip_no or not date_str:
+        return Response({'error': 'bus_no, schedule_no, trip_no and date are required'}, status=400)
+
+    try:
+        trip = TripData.objects.get(
+            company_code=user.company,
+            bus_no=bus_no,
+            schedule_no=int(schedule_no),
+            trip_no=int(trip_no),
+            start_date=date_str,
+        )
+    except TripData.DoesNotExist:
+        return Response({'error': 'Trip not found'}, status=404)
+
+    # Stage map keyed by RouteStage PK — derived from the trip's own route
+    stage_map = {}
+    if trip.route_id:
+        stage_map = {
+            rs.id: rs.stage.stage_name
+            for rs in RouteStage.objects.filter(route=trip.route_id).select_related('stage')
+        }
+
+    qs = TransactionData.objects.filter(
+        company_code=user.company,
+        trip_id=trip,
+        ticket_date=date_str,
+    ).order_by('ticket_time')
+
+    totals = {'full': 0, 'half': 0, 'st': 0, 'phy': 0, 'lugg': 0, 'ladies': 0, 'senior': 0}
+    ticket_list = []
+    for t in qs:
+        totals['full'] += t.full_count or 0
+        totals['half'] += t.half_count or 0
+        totals['st'] += t.st_count or 0
+        totals['phy'] += t.phy_count or 0
+        totals['lugg'] += t.lugg_count or 0
+        totals['ladies'] += t.ladies_count or 0
+        totals['senior'] += t.senior_count or 0
+        ticket_list.append({
+            'ticket_no': t.ticket_number,
+            'from_stage': stage_map.get(t.from_stage_id_id, str(t.from_stage) if t.from_stage is not None else None),
+            'to_stage': stage_map.get(t.to_stage_id_id, str(t.to_stage) if t.to_stage is not None else None),
+            'amount': str(t.ticket_amount),
+            'payment_mode': PAYMENT_LABELS.get(t.ticket_status, 'Unknown'),
+            'ticket_type': t.ticket_type,
+            'full_count': t.full_count,
+            'half_count': t.half_count,
+            'st_count': t.st_count,
+            'phy_count': t.phy_count,
+            'lugg_count': t.lugg_count,
+        })
+
+    return Response({
+        'bus_no': bus_no,
+        'schedule_no': schedule_no,
+        'trip_no': trip_no,
+        'date': date_str,
+        'passenger_totals': totals,
+        'tickets': ticket_list,
+    })
+
+
+# GET /apk/passengers
+# Stage-wise boarded/deboarded table for a trip; live header for open trips.
+# Params: bus_no, schedule_no, trip_no, date (YYYY-MM-DD)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
+def apk_passengers(request):
+    user = request.user
+    if not _meets_tier(user, 'intermediate'):
+        return Response(_TIER_ERROR, status=403)
+
+    bus_no = request.GET.get('bus_no')
+    schedule_no = request.GET.get('schedule_no')
+    trip_no = request.GET.get('trip_no')
+    date_str = request.GET.get('date')
+
+    if not bus_no or not schedule_no or not trip_no or not date_str:
+        return Response({'error': 'bus_no, schedule_no, trip_no and date are required'}, status=400)
+
+    try:
+        trip = TripData.objects.get(
+            company_code=user.company,
+            bus_no=bus_no,
+            schedule_no=int(schedule_no),
+            trip_no=int(trip_no),
+            start_date=date_str,
+        )
+    except TripData.DoesNotExist:
+        return Response({'error': 'Trip not found'}, status=404)
+
+    qs = TransactionData.objects.filter(
+        company_code=user.company,
+        trip_id=trip,
+        ticket_date=date_str,
+    )
+
+    # Route stages ordered by sequence — derived from the trip's own route
+    route_stages = []
+    if trip.route_id:
+        route_stages = list(
+            RouteStage.objects.filter(route=trip.route_id)
+            .select_related('stage')
+            .order_by('sequence_no')
+        )
+
+    # ── Header ────────────────────────────────────────────────────────────────
+    status = 'open' if not trip.is_closed else 'closed'
+    if status == 'open':
+        last_ticket = qs.order_by('-ticket_time').values('to_stage_id_id', 'passenger_count').first()
+        if last_ticket and last_ticket['to_stage_id_id']:
+            try:
+                rs = RouteStage.objects.select_related('stage').get(id=last_ticket['to_stage_id_id'])
+                current_stage = rs.stage.stage_name
+            except RouteStage.DoesNotExist:
+                current_stage = None
+        else:
+            current_stage = None
+        passengers_in_bus = last_ticket['passenger_count'] if last_ticket else None
+
+        live = qs.aggregate(
+            total=Sum('ticket_amount'),
+            upi=Sum('ticket_amount', filter=Q(ticket_status='UPI')),
+        )
+        total_collection = live['total'] or 0
+    else:
+        current_stage = None
+        passengers_in_bus = None
+        total_collection = trip.total_collection or 0
+
+    # ── Passenger totals ──────────────────────────────────────────────────────
+    agg = qs.aggregate(
+        full=Sum('full_count'), half=Sum('half_count'),
+        st=Sum('st_count'), phy=Sum('phy_count'),
+        lugg=Sum('lugg_count'), ladies=Sum('ladies_count'), senior=Sum('senior_count'),
+    )
+    passenger_totals = {k: v or 0 for k, v in agg.items()}
+
+    # ── Stage table: keyed by RouteStage PK (from_stage_id_id / to_stage_id_id) ──
+    empty = {'f': 0, 'h': 0, 'st': 0, 'ph': 0}
+
+    boarded = {
+        r['from_stage_id_id']: {
+            'f': r['full'] or 0, 'h': r['half'] or 0,
+            'st': r['st'] or 0, 'ph': r['phy'] or 0,
+        }
+        for r in qs.values('from_stage_id_id').annotate(
+            full=Sum('full_count'), half=Sum('half_count'),
+            st=Sum('st_count'), phy=Sum('phy_count'),
+        )
+        if r['from_stage_id_id'] is not None
+    }
+
+    deboarded = {
+        r['to_stage_id_id']: {
+            'f': r['full'] or 0, 'h': r['half'] or 0,
+            'st': r['st'] or 0, 'ph': r['phy'] or 0,
+        }
+        for r in qs.values('to_stage_id_id').annotate(
+            full=Sum('full_count'), half=Sum('half_count'),
+            st=Sum('st_count'), phy=Sum('phy_count'),
+        )
+        if r['to_stage_id_id'] is not None
+    }
+
+    if route_stages:
+        stage_table = [
+            {
+                'stage_name': rs.stage.stage_name,
+                'boarded': boarded.get(rs.id, empty),
+                'deboarded': deboarded.get(rs.id, empty),
+            }
+            for rs in route_stages
+        ]
+    else:
+        # No route linked — fall back to raw stage IDs
+        all_ids = sorted(set(boarded.keys()) | set(deboarded.keys()))
+        stage_table = [
+            {
+                'stage_name': str(sid),
+                'boarded': boarded.get(sid, empty),
+                'deboarded': deboarded.get(sid, empty),
+            }
+            for sid in all_ids
+        ]
+
+    return Response({
+        'bus_no': bus_no,
+        'schedule_no': schedule_no,
+        'trip_no': trip_no,
+        'date': date_str,
+        'header': {
+            'status': status,
+            'current_stage': current_stage,
+            'passengers_in_bus': passengers_in_bus,
+            'total_collection': str(total_collection),
+        },
+        'passenger_totals': passenger_totals,
+        'stage_table': stage_table,
+    })
 
 
 # GET /reports/duty
 # Duty report: all closed trips for a bus on a date, with crew and ticket range.
 # Params: bus_no, date (YYYY-MM-DD)
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def duty_report(request):
-    user = get_user_from_cookie(request)
-    if not user:
-        return JsonResponse({'error': 'Unauthorized'}, status=401)
+    user = request.user
     if not _meets_tier(user, 'intermediate'):
-        return JsonResponse(_TIER_ERROR, status=403)
+        return Response(_TIER_ERROR, status=403)
 
     bus_no = request.GET.get('bus_no')
     date_str = request.GET.get('date')
 
     if not bus_no or not date_str:
-        return JsonResponse({'error': 'bus_no and date are required'}, status=400)
+        return Response({'error': 'bus_no and date are required'}, status=400)
 
     trips = TripData.objects.filter(
         bus_no=bus_no,
@@ -92,7 +550,7 @@ def duty_report(request):
             'collection': collection,
         })
 
-    return JsonResponse({
+    return Response({
         'bus_no': bus_no,
         'date': date_str,
         'driver': driver_name,
@@ -105,21 +563,19 @@ def duty_report(request):
 # Per-date revenue and distance for a bus over a date range.
 # Params: bus_no, from_date (YYYY-MM-DD), to_date (YYYY-MM-DD)
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def bus_summary_report(request):
-    user = get_user_from_cookie(request)
-    if not user:
-        return JsonResponse({'error': 'Unauthorized'}, status=401)
+    user = request.user
     if not _meets_tier(user, 'intermediate'):
-        return JsonResponse(_TIER_ERROR, status=403)
+        return Response(_TIER_ERROR, status=403)
 
     bus_no = request.GET.get('bus_no')
     from_date = request.GET.get('from_date')
     to_date = request.GET.get('to_date')
 
     if not bus_no or not from_date or not to_date:
-        return JsonResponse({'error': 'bus_no, from_date and to_date are required'}, status=400)
+        return Response({'error': 'bus_no, from_date and to_date are required'}, status=400)
 
-    # Closed trips: revenue + distance from TripData
     closed_qs = TripData.objects.filter(
         company_code=user.company,
         bus_no=bus_no,
@@ -134,7 +590,6 @@ def bus_summary_report(request):
         for r in closed_qs
     }
 
-    # Open trips: revenue from TransactionData, distance from last stage reached
     open_revenue = {
         str(r['ticket_date']): r['collection'] or 0
         for r in TransactionData.objects.filter(
@@ -156,10 +611,10 @@ def bus_summary_report(request):
         last = TransactionData.objects.filter(
             company_code=user.company,
             trip_id=trip,
-        ).order_by('-ticket_time').values('to_stage').first()
-        if last and last['to_stage'] is not None:
+        ).order_by('-ticket_time').values('to_stage_id_id').first()
+        if last and last['to_stage_id_id'] is not None:
             try:
-                rs = RouteStage.objects.get(route=trip.route_id, sequence_no=last['to_stage'])
+                rs = RouteStage.objects.get(id=last['to_stage_id_id'])
                 date_key = str(trip.start_date)
                 open_distance[date_key] = open_distance.get(date_key, 0) + (rs.distance or 0)
             except RouteStage.DoesNotExist:
@@ -176,7 +631,7 @@ def bus_summary_report(request):
         for date in all_dates
     ]
 
-    return JsonResponse({'rows': rows})
+    return Response({'rows': rows})
 
 
 # GET /reports/payment-type
@@ -184,12 +639,11 @@ def bus_summary_report(request):
 # Params: bus_no, from_date (YYYY-MM-DD), to_date (YYYY-MM-DD),
 #         payment_mode (cash | upi) — optional, returns both if omitted
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def payment_type_report(request):
-    user = get_user_from_cookie(request)
-    if not user:
-        return JsonResponse({'error': 'Unauthorized'}, status=401)
+    user = request.user
     if not _meets_tier(user, 'intermediate'):
-        return JsonResponse(_TIER_ERROR, status=403)
+        return Response(_TIER_ERROR, status=403)
 
     bus_no = request.GET.get('bus_no')
     from_date = request.GET.get('from_date')
@@ -197,12 +651,11 @@ def payment_type_report(request):
     payment_mode = request.GET.get('payment_mode', '').lower()
 
     if not bus_no or not from_date or not to_date:
-        return JsonResponse({'error': 'bus_no, from_date and to_date are required'}, status=400)
+        return Response({'error': 'bus_no, from_date and to_date are required'}, status=400)
 
     want_cash = payment_mode in ('', 'cash')
     want_upi = payment_mode in ('', 'upi')
 
-    # ── Closed trips: from TripData ───────────────────────────────────────────
     closed_map = {}
     for r in TripData.objects.filter(
         company_code=user.company,
@@ -218,7 +671,6 @@ def payment_type_report(request):
         total = r['total'] or 0
         closed_map[date] = {'cash': total - upi, 'upi': upi}
 
-    # ── Open trips: from TransactionData ──────────────────────────────────────
     open_map = {}
     for r in TransactionData.objects.filter(
         company_code=user.company,
@@ -258,28 +710,26 @@ def payment_type_report(request):
     if want_upi:
         totals['total_upi'] = str(total_upi)
 
-    return JsonResponse({'rows': rows, 'totals': totals})
+    return Response({'rows': rows, 'totals': totals})
 
 
 # GET /reports/farewise
 # Fare-wise ticket count/revenue and per-trip passenger counts for a date range.
 # Params: bus_no, from_date (YYYY-MM-DD), to_date (YYYY-MM-DD)
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def farewise_report(request):
-    user = get_user_from_cookie(request)
-    if not user:
-        return JsonResponse({'error': 'Unauthorized'}, status=401)
+    user = request.user
     if not _meets_tier(user, 'intermediate'):
-        return JsonResponse(_TIER_ERROR, status=403)
+        return Response(_TIER_ERROR, status=403)
 
     bus_no = request.GET.get('bus_no')
     from_date = request.GET.get('from_date')
     to_date = request.GET.get('to_date')
 
     if not bus_no or not from_date or not to_date:
-        return JsonResponse({'error': 'bus_no, from_date and to_date are required'}, status=400)
+        return Response({'error': 'bus_no, from_date and to_date are required'}, status=400)
 
-    # ── Fare table ────────────────────────────────────────────────────────────
     fares = [
         {
             'fare': str(r['ticket_amount']),
@@ -296,7 +746,6 @@ def farewise_report(request):
         ).order_by('ticket_amount')
     ]
 
-    # ── Passenger counts per trip ─────────────────────────────────────────────
     trips = TripData.objects.filter(
         company_code=user.company,
         bus_no=bus_no,
@@ -345,30 +794,28 @@ def farewise_report(request):
                 'senior': agg.get('senior') or 0,
             })
 
-    return JsonResponse({
+    return Response({
         'fares': fares,
         'passenger_counts': passenger_counts,
     })
 
 
-
-# GET /ticket-app/reports/expense
+# GET /reports/expense
 # Returns expense data for a bus over a date range.
 # Params: bus_no, from_date (YYYY-MM-DD), to_date (YYYY-MM-DD)
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def expense_report(request):
-    user = get_user_from_cookie(request)
-    if not user:
-        return JsonResponse({'error': 'Unauthorized'}, status=401)
+    user = request.user
     if not _meets_tier(user, 'intermediate'):
-        return JsonResponse(_TIER_ERROR, status=403)
+        return Response(_TIER_ERROR, status=403)
 
     bus_no = request.GET.get('bus_no')
     from_date = request.GET.get('from_date')
     to_date = request.GET.get('to_date')
 
     if not bus_no or not from_date or not to_date:
-        return JsonResponse({'error': 'bus_no, from_date and to_date are required'}, status=400)
+        return Response({'error': 'bus_no, from_date and to_date are required'}, status=400)
 
     closed_revenue = {
         str(r['start_date']): r['collection'] or 0
@@ -406,7 +853,7 @@ def expense_report(request):
 
     all_dates = sorted(set(revenue_map.keys()) | set(expense_map.keys()))
 
-    return JsonResponse({
+    return Response({
         'rows': [
             {
                 'date': date,
@@ -415,349 +862,4 @@ def expense_report(request):
             }
             for date in all_dates
         ]
-    })
-
-
-
-# GET /apk/buses
-# Returns all active bus registration numbers for the company.
-@api_view(['GET'])
-def apk_bus_list(request):
-    user = get_user_from_cookie(request)
-    if not user:
-        return JsonResponse({'error': 'Unauthorized'}, status=401)
-
-    buses = list(
-        VehicleType.objects.filter(company=user.company, is_deleted=False)
-        .order_by('bus_reg_num')
-        .values('id', 'bus_reg_num')
-    )
-    return JsonResponse({'buses': buses})
-
-
-# GET /apk/dashboard
-# APK home dashboard: revenue header, weekly chart (Mon–Sun), per-bus list with status.
-# Params: date (YYYY-MM-DD)
-@api_view(['GET'])
-def apk_dashboard(request):
-    user = get_user_from_cookie(request)
-    if not user:
-        return JsonResponse({'error': 'Unauthorized'}, status=401)
-    if not _meets_tier(user, 'intermediate'):
-        return JsonResponse(_TIER_ERROR, status=403)
-
-    date_str = request.GET.get('date')
-    if not date_str:
-        return JsonResponse({'error': 'date is required'}, status=400)
-
-    company = user.company
-    anchor = datetime.date.fromisoformat(date_str)
-
-    # ── Revenue header ────────────────────────────────────────────────────────
-    day_agg = TripData.objects.filter(
-        company_code=company,
-        start_date=date_str,
-    ).aggregate(total=Sum('total_collection'), upi=Sum('upi_ticket_amount'))
-    total_revenue = day_agg['total'] or 0
-    total_upi = day_agg['upi'] or 0
-
-    # ── Bus list with status ──────────────────────────────────────────────────
-    bus_rows = TripData.objects.filter(
-        company_code=company,
-        start_date=date_str,
-        bus_no__isnull=False,
-    ).values('bus_no').annotate(
-        revenue=Sum('total_collection'),
-        upi_amt=Sum('upi_ticket_amount'),
-        open_count=Count('id', filter=Q(is_closed=False)),
-    )
-
-    buses_with_data = {row['bus_no']: row for row in bus_rows}
-
-    bus_list = []
-    running_count = 0
-    for bus_no, row in buses_with_data.items():
-        cash_amt = (row['revenue'] or 0) - (row['upi_amt'] or 0)
-        status = 'running' if row['open_count'] > 0 else 'idle'
-        if status == 'running':
-            running_count += 1
-        bus_list.append({
-            'bus_no': bus_no,
-            'status': status,
-            'revenue': str(row['revenue'] or '0.00'),
-            'cash_amt': str(cash_amt),
-            'upi_amt': str(row['upi_amt'] or '0.00'),
-        })
-
-    for reg_num in VehicleType.objects.filter(company=company, is_deleted=False).values_list('bus_reg_num', flat=True):
-        if reg_num not in buses_with_data:
-            bus_list.append({
-                'bus_no': reg_num,
-                'status': 'offline',
-                'revenue': '0.00',
-                'cash_amt': '0.00',
-                'upi_amt': '0.00',
-            })
-
-    # ── Weekly chart (Mon–Sun week containing selected date) ──────────────────
-    week_start = anchor - datetime.timedelta(days=anchor.weekday())
-    week_end = week_start + datetime.timedelta(days=6)
-
-    weekly_qs = TripData.objects.filter(
-        company_code=company,
-        start_date__range=[week_start, week_end],
-    ).values('start_date').annotate(
-        total=Sum('total_collection'),
-        upi=Sum('upi_ticket_amount'),
-    ).order_by('start_date')
-
-    weekly_chart = []
-    for row in weekly_qs:
-        rev = row['total'] or 0
-        upi = row['upi'] or 0
-        weekly_chart.append({
-            'date': str(row['start_date']),
-            'total': str(rev),
-            'cash': str(rev - upi),
-            'upi': str(upi),
-        })
-
-    return JsonResponse({
-        'date': date_str,
-        'total_revenue': str(total_revenue),
-        'total_cash': str(total_revenue - total_upi),
-        'total_upi': str(total_upi),
-        'bus_on_road': running_count,
-        'weekly_chart': weekly_chart,
-        'bus_list': bus_list,
-    })
-
-
-# GET /apk/bus-trips
-# Trips for a bus on a specific date (open and closed).
-# Params: bus_no, date (YYYY-MM-DD)
-@api_view(['GET'])
-def apk_bus_trips(request):
-    user = get_user_from_cookie(request)
-    if not user:
-        return JsonResponse({'error': 'Unauthorized'}, status=401)
-    if not _meets_tier(user, 'intermediate'):
-        return JsonResponse(_TIER_ERROR, status=403)
-
-    bus_no = request.GET.get('bus_no')
-    date_str = request.GET.get('date')
-
-    if not bus_no or not date_str:
-        return JsonResponse({'error': 'bus_no and date are required'}, status=400)
-
-    trips = TripData.objects.filter(
-        company_code=user.company,
-        bus_no=bus_no,
-        start_date=date_str,
-    ).select_related('route_id').order_by('trip_no')
-
-    trip_list = []
-    for t in trips:
-        cash_amt = (t.total_collection or 0) - (t.upi_ticket_amount or 0)
-        trip_list.append({
-            'trip_no': t.trip_no,
-            'status': 'open' if not t.is_closed else 'closed',
-            'route_name': t.route_id.route_name if t.route_id else None,
-            'route_code': t.route_id.route_code if t.route_id else None,
-            'start_time': str(t.start_time) if t.start_time else None,
-            'end_time': str(t.end_time) if t.end_time else None,
-            'revenue': str(t.total_collection or '0.00'),
-            'cash_amt': str(cash_amt),
-            'upi_amt': str(t.upi_ticket_amount or '0.00'),
-        })
-
-    return JsonResponse({
-        'bus_no': bus_no,
-        'date': date_str,
-        'trips': trip_list,
-    })
-
-
-# GET /apk/ticket-details
-# Tickets for a specific trip with passenger type totals.
-# Params: bus_no, trip_no (integer), route_code, date (YYYY-MM-DD)
-@api_view(['GET'])
-def apk_ticket_details(request):
-    user = get_user_from_cookie(request)
-    if not user:
-        return JsonResponse({'error': 'Unauthorized'}, status=401)
-    if not _meets_tier(user, 'intermediate'):
-        return JsonResponse(_TIER_ERROR, status=403)
-
-    bus_no = request.GET.get('bus_no')
-    trip_no = request.GET.get('trip_no')
-    route_code = request.GET.get('route_code')
-    date_str = request.GET.get('date')
-
-    if not bus_no or not trip_no or not route_code or not date_str:
-        return JsonResponse({'error': 'bus_no, trip_no, route_code and date are required'}, status=400)
-
-    try:
-        trip = TripData.objects.get(
-            company_code=user.company,
-            bus_no=bus_no,
-            trip_no=int(trip_no),
-            start_date=date_str,
-        )
-    except TripData.DoesNotExist:
-        return JsonResponse({'error': 'Trip not found'}, status=404)
-
-    stage_map = _route_stage_map(user.company, route_code)
-
-    qs = TransactionData.objects.filter(
-        company_code=user.company,
-        trip_id=trip,
-        ticket_date=date_str,
-    ).order_by('ticket_time')
-
-    totals = {'full': 0, 'half': 0, 'st': 0, 'phy': 0, 'lugg': 0, 'ladies': 0, 'senior': 0}
-    ticket_list = []
-    for t in qs:
-        totals['full'] += t.full_count or 0
-        totals['half'] += t.half_count or 0
-        totals['st'] += t.st_count or 0
-        totals['phy'] += t.phy_count or 0
-        totals['lugg'] += t.lugg_count or 0
-        totals['ladies'] += t.ladies_count or 0
-        totals['senior'] += t.senior_count or 0
-        ticket_list.append({
-            'ticket_no': t.ticket_number,
-            'from_stage': stage_map.get(t.from_stage, str(t.from_stage) if t.from_stage is not None else None),
-            'to_stage': stage_map.get(t.to_stage, str(t.to_stage) if t.to_stage is not None else None),
-            'amount': str(t.ticket_amount),
-            'payment_mode': PAYMENT_LABELS.get(t.ticket_status, 'Unknown'),
-            'ticket_type': t.ticket_type,
-            'full_count': t.full_count,
-            'half_count': t.half_count,
-            'st_count': t.st_count,
-            'phy_count': t.phy_count,
-            'lugg_count': t.lugg_count,
-        })
-
-    return JsonResponse({
-        'bus_no': bus_no,
-        'trip_no': trip_no,
-        'date': date_str,
-        'passenger_totals': totals,
-        'tickets': ticket_list,
-    })
-
-
-# GET /apk/passenger-info
-# Stage-wise boarded/deboarded table for a trip; live header for open trips.
-# Params: bus_no, trip_no (integer), route_code, date (YYYY-MM-DD)
-@api_view(['GET'])
-def apk_passenger_info(request):
-    user = get_user_from_cookie(request)
-    if not user:
-        return JsonResponse({'error': 'Unauthorized'}, status=401)
-    if not _meets_tier(user, 'intermediate'):
-        return JsonResponse(_TIER_ERROR, status=403)
-
-    bus_no = request.GET.get('bus_no')
-    trip_no = request.GET.get('trip_no')
-    route_code = request.GET.get('route_code')
-    date_str = request.GET.get('date')
-
-    if not bus_no or not trip_no or not route_code or not date_str:
-        return JsonResponse({'error': 'bus_no, trip_no, route_code and date are required'}, status=400)
-
-    try:
-        trip = TripData.objects.get(
-            company_code=user.company,
-            bus_no=bus_no,
-            trip_no=int(trip_no),
-            start_date=date_str,
-        )
-    except TripData.DoesNotExist:
-        return JsonResponse({'error': 'Trip not found'}, status=404)
-
-    qs = TransactionData.objects.filter(
-        company_code=user.company,
-        trip_id=trip,
-        ticket_date=date_str,
-    )
-
-    # ── Route stages (ordered) ────────────────────────────────────────────────
-    try:
-        route = Route.objects.get(company=user.company, route_code=route_code)
-        route_stages = list(RouteStage.objects.filter(route=route).select_related('stage').order_by('sequence_no'))
-        stage_map = {rs.sequence_no: rs.stage.stage_name for rs in route_stages}
-        has_route = True
-    except Route.DoesNotExist:
-        route_stages = []
-        stage_map = _build_stage_map(user.company)
-        has_route = False
-
-    # ── Header ────────────────────────────────────────────────────────────────
-    status = 'open' if not trip.is_closed else 'closed'
-    if status == 'open':
-        last_ticket = qs.order_by('-ticket_time').values('to_stage', 'passenger_count').first()
-        current_stage = stage_map.get(last_ticket['to_stage']) if last_ticket and last_ticket['to_stage'] is not None else None
-        passengers_in_bus = last_ticket['passenger_count'] if last_ticket else None
-    else:
-        current_stage = None
-        passengers_in_bus = None
-
-    # ── Passenger totals ──────────────────────────────────────────────────────
-    agg = qs.aggregate(
-        full=Sum('full_count'), half=Sum('half_count'),
-        st=Sum('st_count'), phy=Sum('phy_count'),
-        lugg=Sum('lugg_count'), ladies=Sum('ladies_count'), senior=Sum('senior_count'),
-    )
-    passenger_totals = {k: v or 0 for k, v in agg.items()}
-
-    # ── Stage table ───────────────────────────────────────────────────────────
-    boarded = {
-        r['from_stage']: {'f': r['full'] or 0, 'h': r['half'] or 0, 'st': r['st'] or 0, 'ph': r['phy'] or 0}
-        for r in qs.values('from_stage').annotate(
-            full=Sum('full_count'), half=Sum('half_count'), st=Sum('st_count'), phy=Sum('phy_count'),
-        )
-        if r['from_stage'] is not None
-    }
-    deboarded = {
-        r['to_stage']: {'f': r['full'] or 0, 'h': r['half'] or 0, 'st': r['st'] or 0, 'ph': r['phy'] or 0}
-        for r in qs.values('to_stage').annotate(
-            full=Sum('full_count'), half=Sum('half_count'), st=Sum('st_count'), phy=Sum('phy_count'),
-        )
-        if r['to_stage'] is not None
-    }
-
-    if has_route:
-        stage_table = [
-            {
-                'stage_name': rs.stage.stage_name,
-                'boarded': boarded.get(rs.sequence_no, {'f': 0, 'h': 0, 'st': 0, 'ph': 0}),
-                'deboarded': deboarded.get(rs.sequence_no, {'f': 0, 'h': 0, 'st': 0, 'ph': 0}),
-            }
-            for rs in route_stages
-        ]
-    else:
-        all_stages = sorted(set(boarded.keys()) | set(deboarded.keys()))
-        stage_table = [
-            {
-                'stage_name': stage_map.get(sc, str(sc)),
-                'boarded': boarded.get(sc, {'f': 0, 'h': 0, 'st': 0, 'ph': 0}),
-                'deboarded': deboarded.get(sc, {'f': 0, 'h': 0, 'st': 0, 'ph': 0}),
-            }
-            for sc in all_stages
-        ]
-
-    return JsonResponse({
-        'bus_no': bus_no,
-        'trip_no': trip_no,
-        'date': date_str,
-        'header': {
-            'status': status,
-            'current_stage': current_stage,
-            'passengers_in_bus': passengers_in_bus,
-            'total_collection': str(trip.total_collection or '0.00'),
-        },
-        'passenger_totals': passenger_totals,
-        'stage_table': stage_table,
     })
