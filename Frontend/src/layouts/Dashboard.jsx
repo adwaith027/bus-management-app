@@ -1,15 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
-import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
-import api, { BASE_URL } from '../assets/js/axiosConfig';
-
-const IDLE_MS = 20 * 60 * 1000; // 20 minutes
+import api, { cancelAllPendingRequests } from '../assets/js/axiosConfig';
+import { useIdleTimer } from '../hooks/useIdleTimer';
 
 export default function Dashboard() {
-  const navigate = useNavigate();
-  const timerRef = useRef(null);
-  const location = useLocation();
+  const navigate  = useNavigate();
+  const location  = useLocation();
   const alertsShownRef = useRef(false);
+
   const [loginAlerts, setLoginAlerts] = useState(() => {
     if (!alertsShownRef.current && location.state?.loginAlerts?.length) {
       alertsShownRef.current = true;
@@ -18,26 +17,36 @@ export default function Dashboard() {
     return [];
   });
 
-  // AUTO-LOGOUT DISABLED — ghost session issue, see pending-implementations.txt
-  // Re-enable once backend idle check + per-device-type thresholds are implemented.
-  // useEffect(() => {
-  //   const logout = async () => {
-  //     try { await api.post(`${BASE_URL}/logout`, undefined, { timeout: 0 }); } catch {}
-  //     localStorage.removeItem('user');
-  //     navigate('/login');
-  //   };
-  //   const reset = () => {
-  //     clearTimeout(timerRef.current);
-  //     timerRef.current = setTimeout(logout, IDLE_MS);
-  //   };
-  //   const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
-  //   events.forEach(e => window.addEventListener(e, reset, { passive: true }));
-  //   reset();
-  //   return () => {
-  //     events.forEach(e => window.removeEventListener(e, reset));
-  //     clearTimeout(timerRef.current);
-  //   };
-  // }, [navigate]);
+  // ── Idle timer ──────────────────────────────────────────────────────────────
+  const [showIdleWarning, setShowIdleWarning] = useState(false);
+
+  // session_timeout_seconds is stored to localStorage on login and verify-auth.
+  const sessionTimeoutSeconds = parseInt(
+    localStorage.getItem('session_timeout_seconds') || '1200', 10
+  );
+
+  const handleLogout = useCallback(async () => {
+    setShowIdleWarning(false);
+    cancelAllPendingRequests();
+    try { await api.post('/logout'); } catch (_) {}
+    localStorage.removeItem('user');
+    localStorage.removeItem('session_timeout_seconds');
+    navigate('/login');
+  }, [navigate]);
+
+  const { extendSession } = useIdleTimer({
+    sessionTimeoutSeconds,
+    warningBeforeSeconds: 180,       // warn at 17 min
+    keepaliveIntervalMs:  300_000,   // ping at most once per 5 min while active
+    enabled: true,
+    onWarn:           () => setShowIdleWarning(true),
+    onTimeout:        () => handleLogout(),
+    onSessionInvalid: () => {
+      localStorage.removeItem('user');
+      localStorage.removeItem('session_timeout_seconds');
+      navigate('/login?error=Session%20expired.');
+    },
+  });
 
   return (
     <div className="flex min-h-screen overflow-x-hidden bg-slate-100 text-slate-900">
@@ -45,6 +54,37 @@ export default function Dashboard() {
       <main className="min-w-0 flex-1 overflow-y-auto pt-20 lg:pt-0">
         <Outlet />
       </main>
+
+      {/* ── Idle warning modal ── */}
+      {showIdleWarning && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: 'rgba(15,23,42,0.5)', backdropFilter: 'blur(4px)' }}>
+          <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', width: '100%', maxWidth: 400, padding: '28px 28px 24px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 8, background: '#fef3c7', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              </div>
+              <div>
+                <p style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', margin: 0 }}>Still there?</p>
+                <p style={{ fontSize: 12, color: '#64748b', margin: 0 }}>You'll be logged out in 3 minutes due to inactivity.</p>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+              <button
+                onClick={() => { extendSession(); setShowIdleWarning(false); }}
+                style={{ flex: 1, padding: '11px 0', background: '#1e293b', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+              >
+                Keep Using
+              </button>
+              <button
+                onClick={handleLogout}
+                style={{ flex: 1, padding: '11px 0', background: '#fff', color: '#64748b', border: '1px solid #e2e8f0', borderRadius: 10, fontSize: 14, fontWeight: 500, cursor: 'pointer' }}
+              >
+                Log Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loginAlerts.length > 0 && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: 'rgba(15,23,42,0.5)', backdropFilter: 'blur(4px)' }}>

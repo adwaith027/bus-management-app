@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { NavLink, useNavigate, useSearchParams } from "react-router-dom";
-import api, { BASE_URL } from '../../assets/js/axiosConfig';
+import api from '../../assets/js/axiosConfig';
 import login_img from '../../assets/images/login_2.png';
 
 /* ─── Icons ─── */
@@ -104,6 +104,19 @@ export default function Login() {
   const [userFocus, setUserFocus] = useState(false);
   const [passFocus, setPassFocus] = useState(false);
 
+  /* session conflict state */
+  const [conflictData, setConflictData] = useState(null);         // { device_type, active_since }
+  const [pendingCreds, setPendingCreds] = useState(null);         // { username, password } — React state only, never persisted
+  const [forceLoading, setForceLoading] = useState(false);
+
+  /* clear sensitive state on unmount */
+  useEffect(() => {
+    return () => {
+      setPendingCreds(null);
+      setConflictData(null);
+    };
+  }, []);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -126,20 +139,28 @@ export default function Login() {
         username: trimmedUsername,
         password: trimmedPassword,
       };
-      const response = await api.post(`${BASE_URL}/login`, login_data);
+      const response = await api.post('/login', login_data);
       if (response.data.user) {
         localStorage.setItem('user', JSON.stringify(response.data.user));
+      }
+      if (response.data.session_timeout_seconds) {
+        localStorage.setItem('session_timeout_seconds', String(response.data.session_timeout_seconds));
       }
       const notifications = response.data.notifications || [];
       navigate('/dashboard', { state: { loginAlerts: notifications } });
     } catch (err) {
       console.error('Login error:', err);
-      const backendCode = err.response?.data?.error_code;
+      const backendCode    = err.response?.data?.error_code;
       const backendMessage = err.response?.data?.message || err.response?.data?.error;
 
-      if (backendCode === "ALREADY_LOGGED_IN") {
-        setError(backendMessage || "You are already logged in on another device. Log out there first.");
-      } else if (err.response) {
+      if (backendCode === 'SESSION_CONFLICT') {
+        setConflictData(err.response.data.conflict);
+        setPendingCreds({ username: trimmedUsername, password: trimmedPassword });
+        setPassword('');
+        return;
+      }
+
+      if (err.response) {
         switch (err.response.status) {
           case 401: setError(backendMessage || 'Invalid username or password'); break;
           case 403: setError(backendMessage || 'Account is inactive. Contact administrator.'); break;
@@ -156,6 +177,31 @@ export default function Login() {
       setPassword('');
     } finally {
       setLoading(false);
+    }
+  };
+
+  /* Re-submits login with force_login:true after user confirms they want
+     to terminate the existing session on the other device. */
+  const handleForceLogin = async () => {
+    if (!pendingCreds) return;
+    setForceLoading(true);
+    try {
+      const response = await api.post('/login', { ...pendingCreds, force_login: true });
+      if (response.data.user) {
+        localStorage.setItem('user', JSON.stringify(response.data.user));
+      }
+      if (response.data.session_timeout_seconds) {
+        localStorage.setItem('session_timeout_seconds', String(response.data.session_timeout_seconds));
+      }
+      const notifications = response.data.notifications || [];
+      navigate('/dashboard', { state: { loginAlerts: notifications } });
+    } catch (err) {
+      const backendMessage = err.response?.data?.message || err.response?.data?.error;
+      setError(backendMessage || 'Login failed. Please try again.');
+      setConflictData(null);
+      setPendingCreds(null);
+    } finally {
+      setForceLoading(false);
     }
   };
 
@@ -245,7 +291,66 @@ export default function Login() {
             </p>
           </div>
 
-          {/* form */}
+          {/* ── Session conflict panel ── */}
+          {conflictData ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 24 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: '#fef3c7', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                </div>
+                <div>
+                  <p style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: 0 }}>Already logged in</p>
+                  <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>Your account is active on another device</p>
+                </div>
+              </div>
+
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: '16px 18px', marginBottom: 24 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <span style={{ fontSize: 12, color: '#64748b', fontWeight: 500 }}>Device</span>
+                  <span style={{ fontSize: 12, color: '#0f172a', fontWeight: 600, textTransform: 'capitalize' }}>
+                    {conflictData.device_type?.replace(/_/g, ' ') || 'Unknown'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 12, color: '#64748b', fontWeight: 500 }}>Active since</span>
+                  <span style={{ fontSize: 12, color: '#0f172a', fontWeight: 600 }}>
+                    {conflictData.active_since
+                      ? new Date(conflictData.active_since).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                      : '—'}
+                  </span>
+                </div>
+              </div>
+
+              {error && (
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '11px 14px', fontSize: 13, color: '#b91c1c', lineHeight: 1.4, marginBottom: 16 }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={handleForceLogin}
+                  disabled={forceLoading}
+                  style={{ width: '100%', padding: '13px 0', background: '#1e293b', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: forceLoading ? 'not-allowed' : 'pointer', opacity: forceLoading ? 0.7 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontFamily: 'inherit' }}
+                >
+                  {forceLoading
+                    ? <><SpinnerIcon /><span>Logging out…</span></>
+                    : 'Log Out Other Device & Continue'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setConflictData(null); setPendingCreds(null); setError(''); }}
+                  style={{ width: '100%', padding: '13px 0', background: '#fff', color: '#475569', border: '1px solid #e2e8f0', borderRadius: 10, fontSize: 14, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}
+                >
+                  Stay on This Page
+                </button>
+              </div>
+            </div>
+
+          ) : (
+          /* ── Login form ── */
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
             {/* username */}
@@ -363,6 +468,7 @@ export default function Login() {
               {loading ? <SpinnerIcon /> : <><span>Sign in</span><ArrowRightIcon /></>}
             </button>
           </form>
+          )} {/* end SESSION_CONFLICT ternary */}
 
 
 

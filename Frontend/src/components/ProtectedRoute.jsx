@@ -1,6 +1,6 @@
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import api, { BASE_URL } from '../assets/js/axiosConfig';
+import api from '../assets/js/axiosConfig';
 import { PropagateLoader } from "react-spinners";
 
 // Allowed sub-paths per role (path.startsWith check).
@@ -75,14 +75,18 @@ export default function ProtectedRoute() {
 
   const verifyAuthFromBackend = async () => {
     try {
-      const response = await api.get(`${BASE_URL}/verify-auth`);
+      const response = await api.get('/verify-auth');
       if (response.data.authenticated) {
         setIsAuthenticated(true);
         setUserRole(response.data.user.role);
         localStorage.setItem('user', JSON.stringify(response.data.user));
+        if (response.data.session_timeout_seconds) {
+          localStorage.setItem('session_timeout_seconds', String(response.data.session_timeout_seconds));
+        }
       } else {
         setIsAuthenticated(false);
         localStorage.removeItem('user');
+        localStorage.removeItem('session_timeout_seconds');
       }
     } catch (error) {
       const status = error.response?.status;
