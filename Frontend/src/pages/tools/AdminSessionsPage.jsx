@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import api, { BASE_URL } from '../../assets/js/axiosConfig';
+import api from '../../assets/js/axiosConfig';
 import {
   Monitor, Smartphone, Clock, AlertCircle,
   CheckCircle2, LogOut, RefreshCw, Shield, Building2,
@@ -34,6 +34,15 @@ function RoleBadge({ role }) {
   );
 }
 
+// A session is considered "likely disconnected" if last_active is older than
+// the session idle timeout + a small buffer (25 min). The backend sweeps
+// these every 10 min, but they may still appear briefly in the listing.
+const STALE_THRESHOLD_MS = 25 * 60 * 1000;
+const isStale = (s) => {
+  if (!s.last_active) return false;
+  return (Date.now() - new Date(s.last_active).getTime()) > STALE_THRESHOLD_MS;
+};
+
 export default function AdminSessionsPage() {
   const [sessions, setSessions]     = useState([]);
   const [loading, setLoading]       = useState(true);
@@ -42,7 +51,7 @@ export default function AdminSessionsPage() {
   const fetchSessions = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get(`${BASE_URL}/admin/sessions`);
+      const res = await api.get('/admin/sessions');
       setSessions(res.data?.data || []);
     } catch { setSessions([]); }
     finally { setLoading(false); }
@@ -54,14 +63,14 @@ export default function AdminSessionsPage() {
     if (!window.confirm(`Force logout ${username}'s session?`)) return;
     setForcingOut(p => ({ ...p, [sessionUid]: true }));
     try {
-      await api.post(`${BASE_URL}/admin/sessions/${sessionUid}/force-logout`);
+      await api.post(`/admin/sessions/${sessionUid}/force-logout`);
       setSessions(prev => prev.filter(s => s.session_uid !== sessionUid));
     } catch (err) {
       window.alert(err.response?.data?.error || 'Force logout failed.');
     } finally { setForcingOut(p => ({ ...p, [sessionUid]: false })); }
   };
 
-  const staleCount = sessions.filter(s => s.is_stale).length;
+  const staleCount = sessions.filter(isStale).length;
 
   return (
     <div className="p-6 md:p-8 min-h-screen bg-slate-50">
@@ -114,7 +123,7 @@ export default function AdminSessionsPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {sessions.map(s => (
-                  <tr key={s.session_uid} className={`transition-colors ${s.is_stale ? 'bg-amber-50/40' : 'hover:bg-slate-50/50'}`}>
+                  <tr key={s.session_uid} className={`transition-colors ${isStale(s) ? 'bg-amber-50/40' : 'hover:bg-slate-50/50'}`}>
                     <td className="px-4 py-3">
                       <p className="text-sm font-medium text-slate-800">{s.username}</p>
                       <RoleBadge role={s.role} />
@@ -142,7 +151,7 @@ export default function AdminSessionsPage() {
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-600">{fmt(s.last_active)}</td>
                     <td className="px-4 py-3">
-                      {s.is_stale ? (
+                      {isStale(s) ? (
                         <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
                           <AlertCircle size={11} /> Likely disconnected
                         </span>

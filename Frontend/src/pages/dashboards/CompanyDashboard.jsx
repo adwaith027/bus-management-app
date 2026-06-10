@@ -50,6 +50,7 @@ export default function CompanyDashboard() {
   const navigate = useNavigate();
   const storedUser = localStorage.getItem("user") ? JSON.parse(localStorage.getItem("user")) : null;
   const companyName = storedUser?.company_name || "Company";
+  const companyCode = storedUser?.company_id || "-";
 
   const [metrics, setMetrics] = useState({
     collections: { daily_cash: 0, daily_upi: 0, monthly_total: 0, prev_month_total: 0 },
@@ -112,7 +113,7 @@ export default function CompanyDashboard() {
       <PageHeader
         icon={RouteIcon}
         title="Company Dashboard"
-        subtitle={`${companyName}`}
+        subtitle={`${companyCode} / ${companyName}`}
         livePill={{ live: !loading, text: loading ? 'Loading…' : 'Live' }}
         actions={
           <div className="flex items-center gap-2">

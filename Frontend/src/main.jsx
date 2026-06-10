@@ -50,16 +50,17 @@ import ResetPassword from './pages/auth/ResetPassword'
 
 // Catch-all: hard-redirect based on auth state
 function SmartRedirect() {
+  const base = import.meta.env.BASE_URL;
   const userStr = localStorage.getItem('user');
   if (userStr) {
     try {
       const role = JSON.parse(userStr)?.role;
-      window.location.replace(role === 'production' ? '/dashboard/device-registry' : '/dashboard');
+      window.location.replace(role === 'production' ? `${base}dashboard/device-registry` : `${base}dashboard`);
     } catch {
-      window.location.replace('/login');
+      window.location.replace(`${base}login`);
     }
   } else {
-    window.location.replace('/login');
+    window.location.replace(`${base}login`);
   }
   return null;
 }

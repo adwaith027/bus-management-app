@@ -1119,7 +1119,7 @@ export default function CompanyListing() {
                 </div>
                 <div className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-100 px-3 py-2.5 text-xs text-amber-700">
                   <Info size={13} className="mt-0.5 shrink-0 text-amber-500" />
-                  <span>This admin account is <strong>not counted against your licensed user slots</strong>. It provides management access to the company dashboard and is excluded from all login slot caps.</span>
+                  <span>This admin account is <strong>not counted against the allocated licensed user slots</strong>. It provides management access to the company dashboard and is excluded from all login slot caps.</span>
                 </div>
               </SectionCard>
 
