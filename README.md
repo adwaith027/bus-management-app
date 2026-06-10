@@ -6,7 +6,7 @@
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![Django](https://img.shields.io/badge/django-5.2-green.svg)
 ![React](https://img.shields.io/badge/react-18.0-blue.svg)
-![Version](https://img.shields.io/badge/version-1.2.1-orange.svg)
+![Version](https://img.shields.io/badge/version-1.3-orange.svg)
 
 Private multi-tenant platform for bus fleet operations with real-time ticketing, payment reconciliation, and comprehensive reporting.
 
@@ -16,12 +16,13 @@ Private multi-tenant platform for bus fleet operations with real-time ticketing,
 
 ## 📋 Overview
 
-The **Bus Ticketing Management System** streamlines bus operations for transport companies through:
+The **Bus Ticketing Management System** (Palmtec Amphibia QR) streamlines bus operations for transport companies through:
 
 - **Multi-Tenant Architecture** - Manage multiple companies with isolated data
 - **Real-Time Device Integration** - Direct ticketing device communication via HTTP
 - **Automated Payment Reconciliation** - Match UPI payments with ticket transactions
 - **Role-Based Access** - Granular permissions (Super Admin, Company Admin, User)
+- **Android APK Integration** - Dedicated mobile API for field reporting
 
 ---
 
@@ -29,10 +30,11 @@ The **Bus Ticketing Management System** streamlines bus operations for transport
 
 ### 🏢 Company & User Management
 - Multi-company support with external license validation
-- User management with role-based access control
+- User management with role-based access control (superadmin, company_admin, company_user, dealer_admin, executive)
+- Tier system (premium, intermediate, basic) controlling feature access
 - Depot organization across locations
 - Password management with session termination
-- Device approval workflow for security
+- Device approval workflow for APK security
 
 ### 💳 Transaction Processing
 - Real-time ticket data collection from handheld ETM devices
@@ -83,13 +85,14 @@ The **Bus Ticketing Management System** streamlines bus operations for transport
 - **Expense Reports** - Expense summary and breakdown via APK reports
 
 ### 🔧 Device Management
-- **Device Registry** - ETM device registration with company/dealer assignment
-- **Device Approvals** - Secure device-to-user binding workflow
+- **ETM Device Registry** - ETM device registration with company/dealer assignment
+- **Device Approvals** - Secure device-to-user binding workflow for APK logins
+- **Session Management** - View and force-logout active user sessions
 - **Device Sync** - On-demand master data files (routes, crew, vehicles, settings, expenses) served to devices
 - **Failed Payload Retry** - View and requeue failed device data payloads
 
 ### 🏢 Dealer & Executive Management
-- **Dealer Management** - Dealer registration with improved data validation
+- **Dealer Management** - Dealer registration with license server integration
 - **Dealer Mappings** - Dealer-to-company association management
 - **Executive Mappings** - Executive territory management with granular permissions
 - **Specialized Dashboards** - Role-specific views with transaction visibility
@@ -98,16 +101,19 @@ The **Bus Ticketing Management System** streamlines bus operations for transport
 ### 🏢 Operational Management
 - **Depot Management** - Transit hub/depot configuration
 - **Settings Management** - System and company-level configurations with device settings profiles
-- **License Allocation & Management** - License lifecycle management with allocation workflow
+- **License Allocation & Management** - License lifecycle management (register, validate, sync)
 - **Company Registration Flow** - Enhanced validation and approval process
+- **Global Settings** - System-wide configuration and About page
 
 ### 🔐 Security
-- JWT authentication with HTTP-only cookies
-- Auto token refresh on expiration
+- Server-side session authentication with Redis cache (single `pqr_session` HttpOnly cookie)
+- Session idle timeout with frontend idle timer and keepalive
+- Force-logout for active sessions (company admin and superadmin)
 - Checksum validation (SHA512) for payment and device data
-- Role-based UI rendering
-- Device authentication & approval workflow
+- Role-based UI rendering with tier enforcement
+- Device UUID approval workflow for APK logins
 - Company/dealer cascade deactivation via signals
+- Audit logging for all management actions
 
 ---
 
@@ -115,10 +121,10 @@ The **Bus Ticketing Management System** streamlines bus operations for transport
 
 **Backend**
 - Django 5.2 + Django REST Framework
-- MySQL 8.0+ with timezone support (Asia/Kolkata)
-- JWT Authentication (30-min access, 7-day refresh)
+- MariaDB with timezone support (Asia/Kolkata)
+- Server-side session authentication (opaque cookie, Redis-backed)
 - Django Signals for auto-reconciliation and cascading logic
-- **Celery + Redis** for async task processing
+- **Celery + Redis** for async task processing and session cache
 - **MDB Parser** for bulk data import from Access files
 - **Flower** for Celery task monitoring
 
@@ -126,7 +132,7 @@ The **Bus Ticketing Management System** streamlines bus operations for transport
 - React 18 with Vite
 - React Router v6
 - Tailwind CSS
-- Axios with auto-refresh interceptors
+- Axios (session cookie sent automatically — no token refresh cycle)
 - ExcelJS for exports
 - Dynamic form builders for master data CRUD
 
@@ -135,13 +141,15 @@ The **Bus Ticketing Management System** streamlines bus operations for transport
 ## 🏗️ System Architecture
 
 ```
-              Ticketing Devices (HTTP GET) → Django Backend → MySQL Database
-                                       ↓
+              Ticketing Devices (HTTP GET) → Django Backend → MariaDB
+                                        ↓
                           License Server (Background Polling)
-                                       ↓
-                        React Frontend (JWT Auth, Role-Based UI)
-                                       ↓
+                                        ↓
+                        React Frontend (Session Auth, Role-Based UI)
+                                        ↓
                           Mosambee Payment Gateway (POST)
+                                        ↓
+                        Android APK (api/v1/ prefix, session cookie)
 ```
 
 ### Key Data Flow
@@ -152,13 +160,14 @@ The **Bus Ticketing Management System** streamlines bus operations for transport
 4. **Auto-Reconciliation**: Django signal matches payments to tickets
 5. **Manager Verification**: Manual review before settlement
 6. **Device Sync**: Devices fetch route, crew, vehicle, settings, and expense files built from current DB state
+7. **Session Flow**: Login → `pqr_session` cookie (Redis-backed) → auto-expire on idle → Celery sweep reconciles DB
 
 ---
 
 ## 🚀 Installation
 
 ### Prerequisites
-- Python 3.11+, Node.js 22+, MySQL 8.0+
+- Python 3.11+, Node.js 22+, MariaDB, Redis
 
 ### Backend Setup
 
@@ -192,6 +201,12 @@ python manage.py createsuperuser
 
 # Run server
 python manage.py runserver 0.0.0.0:8000
+
+# Start Celery worker (separate terminal)
+celery -A Backend worker -l info
+
+# Start Celery beat scheduler (separate terminal)
+celery -A Backend beat -l info
 ```
 
 ### Frontend Setup
@@ -230,6 +245,12 @@ DB_PORT=host_port
 ALLOWED_HOSTS=localhost,127.0.0.1
 CORS_ALLOWED_ORIGINS=http://localhost:5173
 
+# Session
+SESSION_IDLE_TIMEOUT=1200   # seconds (20 min web idle timeout)
+
+# Redis (Celery broker + session cache)
+REDIS_URL=redis://localhost:6379/0
+
 # License Server
 LICENSE_SERVER_BASE_URL=http://your-license-server.com/api
 PRODUCT_REGISTRATION_ENDPOINT=/ProductRegistration
@@ -239,7 +260,7 @@ PRODUCT_AUTH_ENDPOINT=/ProductAuthentication
 MOSAMBEE_SALT=your-mosambee-salt-key
 
 # App Info
-APP_VERSION=1.2.1
+APP_VERSION=1.3
 PROJECT_NAME=Bus Ticketing System
 ```
 
@@ -247,143 +268,186 @@ PROJECT_NAME=Bus Ticketing System
 
 ## 📖 Usage
 
+### Session Authentication
+
+All authenticated requests use a single `pqr_session` HttpOnly cookie. The cookie is issued at login, reset by the keepalive endpoint, and cleared on logout. No manual token management is needed on the client — Axios sends the cookie automatically with `withCredentials: true`.
+
 ### License Validation Workflow
 
 1. Register company → Get `company_id`
 2. Click "Validate License" → Backend polls external server (3s intervals, 2min max)
 3. Status: Pending → Validating → Approved/Expired/Blocked
 
+### Session Conflict
+
+If a user logs in from a second device, the server returns `SESSION_CONFLICT`. The frontend prompts: keep the existing session or force-logout the other device and proceed.
+
 ---
 
 ## 🔌 API Documentation
 
-### Core Endpoints
+### Web Dashboard API (`/`)
 
-**Authentication**
+#### Authentication
 ```http
-POST /signup/
-POST /login/
-POST /logout/
-POST /token/refresh/
-GET  /verify-auth/
+POST /login
+POST /logout
+POST /session/keepalive
+GET  /verify-auth
+POST /auth/forgot-password
+POST /auth/reset-password
 ```
 
-**Companies & Depots**
+#### Session & Device Approvals
 ```http
-GET  /customer-data/
-POST /create-company/
-PUT  /update-company-details/{id}/
-POST /register-company-license/{id}/
-POST /validate-company-license/{id}/
-GET  /get_company_dashboard_metrics/
-GET  /get_admin_data/
-GET  /depots/
-POST /create-depot/
-PUT  /update-depot-details/{id}/
+GET  /sessions
+POST /sessions/{session_uid}/force-logout
+GET  /device-approvals
+POST /device-approvals/{id}/approve
+POST /device-approvals/{id}/reject
+GET  /admin/sessions                              # superadmin only
+POST /admin/sessions/{session_uid}/force-logout   # superadmin only
 ```
 
-**Users & Device Management**
+#### Companies & Depots
 ```http
-GET  /get_users/
-POST /create_user/
-PUT  /update_user/{id}/
-POST /change_user_password/{id}/
-GET  /device-approvals/
-POST /device-approvals/{id}/approve/
-POST /device-approvals/{id}/revoke/
+GET  /customer-data
+POST /create-company
+PUT  /update-company-details/{id}
+DELETE /delete-company/{id}
+POST /register-company-license/{id}
+POST /validate-company-license/{id}
+POST /sync-company-license/{id}
+POST /sync-company-license/{id}/confirm
+GET  /get-company-by-company-id/{company_id}
+POST /import-company
+GET  /get_company_dashboard_metrics
+GET  /get_admin_data
+GET  /depots
+POST /create-depot
+PUT  /update-depot-details/{id}
+DELETE /delete-depoteva/{id}
 ```
 
-**Device Registry**
+#### Users
 ```http
-GET  /device-registry/
-POST /device-registry/upload/
-GET  /device-registry/summary/
-POST /device-registry/{id}/assign-dealer/
-POST /device-registry/{id}/assign-company/
-POST /device-registry/bulk-assign/
+GET  /get_users
+POST /create_user
+PUT  /update_user/{id}
+POST /users/{id}/toggle-active
+GET  /users/capacity
+POST /change_user_password/{id}
 ```
 
-**Device Sync (ETM File Endpoints)**
+#### ETM Device Registry
 ```http
-GET /getETMDeviceVersion/
-GET /getRoutesList/
-GET /getSettingsFile/
-GET /getCrewFile/
-GET /getVehiclesFile/
-GET /getExpensesFile/
-GET /getRouteLstFile/
-GET /getStageLstFile/
-GET /getLanguageDatFile/
-GET /getRteDatFile/
-GET /getCurrencyFile/
+POST /etm-devices/upload
+GET  /etm-devices
+GET  /etm-devices/summary
+POST /etm-devices/bulk-assign-dealer
+POST /etm-devices/bulk-assign-company
+POST /etm-devices/{id}/allocate
+POST /etm-devices/{id}/deactivate
+POST /etm-devices/{id}/reactivate
+POST /etm-devices/{id}/unmap
+POST /etm-devices/{id}/return-to-stock
+POST /etm-devices/{id}/set-palmtec-id
+POST /etm-devices/{id}/set-mosambee-tid
 ```
 
-**Master Data - Transport**
+#### Device Sync (ETM ← Web App)
 ```http
-GET  /masterdata/bus-types/
-POST /masterdata/bus-types/create/
-PUT  /masterdata/bus-types/update/{id}/
-GET  /masterdata/stages/
-POST /masterdata/stages/create/
-PUT  /masterdata/stages/update/{id}/
-GET  /masterdata/routes/
-POST /masterdata/routes/create/
-PUT  /masterdata/routes/update/{id}/
-GET  /masterdata/routes/{id}/
-GET  /masterdata/vehicles/
-POST /masterdata/vehicles/create/
-PUT  /masterdata/vehicles/update/{id}/
-GET  /masterdata/fares/editor/{route_id}/
-PUT  /masterdata/fares/update/{route_id}/
-GET  /masterdata/dropdowns/bus-types/
-GET  /masterdata/dropdowns/stages/
-GET  /masterdata/dropdowns/vehicles/
+GET /device/routes
+GET /device/settings
+GET /device/crew
+GET /device/vehicles
+GET /device/expenses
+GET /device/routelst
+GET /device/stagelst
+GET /device/languagedat
+GET /device/rtedat
+GET /device/currency
+GET /getEtmSetupDetails
 ```
 
-**Master Data - Crew**
+#### Master Data — Transport
 ```http
-GET  /masterdata/employee-types/
-POST /masterdata/employee-types/create/
-PUT  /masterdata/employee-types/update/{id}/
-GET  /masterdata/employees/
-POST /masterdata/employees/create/
-PUT  /masterdata/employees/update/{id}/
-GET  /masterdata/crew-assignments/
-POST /masterdata/crew-assignments/create/
-PUT  /masterdata/crew-assignments/update/{id}/
-DELETE /masterdata/crew-assignments/delete/{id}/
-GET  /masterdata/dropdowns/employee-types/
-GET  /masterdata/dropdowns/employees/
+GET  /masterdata/bus-types
+POST /masterdata/bus-types/create
+PUT  /masterdata/bus-types/update/{id}
+GET  /masterdata/stages
+POST /masterdata/stages/create
+PUT  /masterdata/stages/update/{id}
+GET  /masterdata/routes
+POST /masterdata/routes/create
+PUT  /masterdata/routes/update/{id}
+GET  /masterdata/routes/{id}
+POST /masterdata/routes/create-wizard
+POST /masterdata/routes/import-excel
+POST /masterdata/routes/import/validate
+POST /masterdata/routes/import/confirm
+GET  /masterdata/routes/import/template/{fare_type}
+PUT  /masterdata/routestages/update/{id}
+GET  /masterdata/vehicles
+POST /masterdata/vehicles/create
+PUT  /masterdata/vehicles/update/{id}
+GET  /masterdata/fares/editor/{route_id}
+PUT  /masterdata/fares/update/{route_id}
+GET  /masterdata/dropdowns/bus-types
+GET  /masterdata/dropdowns/stages
+GET  /masterdata/dropdowns/vehicles
+GET  /masterdata/dropdowns/depots
 ```
 
-**Master Data - Settings & Currencies**
+#### Master Data — Crew
 ```http
-GET  /masterdata/currencies/
-POST /masterdata/currencies/create/
-PUT  /masterdata/currencies/update/{id}/
-GET  /masterdata/settings/
-GET  /masterdata/device-settings/
-GET  /masterdata/settings-profiles/
-POST /masterdata/settings-profiles/create/
-PUT  /masterdata/settings-profiles/update/{id}/
+GET  /masterdata/employee-types
+POST /masterdata/employee-types/create
+PUT  /masterdata/employee-types/update/{id}
+GET  /masterdata/employees
+POST /masterdata/employees/create
+PUT  /masterdata/employees/update/{id}
+GET  /masterdata/crew-assignments
+POST /masterdata/crew-assignments/create
+PUT  /masterdata/crew-assignments/update/{id}
+DELETE /masterdata/crew-assignments/delete/{id}
+GET  /masterdata/dropdowns/employee-types
+GET  /masterdata/dropdowns/employees
 ```
 
-**Dealer & Executive Management**
+#### Master Data — Settings & Currencies
 ```http
-GET  /dealers/
-POST /create-dealer/
-PUT  /update-dealer-details/{id}/
-GET  /dealer-mappings/
-POST /create-dealer-mapping/
-PUT  /update-dealer-mapping/{id}/
-GET  /dealer-dashboard/
-GET  /executive-mappings/
-POST /create-executive-mapping/
-PUT  /update-executive-mapping/{id}/
-GET  /executive-dashboard/
+GET  /masterdata/currencies
+POST /masterdata/currencies/create
+PUT  /masterdata/currencies/update/{id}
+GET  /masterdata/settings
+GET  /masterdata/device-settings/devices
+GET  /masterdata/settings-profiles
+POST /masterdata/settings-profiles/create
+GET  /masterdata/settings-profiles/{profile_id}
 ```
 
-**Transaction Data (Device Endpoints)**
+#### Dealer & Executive Management
+```http
+GET  /dealers
+POST /create-dealer
+PUT  /update-dealer-details/{id}
+DELETE /delete-dealer/{id}
+POST /register-dealer-license/{id}
+POST /validate-dealer-license/{id}
+POST /sync-dealer-license/{id}
+POST /sync-dealer-license/{id}/confirm
+GET  /dealer-mappings
+POST /create-dealer-mapping
+PUT  /update-dealer-mapping/{id}
+GET  /dealer-dashboard
+GET  /executive-mappings
+POST /create-executive-mapping
+PUT  /update-executive-mapping/{id}
+GET  /executive-dashboard
+```
+
+#### Transaction Data — Device Push (ETM → Server)
 ```http
 GET /getTicket?fn={pipe_delimited_data}
 GET /getTripOpen?fn={pipe_delimited_data}
@@ -396,56 +460,104 @@ GET /getOdometerDetails?fn={pipe_delimited_data}
 GET /getExpenseDetails?fn={pipe_delimited_data}
 ```
 
-**Reports (Web)**
+#### Reports — Web Fetch
 ```http
 GET /get_all_transaction_data?from_date={date}&to_date={date}&since={timestamp}
 GET /get_all_trip_data?from_date={date}&to_date={date}&since={timestamp}
 GET /get_all_schedule_data?from_date={date}&to_date={date}&since={timestamp}
 ```
 
-**APK Reports**
+#### Settlements & Payments
 ```http
-GET /apk/duty-report/
-GET /apk/bus-summary-report/
-GET /apk/payment-type-report/
-GET /apk/farewise-report/
-GET /apk/passenger-info/
-GET /apk/trip-details/
-GET /apk/ticket-details/
-GET /apk/expense-report/
-GET /apk/stage-wise-report/
-GET /apk/dashboard/
-```
-
-**APK File Uploads**
-```http
-POST /apk/upload-odometer-dat/
-POST /apk/upload-expense-dat/
-```
-
-**Settlements & Payments**
-```http
-POST /postSettlementDetails/           # Mosambee webhook
-POST /postPayoutCallback/              # Mosambee payout callback
+POST /postTransactionDetails           # Mosambee webhook
+POST /postPayoutDetails                # Mosambee payout callback
 GET  /get_settlement_data?from_date={}&to_date={}
 GET  /get_payout_data?from_date={}&to_date={}
-POST /verify_settlement/               # Manager action
+POST /verify_settlement
 GET  /get_settlement_summary?from_date={}&to_date={}
 ```
 
-**Failed Payloads**
+#### Failed Payloads
 ```http
-GET  /failed-payloads/
-POST /failed-payloads/{id}/retry/
+GET  /failed-payloads
+POST /failed-payloads/{id}/retry
 ```
 
-**Data Import**
+#### Data Import
 ```http
-POST /import-mdb/                      # MDB file upload & bulk import
-POST /import-routes/validate/          # Excel route import validation
-POST /import-routes/confirm/           # Excel route import confirmation
-GET  /import-routes/template/          # Download import template
+POST /import-mdb                              # MDB file upload & bulk import
 ```
+
+#### Audit Logs
+```http
+GET /audit-logs
+GET /audit-logs/action-types
+```
+
+#### Global Settings & About
+```http
+GET     /about
+GET|PUT /global-settings
+```
+
+---
+
+### APK API (`/api/v1/`)
+
+All APK endpoints are under the `/api/v1/` prefix. Only `company_user` role can log in via APK. Admin accounts are web-only.
+
+Auth uses the same `pqr_session` HttpOnly cookie. The APK HTTP client must persist and send this cookie on every request (same as a browser).
+
+#### Authentication
+```http
+POST /api/v1/login
+POST /api/v1/logout
+GET  /api/v1/verify-auth
+```
+
+Login body must include `device_type: "android"` and `uuid: "<hardware UUID>"`. First login from an unknown UUID returns `403 DEVICE_PENDING` until a company admin approves it.
+
+#### APK Dashboard & Drill-Down
+```http
+GET /api/v1/apk/dashboard?date={YYYY-MM-DD}
+GET /api/v1/apk/buses
+GET /api/v1/apk/schedules?bus_no={}&date={}
+GET /api/v1/apk/trips?bus_no={}&date={}
+GET /api/v1/apk/tickets?bus_no={}&trip_no={}&route_code={}&date={}
+GET /api/v1/apk/passengers?bus_no={}&trip_no={}&route_code={}&date={}
+```
+
+#### APK Reports (requires tier `intermediate` or above)
+```http
+GET /api/v1/reports/duty?bus_no={}&date={}
+GET /api/v1/reports/bus-summary?bus_no={}&from_date={}&to_date={}
+GET /api/v1/reports/payment-type?bus_no={}&from_date={}&to_date={}[&payment_mode={cash|upi}]
+GET /api/v1/reports/farewise?bus_no={}&from_date={}&to_date={}
+GET /api/v1/reports/expense?bus_no={}&from_date={}&to_date={}
+```
+
+#### APK Master Data Download
+```http
+GET /api/v1/device/getEtmVersion
+GET /api/v1/device/routes
+GET /api/v1/device/settings
+GET /api/v1/device/crew
+GET /api/v1/device/vehicles
+GET /api/v1/device/expenses
+GET /api/v1/device/routelst
+GET /api/v1/device/stagelst
+GET /api/v1/device/languagedat
+GET /api/v1/device/rtedat
+GET /api/v1/device/currency
+```
+
+#### APK File Upload
+```http
+POST /api/v1/upload/odometer-dat
+POST /api/v1/upload/expense-dat
+```
+
+---
 
 ### Device Data Format
 
@@ -528,6 +640,8 @@ ERROR                # Server-side processing error (HTTP 500)
 
 **Response Content-Type**: `text/plain`
 
+> **IIS deployment note**: Set `maxQueryString="8192"` in `web.config` before production deploy. Default 2048-byte limit can be exceeded by large ShdCls/Ticket payloads.
+
 ---
 
 ## 📁 Project Structure
@@ -539,29 +653,35 @@ bus-ticketing-system/
 │   │   └── settings.py              # Django config (Timezone: Asia/Kolkata)
 │   ├── TicketAppB/
 │   │   ├── models/
-│   │   │   ├── auth.py              # CustomUser, UserDeviceMapping
+│   │   │   ├── auth.py              # CustomUser, UserSession, UserApprovedDevice, DevicePendingApproval
 │   │   │   ├── company.py           # Company, Depot, Dealer, ETMDevice, mappings
 │   │   │   ├── master_data.py       # BusType, Route, Stage, Fare, Vehicle, Employee, Currency, Settings
 │   │   │   ├── operations.py        # CrewAssignment, ExpenseMaster, Expense, InspectorDetails
 │   │   │   ├── transactions.py      # RawDataLog, TransactionData, TripData, ScheduleData, OdometerData, ExpenseData
 │   │   │   ├── payments.py          # MosambeeTransaction, MosambeePayoutCallback
 │   │   │   └── managers.py          # Custom QuerySet managers
+│   │   ├── authentication.py        # SessionAuthentication DRF backend (Redis + DB)
+│   │   ├── permissions.py           # LicensePermission DRF permission class
 │   │   ├── serializers.py           # DRF serializers
 │   │   ├── signals.py               # Auto-reconciliation, cascade deactivation, route sync
-│   │   ├── tasks.py                 # Celery async tasks (payload processing, cleanup)
+│   │   ├── tasks.py                 # Celery async tasks (payload processing, cleanup, session sweep)
+│   │   ├── urls.py                  # Web dashboard URL patterns
+│   │   ├── apk_urls.py              # APK-exclusive URL patterns (/api/v1/)
 │   │   ├── views/
 │   │   │   ├── web/
-│   │   │   │   ├── auth.py              # Login, signup, token refresh
+│   │   │   │   ├── auth.py              # Login, logout, keepalive, verify-auth, password reset
+│   │   │   │   ├── sessions.py          # Session management, device approvals
 │   │   │   │   ├── company.py           # Company & license management
 │   │   │   │   ├── users.py             # User CRUD
 │   │   │   │   ├── depots.py            # Depot management
 │   │   │   │   ├── dealers.py           # Dealer & mapping management
 │   │   │   │   ├── executives.py        # Executive territory management
-│   │   │   │   ├── device_approvals.py  # Device security workflow
-│   │   │   │   ├── device_registry.py   # Device registration & assignment
+│   │   │   │   ├── device_registry.py   # ETM device registration & assignment
 │   │   │   │   ├── ticket_reports.py    # Transaction, trip, schedule reports
 │   │   │   │   ├── settlements.py       # Settlement & payout management
 │   │   │   │   ├── raw_data_logs.py     # Failed payload management & retry
+│   │   │   │   ├── audit_logs.py        # Audit log listing and log_action() helper
+│   │   │   │   ├── global_settings.py   # About page and global settings
 │   │   │   │   ├── masterdata/
 │   │   │   │   │   ├── transport.py     # Bus types, routes, stages, vehicles, fares
 │   │   │   │   │   ├── crew.py          # Employee types, employees, crew assignments
@@ -570,35 +690,37 @@ bus-ticketing-system/
 │   │   │   │       ├── mdb.py           # MDB file import service
 │   │   │   │       └── routes.py        # Excel route import
 │   │   │   ├── palmtec/
-│   │   │   │   ├── data_post.py         # Device data ingestion (ticket, trip, schedule, odometer, expense)
-│   │   │   │   └── master_send.py       # Device sync file endpoints
+│   │   │   │   └── data_post.py         # Device data ingestion (ticket, trip, schedule, odometer, expense)
 │   │   │   ├── webhooks/
 │   │   │   │   └── mosambee.py          # Mosambee payment & payout webhooks
-│   │   │   └── apk/
-│   │   │       ├── reports.py           # APK report endpoints
-│   │   │       └── apk_upload.py        # DAT file uploads (odometer, expense)
+│   │   │   ├── apk/
+│   │   │   │   ├── master_send.py       # APK/device master data file endpoints
+│   │   │   │   ├── reports.py           # APK report endpoints
+│   │   │   │   └── apk_upload.py        # DAT file uploads (odometer, expense)
+│   │   │   └── setup_data.py            # ETM initial setup data
 │   │   ├── migrations/              # Database versioning
 │   │   └── apps.py                  # Signal registration
 │   └── .env
 │
 ├── Frontend/
 │   ├── src/
+│   │   ├── assets/js/
+│   │   │   └── axiosConfig.js       # Axios instance (withCredentials, no refresh cycle)
+│   │   ├── hooks/
+│   │   │   └── useIdleTimer.js      # Idle detection, keepalive, session timeout
 │   │   ├── components/
 │   │   │   ├── ui/                  # Button, Card, Input, Dialog, KPI Card, Charts
 │   │   │   ├── ProtectedRoute.jsx   # Auth guard
 │   │   │   ├── Sidebar.jsx          # Navigation sidebar
-│   │   │   ├── RoleBasedHome.jsx    # Role-based route selector
 │   │   │   └── ...
 │   │   ├── pages/
 │   │   │   ├── auth/
-│   │   │   │   ├── Login.jsx
-│   │   │   │   └── Signup.jsx
+│   │   │   │   └── Login.jsx        # Includes SESSION_CONFLICT force-login flow
 │   │   │   ├── dashboards/
-│   │   │   │   ├── AdminHome.jsx        # Super admin dashboard
-│   │   │   │   ├── CompanyDashboard.jsx # Company admin dashboard
-│   │   │   │   ├── DealerDashboard.jsx  # Dealer view
-│   │   │   │   ├── ExecutiveDashboard.jsx # Executive view
-│   │   │   │   └── UserHome.jsx         # Role-based home router
+│   │   │   │   ├── AdminHome.jsx
+│   │   │   │   ├── CompanyDashboard.jsx
+│   │   │   │   ├── DealerDashboard.jsx
+│   │   │   │   └── ExecutiveDashboard.jsx
 │   │   │   ├── listings/
 │   │   │   │   ├── CompanyListing.jsx
 │   │   │   │   ├── DepotListing.jsx
@@ -611,9 +733,9 @@ bus-ticketing-system/
 │   │   │   ├── operations/
 │   │   │   │   ├── DealerManagement.jsx
 │   │   │   │   ├── DeviceRegistry.jsx
-│   │   │   │   ├── DeviceApprovals.jsx
+│   │   │   │   ├── SessionManagement.jsx
 │   │   │   │   ├── CrewAssignmentListing.jsx
-│   │   │   │   ├── FareEditor.jsx       # Dynamic fare table editor
+│   │   │   │   ├── FareEditor.jsx
 │   │   │   │   ├── StageEditor.jsx
 │   │   │   │   └── ExpenseMasterPage.jsx
 │   │   │   ├── reports/
@@ -628,10 +750,13 @@ bus-ticketing-system/
 │   │   │       ├── MdbImport.jsx
 │   │   │       ├── DeviceDownload.jsx
 │   │   │       ├── SettingsPage.jsx
-│   │   │       └── FailedPayloadsPage.jsx
+│   │   │       ├── FailedPayloadsPage.jsx
+│   │   │       ├── AuditLogsPage.jsx
+│   │   │       └── AboutPage.jsx
 │   │   └── main.jsx                 # Router with 404 handling
 │   └── .env
 │
+├── _docs/                           # Internal specs and design references
 └── README.md
 ```
 
@@ -662,36 +787,63 @@ bus-ticketing-system/
 ### ✅ Completed (v1.2)
 
 - [x] Company & Dealer Registration Flow Restructure
-- [x] License Allocation & Management
-- [x] User Access Control Enhancements
+- [x] License Allocation & Management (register, validate, sync)
+- [x] User Access Control Enhancements (tier system)
 - [x] APK Report suite (duty, bus summary, payment type, farewise, passenger info, trip details, ticket details, stage-wise, expense, dashboard)
 - [x] Expense Management (ExpenseMaster, Expense records, DAT file uploads, expense reports)
 - [x] Payout callback tracking (MosambeePayoutCallback)
-- [x] Failed payload management & retry
-- [x] Device Registry with bulk assignment
+- [x] Failed payload management & retry (with retry count cap)
+- [x] ETM Device Registry with bulk assignment, allocate, deactivate, unmap, return-to-stock
 - [x] Device sync endpoints (routes, crew, vehicles, settings, expenses served to ETM devices)
 - [x] Raw data logging pipeline (RawDataLog → Celery → parsed models)
 - [x] Odometer data capture (API ingestion and DAT file upload)
 - [x] Schedule data tracking (schedule open/close merged into ScheduleData)
 - [x] Route Excel import (validate, confirm, template download)
 - [x] Inspector details tracking
+- [x] MDB concurrent import lock (per-company, MariaDB GET_LOCK)
 
-### ✅ Completed (v1.2.1 - Current)
+### ✅ Completed (v1.3 - Current)
 
-- [x] APK dashboard endpoint
-- [x] Stage-wise and expense APK report endpoints
+- [x] **Auth system overhaul**: JWT replaced with server-side opaque session (single `pqr_session` cookie, Redis-backed)
+- [x] Session management UI — list active sessions, force-logout (company admin + superadmin)
+- [x] Session conflict handling — `SESSION_CONFLICT` flow with force-login option
+- [x] Frontend idle timer + keepalive (`useIdleTimer` hook, `POST /session/keepalive`)
+- [x] Celery `sweep_stale_sessions` task (reconciles DB with Redis TTL expiry)
+- [x] Audit logging — 24 call sites across all management views
+- [x] Forgot password / reset password flow
+- [x] Company and dealer delete endpoints
+- [x] Separate APK URL prefix (`api/v1/`) with APK-specific auth, reports, masterdata download, and file upload
+- [x] APK masterdata download endpoints (`api/v1/device/*`)
+- [x] APK file upload endpoints (`api/v1/upload/*`)
+- [x] Global settings + About page endpoint
+- [x] Device set-mosambee-tid, reactivate, return-to-stock endpoints
+- [x] User toggle-active and capacity endpoints
 
 ### 🚧 Pending
 
-- [ ] Real-time GPS tracking integration
+- [ ] **Ghost session fix** — proper backend idle check at `/token/refresh` once `last_seen_at` heartbeat and APK-vs-web threshold are solved (see `_docs/pending-implementations.txt`)
+- [ ] **Logout delay** — HTTP/2 via nginx+gunicorn in production eliminates the HTTP/1.1 6-connection pool queue (see `_docs/pending-implementations.txt`)
+- [ ] **About page company block** — extend `GET /about` to include company name, active user count, admin names, allocated device count for company-scoped users
+- [ ] **Route code string snapshot** — store `route_code_str` alongside FK on TransactionData/TripData for deleted-route recovery
+- [ ] **Stage name resolution** — resolve `from_stage`/`to_stage` ordinals to stage names via route FK
+- [ ] **APK settlement / UPI payment data** — expose settlement and payout data via `api/v1/` endpoints for the APK
+- [ ] **Masterdata upload API expansion** — extend APK upload endpoints beyond odometer and expense DAT files as needed
+- [ ] **Company under dealer — license pool** — dealer's remaining counts pool, deduction on company creation, restoration on deletion
+- [ ] **Sync on license count reduction** — dry-run excess user display, selective deactivation flow
+- [ ] **Server-side pagination** — trip/ticket/schedule report pages (trigger: 50+ buses or >5MB responses)
+- [ ] **Serial number reassignment** — superadmin-only, clears all active mappings with audit trail
+- [ ] **Dealer MDB import for client companies** — dealer admin triggers import on behalf of managed company
+- [ ] **Superadmin operational data access** — select a company and browse their reports/masterdata
+- [ ] **Email & push notifications** — license expiry warnings (10-day, 5-day), unmapped device/route alerts
+- [ ] **Real-time GPS tracking integration**
 
 ---
 
 ## 📊 Project Status
 
-**Current Version**: 1.2.1
+**Current Version**: 1.3
 **Status**: Active Development
-**Last Updated**: May 2026
+**Last Updated**: June 2026
 
 ---
 
@@ -712,7 +864,6 @@ bus-ticketing-system/
 - Modular model structure (auth.py, company.py, master_data.py, operations.py, transactions.py, payments.py)
 - Extended view layer organized by functional area
 - Comprehensive API for master data CRUD operations
-- Enhanced device security with approval workflow
 - MDB file parsing and bulk import engine
 
 ---
@@ -722,25 +873,21 @@ bus-ticketing-system/
 ### Restructured Flows
 - **Company Registration**: Enhanced validation, streamlined approval process
 - **Dealer Registration**: Restructured workflow with better data consistency
-- **License Management**: Complete lifecycle - allocation, validation, renewal, expiration
+- **License Management**: Complete lifecycle — allocation, validation, renewal, expiration
 
 ### New Features
 - **Expense Management**: Full expense pipeline from device to report
 - **APK Reports**: Complete suite of 10 report types for mobile device data
-- **Device Registry**: ETM device registration with company/dealer bulk assignment
+- **ETM Device Registry**: Device registration with company/dealer bulk assignment
 - **Device Sync**: On-demand master data file serving to ETM devices
 - **Raw Data Pipeline**: RawDataLog → Celery task processing → parsed models
 - **Odometer Tracking**: Per-trip odometer data via API and DAT uploads
 - **Schedule Data**: Full schedule open/close lifecycle tracking
-- **Failed Payload Retry**: View and requeue failed device payloads
+- **Failed Payload Retry**: View and requeue failed device payloads with retry cap
 - **Route Excel Import**: Validate, preview, and confirm route imports from Excel
 - **Payout Tracking**: Mosambee payout callback ingestion and reporting
 - **Inspector Details**: Inspector check record tracking
-
-### Enhanced Security & Access Control
-- **Granular User Permissions**: Fine-grained access control for dealer and executive roles
-- **Cascade Deactivation**: Company/dealer deactivation propagates to all associated users via signals
-- **Access Control Policies**: Better enforcement of company data isolation
+- **MDB Concurrent Lock**: Per-company import lock via MariaDB GET_LOCK
 
 ### Technical Updates
 - Celery tasks for all device payload types (ticket, trip, schedule, odometer, expense)
@@ -750,10 +897,30 @@ bus-ticketing-system/
 
 ---
 
-## 🔧 Key Changes in v1.2.1
+## 🔧 Key Changes in v1.3
 
-- APK dashboard metrics endpoint
-- Stage-wise revenue report endpoint
+### Auth System Overhaul
+- **Removed**: `rest_framework_simplejwt`, three-cookie system (access_token, refresh_token, session_uid), 401→refresh→retry cycle on the frontend
+- **Added**: Single opaque `pqr_session` HttpOnly cookie, DRF `SessionAuthentication` backend reading from Redis (with DB fallback), `LicensePermission` DRF class replacing middleware
+- **Frontend**: `axiosConfig.js` simplified — no `refreshApi`, no retry interceptor. 401 means session dead → redirect to login
+- **Idle timer**: `useIdleTimer` hook with keepalive, warning modal at T-3min, auto-logout at idle timeout
+- **Session conflict**: `SESSION_CONFLICT` error code with force-login option replaces `ALREADY_LOGGED_IN`
+
+### New Endpoints
+- `POST /session/keepalive` — resets Redis TTL and `last_seen_at`
+- `GET /sessions`, `POST /sessions/{uid}/force-logout` — company admin session management
+- `GET /admin/sessions`, `POST /admin/sessions/{uid}/force-logout` — superadmin session management
+- `POST /auth/forgot-password`, `POST /auth/reset-password` — self-service password reset
+- `DELETE /delete-company/{id}`, `DELETE /delete-dealer/{id}` — soft-delete support
+- `POST /sync-company-license/{id}[/confirm]`, `POST /sync-dealer-license/{id}[/confirm]` — license sync
+- `GET /audit-logs`, `GET /audit-logs/action-types` — audit trail
+- `GET|PUT /global-settings`, `GET /about`
+- Separate `api/v1/` APK URL space with own auth, drill-down, reports, masterdata, and upload endpoints
+
+### Technical Updates
+- `TicketAppB/authentication.py` + `TicketAppB/permissions.py` — clean DRF separation
+- `sweep_stale_sessions` Celery task reconciles DB with Redis TTL expiry every 10 minutes
+- All 24 management views emit audit log entries via `log_action()`
 
 ---
 
