@@ -42,11 +42,6 @@ class DealerSerializer(serializers.ModelSerializer):
             'intermediate_user_count',
             # License error
             'error_message',
-            # Remaining pool (available to allocate)
-            'remaining_palmtec_count',
-            'remaining_total_user_count',
-            'remaining_premium_user_count',
-            'remaining_intermediate_user_count',
             'created_by',
             'created_at',
             'updated_at',
@@ -62,11 +57,6 @@ class DealerSerializer(serializers.ModelSerializer):
             'premium_user_count',
             'intermediate_user_count',
             'error_message',
-            # Pool fields managed by service layer
-            'remaining_palmtec_count',
-            'remaining_total_user_count',
-            'remaining_premium_user_count',
-            'remaining_intermediate_user_count',
             'created_by',
             'created_at',
             'updated_at',

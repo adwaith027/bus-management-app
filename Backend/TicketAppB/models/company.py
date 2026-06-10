@@ -189,11 +189,10 @@ class Dealer(models.Model):
     A dealer intermediary. Dealers have their own license (from the license server,
     Path A) and distribute counts from that license to their client companies (Path B).
 
-    Pool fields (remaining_*) track how much of each count the dealer still has
-    available to allocate to new client companies. Allocation is static:
-      - On company creation → deduct from remaining_*
-      - On company deletion → restore to remaining_*
-      - Remaining must never go below zero (enforced at view/service level)
+    Available pool counts are computed live from child company records via
+    properties (slots_remaining, users_slots_remaining). No stored counters —
+    the properties aggregate from active Company rows on every read, so they
+    are always accurate without any deduction/restoration logic.
 
     A dealer's license_valid_to sets the maximum expiry date they can grant to
     any company they create.
@@ -239,14 +238,6 @@ class Dealer(models.Model):
     number_of_licences      = models.IntegerField(default=0, null=True, blank=True)
     error_message           = models.CharField(max_length=500, null=True, blank=True)
 
-    # ── Remaining pool (available to allocate to new client companies) ────────
-    # Decremented when a company is created under this dealer.
-    # Restored when a company is deleted or its allocation is reduced.
-
-    remaining_total_user_count        = models.IntegerField(default=0)
-    remaining_premium_user_count      = models.IntegerField(default=0)
-    remaining_intermediate_user_count = models.IntegerField(default=0)
-
     # ── Status ────────────────────────────────────────────────────────────────
     is_active = models.BooleanField(default=True, db_index=True)
 
@@ -276,6 +267,73 @@ class Dealer(models.Model):
     @property
     def is_validated(self):
         return self.authentication_status == self.AuthStatus.APPROVED
+
+    # ── Live-computed pool counts (replaces stored remaining_* fields) ─────────
+
+    @property
+    def slots_given_to_companies(self):
+        """Sum of palmtec_count promised to all active companies under this dealer."""
+        from django.db.models import Sum
+        result = Company.objects.filter(
+            dealer=self, is_active=True
+        ).aggregate(total=Sum('palmtec_count'))
+        return result['total'] or 0
+
+    @property
+    def slots_remaining(self):
+        """Slots dealer can still promise to new companies. Never negative."""
+        return max(0, self.palmtec_count - self.slots_given_to_companies)
+
+    @property
+    def devices_total(self):
+        """Physical devices superadmin has given this dealer (all statuses)."""
+        return ETMDevice.objects.filter(dealer=self).count()
+
+    @property
+    def devices_in_pool(self):
+        """Physical devices sitting in dealer pool, not yet sent to a company."""
+        return ETMDevice.objects.filter(
+            dealer=self,
+            allocation_status=ETMDevice.AllocationStatus.DEALER_POOL
+        ).count()
+
+    @property
+    def devices_at_clients(self):
+        """Physical devices currently allocated to a client company."""
+        return ETMDevice.objects.filter(
+            dealer=self,
+            allocation_status=ETMDevice.AllocationStatus.ALLOCATED
+        ).count()
+
+    @property
+    def devices_capacity_remaining(self):
+        """How many more physical devices superadmin can push to this dealer."""
+        return max(0, self.palmtec_count - self.devices_total)
+
+    @property
+    def users_given_to_companies(self):
+        from django.db.models import Sum
+        result = Company.objects.filter(
+            dealer=self, is_active=True
+        ).aggregate(
+            total=Sum('total_user_count'),
+            premium=Sum('premium_user_count'),
+            inter=Sum('intermediate_user_count'),
+        )
+        return {
+            'total':   result['total']   or 0,
+            'premium': result['premium'] or 0,
+            'inter':   result['inter']   or 0,
+        }
+
+    @property
+    def users_slots_remaining(self):
+        given = self.users_given_to_companies
+        return {
+            'total':   max(0, self.total_user_count        - given['total']),
+            'premium': max(0, self.premium_user_count      - given['premium']),
+            'inter':   max(0, self.intermediate_user_count - given['inter']),
+        }
 
 
 # ── ETMDevice ─────────────────────────────────────────────────────────────────
@@ -312,7 +370,7 @@ class ETMDevice(models.Model):
         STOCK       = 'Stock',      'Stock'        # imported, not yet assigned
         DEALER_POOL = 'DealerPool', 'Dealer Pool'  # assigned to dealer
         ALLOCATED   = 'Allocated',  'Allocated'    # assigned to company
-        INACTIVE    = 'Inactive',   'Inactive'     # decommissioned
+        # INACTIVE removed — decommissioning is now handled by is_active=False
 
     serial_number = models.CharField(max_length=100, unique=True, db_index=True)
     device_type   = models.CharField(
@@ -332,6 +390,14 @@ class ETMDevice(models.Model):
             'Sent to device via masterdata download.'
         ),
     )
+
+    # for accomodating the terminal ID assigned by mosambee to each device.
+    mosambee_tid =  models.CharField(
+        max_length=20, 
+        unique=True, 
+        null=True,
+        blank=True,
+        help_text="Holds the terminal ID assigned by mosambee to each ETM device")
 
     company = models.ForeignKey(
         Company,
@@ -355,6 +421,41 @@ class ETMDevice(models.Model):
         db_index=True,
     )
 
+    # ── Deactivation ───────────────────────────────────────────────────────────
+    is_active = models.BooleanField(
+        default=True,
+        db_index=True,
+        help_text='False = device is suspended. Inbound data will be rejected.',
+    )
+    deactivated_at = models.DateTimeField(null=True, blank=True)
+    deactivated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='etm_devices_deactivated',
+    )
+
+    # ── Unmap tracking ─────────────────────────────────────────────────────────
+    # Set when dealer allocates device to a company; tells unmap where to return it.
+    source_dealer = models.ForeignKey(
+        'Dealer',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='etm_devices_sourced',
+    )
+
+    # ── Activity tracking ──────────────────────────────────────────────────────
+    has_fetched_setup = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text='Flips True once on first successful getEtmSetupDetails call.',
+    )
+    setup_fetched_at = models.DateTimeField(null=True, blank=True)
+    last_seen_at = models.DateTimeField(
+        null=True, blank=True, db_index=True,
+        help_text='Updated on every successful inbound data post (tasks.py).',
+    )
+
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -371,8 +472,11 @@ class ETMDevice(models.Model):
             models.Index(fields=['serial_number']),
             models.Index(fields=['palmtec_id']),
             models.Index(fields=['company', 'allocation_status']),
+            models.Index(fields=['company', 'palmtec_id']),
             models.Index(fields=['dealer']),
             models.Index(fields=['allocation_status']),
+            models.Index(fields=['is_active']),
+            models.Index(fields=['company', 'is_active']),
         ]
 
     def __str__(self):
