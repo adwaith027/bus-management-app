@@ -1,7 +1,8 @@
 import logging
 from datetime import datetime
 from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.http import JsonResponse
 from django.db.models import Count
@@ -10,7 +11,7 @@ from django.utils.dateparse import parse_datetime
 import pytz
 
 from ...models import TransactionData, TripData, ScheduleData
-from .auth import get_user_from_cookie
+from ...permissions import LicensePermission
 from ...serializers.transactions import TicketDataSerializer,TripDataSerializer,ScheduleDataSerializer
 
 logger = logging.getLogger('ticket.transactions')
@@ -32,6 +33,7 @@ def _parse_since(since_timestamp):
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def get_all_transaction_data(request):
     """
     Ticket transactions for the web report page.
@@ -41,9 +43,7 @@ def get_all_transaction_data(request):
         to_date    YYYY-MM-DD  required
         since      ISO ts      optional — incremental polling cursor
     """
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
 
     try:
         from_date = request.GET.get('from_date')
@@ -97,6 +97,7 @@ def get_all_transaction_data(request):
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def get_all_trip_data(request):
     """
     Combined trip open+close data for the Trip Data report page.
@@ -107,10 +108,7 @@ def get_all_trip_data(request):
         to_date    YYYY-MM-DD  required
         since      ISO ts      optional  — incremental polling cursor (uses updated_at)
     """
-    user = get_user_from_cookie(request)
-    if not user:
-        return JsonResponse({"error": "Authentication required"},
-                            status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
 
     try:
         from_date = request.GET.get('from_date')
@@ -163,6 +161,7 @@ def get_all_trip_data(request):
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def get_all_schedule_data(request):
     """
     Combined schedule open+close data for the Schedule Data report page.
@@ -173,10 +172,7 @@ def get_all_schedule_data(request):
         to_date    YYYY-MM-DD  required
         since      ISO ts      optional  — incremental polling cursor (uses updated_at)
     """
-    user = get_user_from_cookie(request)
-    if not user:
-        return JsonResponse({"error": "Authentication required"},
-                            status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
 
     try:
         from_date = request.GET.get('from_date')

@@ -1,21 +1,21 @@
 import logging
 from rest_framework import status
 from rest_framework.response import Response
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 
 from ...models import Depot,RouteDepot
 from ...serializers.company import DepotSerializer
-from .auth import get_user_from_cookie
+from ...permissions import LicensePermission
 
 
 logger = logging.getLogger(__name__)
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def get_all_depots(request):
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
 
     company_instance = user.company
     if not company_instance:
@@ -32,10 +32,9 @@ def get_all_depots(request):
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def create_depot(request):
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
 
     if not request.data:
         return Response({"message": "No input received"}, status=status.HTTP_400_BAD_REQUEST)
@@ -54,10 +53,9 @@ def create_depot(request):
 
 
 @api_view(['PUT'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def update_depot_details(request, pk):
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
 
     try:
         depot = Depot.objects.get(pk=pk,company=user.company)
@@ -77,10 +75,9 @@ def update_depot_details(request, pk):
 
 
 @api_view(['DELETE'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def delete_depot(request,pk):
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
 
     try:
         depot = Depot.objects.get(pk=pk,company=user.company)

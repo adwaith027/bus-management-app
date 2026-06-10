@@ -1,4 +1,5 @@
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from django.db.models import Q
@@ -6,12 +7,12 @@ from django.utils import timezone as tz
 import datetime
 
 from ...models import RawDataLog, UserRole
+from ...permissions import LicensePermission
 from ...tasks import (
     process_transaction_data, process_trip_open_data, process_trip_close_data,
     process_trip_close_summary_data, process_schedule_open_data,
     process_schedule_close_data, process_schedule_close_summary_data,
 )
-from .auth import get_user_from_cookie
 
 _TASK_MAP = {
     RawDataLog.typeChoices.TRANSACTION:            process_transaction_data,
@@ -25,10 +26,9 @@ _TASK_MAP = {
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def get_failed_payloads(request):
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
     if user.role != UserRole.SUPERADMIN:
         return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -106,10 +106,9 @@ _MAX_MANUAL_RETRIES = 3
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def retry_failed_payload(request, log_id):
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
     if user.role != UserRole.SUPERADMIN:
         return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
 

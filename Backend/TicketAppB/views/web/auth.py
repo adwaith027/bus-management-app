@@ -1,26 +1,28 @@
 """
 Auth views
 ==========
-Token delivery:
-  All clients (web + APK) — access_token + refresh_token + session_uid
-  delivered as HttpOnly cookies. APK team handles cookie storage in their
-  HTTP client (cookie_jar / dio).
+Cookie name: pqr_session (single HttpOnly cookie — no access_token,
+             refresh_token, or session_uid cookies).
 
-  APK is identified by `device_type` field in the login request body.
-  Bearer header path has been removed.
+request.user and request.auth (session_uid) are set by
+TicketAppB.authentication.SessionAuthentication for all authenticated views.
 
-Session enforcement:
-  - One active UserSession per user at a time.
-  - New login blocked if an existing active session is found (not stale).
-  - Stale sessions (last_seen_at > 24h ago) are auto-expired before the check.
-  - Superadmin is exempt from all session limits.
-  - company_user logins also check company-level concurrent session caps.
-  - APK logins for company_user require device UUID approval by company_admin.
+Login check order:
+  1.  Input validation
+  2.  Credentials + is_active
+  3.  Entity checks (company/dealer active, license valid)
+  4.  Platform restriction (superadmin/company_admin cannot use APK)
+  5.  Device approval check (APK + company_user only)
+  6.  Session conflict check — returns SESSION_CONFLICT or kills old session
+      if force_login=True, inside atomic block with select_for_update
+  7.  Tier / concurrent session cap (company_user only)
+  8.  Create UserSession (DB + Redis)
+  9.  Issue pqr_session cookie
+  10. Side effects (last_login, audit log, notifications)
 """
 
 import uuid
 import logging
-from datetime import timedelta
 
 from django.db import transaction
 from django.utils import timezone
@@ -28,27 +30,23 @@ from django.core.mail import send_mail
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.contrib.auth import get_user_model, authenticate
+from django.conf import settings
 from rest_framework import status
 from rest_framework.response import Response
-from rest_framework.decorators import api_view
-from rest_framework_simplejwt.exceptions import TokenError
-from django.contrib.auth import get_user_model, authenticate
-from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
-from django.conf import settings
-from django.core.cache import cache
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny, IsAuthenticated
 
-from ...models import Company, UserSession, AuditLog, UserApprovedDevice, DevicePendingApproval, UserRole
+from ...models import Company, UserSession, AuditLog, UserApprovedDevice, DevicePendingApproval, UserTier
+from ...authentication import (
+    set_session_cache, delete_session_cache, set_session_revoked,
+    kill_session, session_key_exists, get_session_timeout, SessionInfo, COOKIE_NAME,
+)
 from .audit_logs import log_action
 
 logger = logging.getLogger(__name__)
 _token_generator = PasswordResetTokenGenerator()
-
-
 User = get_user_model()
-
-# Sessions inactive for longer than this are considered stale and auto-expired
-# at login time before the single-session check runs.
-SESSION_INACTIVITY_HOURS = 24
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -59,27 +57,18 @@ SESSION_INACTIVITY_HOURS = 24
 def _get_client_ip(request):
     x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
     if x_forwarded_for:
-        ip = x_forwarded_for.split(',')[-1].strip()
-    else:
-        ip = request.META.get('REMOTE_ADDR')
-    return ip
+        return x_forwarded_for.split(',')[-1].strip()
+    return request.META.get('REMOTE_ADDR')
 
 
 def _is_apk_request(request):
-    """
-    Returns True if the request originates from the APK (Flutter app).
-    Detection: device_type field in request body ('android' or 'ios').
-    APK uses the same cookie-based auth as web.
-    """
     if hasattr(request, 'data') and isinstance(request.data, dict):
         hint = str(request.data.get('device_type', '')).lower()
-        if hint in ('android', 'ios'):
-            return True
+        return hint in ('android', 'ios')
     return False
 
 
 def _detect_device_type(request):
-    """Best-effort device type from request body hint or User-Agent."""
     if hasattr(request, 'data') and isinstance(request.data, dict):
         hint = str(request.data.get('device_type', '')).lower()
         mapping = {
@@ -90,7 +79,6 @@ def _detect_device_type(request):
         }
         if hint in mapping:
             return mapping[hint]
-
     ua = request.META.get('HTTP_USER_AGENT', '').lower()
     if 'android' in ua:
         return UserSession.DeviceType.ANDROID
@@ -98,27 +86,11 @@ def _detect_device_type(request):
         return UserSession.DeviceType.IOS
     if 'mobile' in ua:
         return UserSession.DeviceType.WEB_MOBILE
-    if _is_apk_request(request):
-        return UserSession.DeviceType.ANDROID   # fallback for APK
     return UserSession.DeviceType.WEB_DESKTOP
 
 
-# ── Token / Cookie helpers ────────────────────────────────────────────────────
-
-def _make_tokens(user, session_uid: str):
-    """
-    Create a JWT refresh + access pair with session_uid embedded as a claim.
-    Both tokens carry the session_uid so any endpoint can read it from either.
-    """
-    refresh = RefreshToken.for_user(user)
-    session_uid_str = str(session_uid)
-    refresh['session_uid'] = session_uid_str
-    refresh.access_token['session_uid'] = session_uid_str
-    return refresh, str(refresh.access_token), str(refresh)
-
 
 def _user_payload(user, company):
-    """Shared user dict returned in all login responses."""
     valid_till = None
     if company and company.product_to_date:
         valid_till = company.product_to_date.strftime('%d-%m-%Y')
@@ -137,152 +109,55 @@ def _user_payload(user, company):
     }
 
 
-def _build_token_response(user, company, session_uid):
-    """Issue tokens as HttpOnly cookies and store refresh jti for force-logout blacklisting."""
-    refresh, access_token, refresh_token = _make_tokens(user, session_uid)
-    UserSession.objects.filter(session_uid=session_uid).update(refresh_jti=str(refresh['jti']))
-    response = Response({
-        'message': 'Login Successful',
-        'user': _user_payload(user, company),
-    })
-    cookie_kwargs = dict(httponly=True, secure=not settings.DEBUG, samesite='Lax', path='/')
-    response.set_cookie('access_token',  access_token,  max_age=900,    **cookie_kwargs)
-    response.set_cookie('refresh_token', refresh_token, max_age=604800, **cookie_kwargs)
-    response.set_cookie('session_uid',   session_uid,   max_age=604800, **cookie_kwargs)
-    return response
-
-
-def _build_logout_response(message):
-    """Web logout: clear all auth cookies."""
-    response = Response({'message': message})
-    for cookie in ('access_token', 'refresh_token', 'session_uid'):
-        response.delete_cookie(cookie, path='/')
-    return response
-
-
-# ── Auth utilities ────────────────────────────────────────────────────────────
-
-def get_user_from_cookie(request):
-    """
-    Web path only — extract user from access_token cookie.
-    Kept for all web views; APK views should use get_user_from_request().
-    """
-    access_token = request.COOKIES.get('access_token')
-    if not access_token:
-        return None
-    try:
-        token = AccessToken(access_token)
-        session_uid = token.get('session_uid')
-        if session_uid and cache.get(f'busmgmt:revoked:{session_uid}'):
-            return None
-        return User.objects.get(id=token['user_id'])
-    except (TokenError, User.DoesNotExist):
-        return None
-
-
-def get_user_from_request(request):
-    """
-    Cookie-based auth — works for both web and APK (APK uses cookies).
-    Kept as an alias for get_user_from_cookie for call-site compatibility.
-    """
-    return get_user_from_cookie(request)
-
-
-def _get_session_uid_from_request(request):
-    """Extract the session_uid claim from the access_token cookie."""
-    token_str = request.COOKIES.get('access_token')
-    if not token_str:
-        return None
-    try:
-        token = AccessToken(token_str)
-        return token.get('session_uid')
-    except TokenError:
-        return None
-
-
-# ── Session helpers ───────────────────────────────────────────────────────────
-
-def _expire_stale_sessions(user):
-    """
-    Kill all sessions for this user that have been inactive for >24 hours.
-    Called at login time before the single-session check.
-    """
-    cutoff = timezone.now() - timedelta(hours=SESSION_INACTIVITY_HOURS)
-    UserSession.objects.filter(
-        user=user, is_active=True, last_seen_at__lt=cutoff,
-    ).update(is_active=False)
-    UserSession.objects.filter(
-        user=user, is_active=True,
-        last_seen_at__isnull=True, created_at__lt=cutoff,
-    ).update(is_active=False)
-
-
-def _enforce_single_session(user):
-    """
-    Block new login if a live session already exists.
-    Superadmin is exempt. Stale sessions must be expired first via _expire_stale_sessions().
-    Returns an error Response or None if the login may proceed.
-    """
-    if user.role == UserRole.SUPERADMIN:
-        return None
-
-    if UserSession.objects.filter(user=user, is_active=True).exists():
-        return Response(
-            {
-                'error': (
-                    'Active session detected on another device. '
-                    'Log out from there first, or contact an admin '
-                    'if this was not you.'
-                ),
-                'error_code': 'ALREADY_LOGGED_IN',
-            },
-            status=status.HTTP_403_FORBIDDEN,
-        )
-    return None
-
-
-def _create_session(user, request, device_uuid=None):
-    """Create a new UserSession and return its session_uid (str)."""
-    session = UserSession.objects.create(
-        user=user,
-        session_uid=uuid.uuid4(),
-        device_type=_detect_device_type(request),
-        user_agent=(request.META.get('HTTP_USER_AGENT') or '')[:500],
-        is_active=True,
-        last_seen_at=timezone.now(),
-        device_uuid=device_uuid,
+def _set_session_cookie(response, session_uid: str, device_type: str = 'web_desktop') -> None:
+    timeout = get_session_timeout(device_type)
+    # Add a 300s buffer so the cookie outlasts the frontend idle timer even when
+    # the last keepalive was sent up to 5 minutes before the user went idle.
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=str(session_uid),
+        max_age=timeout + 300,
+        httponly=True,
+        secure=not settings.DEBUG,
+        samesite='Lax',
+        path='/',
     )
-    return str(session.session_uid)
 
 
-# ── Views ─────────────────────────────────────────────────────────────────────
+def _clear_session_cookie(response) -> None:
+    response.delete_cookie(COOKIE_NAME, path='/')
+
+
+# ── Login ─────────────────────────────────────────────────────────────────────
 
 @api_view(['POST'])
+@permission_classes([AllowAny])
 def login_view(request):
     """
-    Login — full check order:
+    Full login flow — see module docstring for check order.
 
-      1.  Credentials valid + user is_active
-      2.  Entity (company / dealer) active + license not expired
-      3.  company_admin cannot log in via APK
-      4.  APK + unrecognised device UUID → DEVICE_PENDING
-      5.  Auto-expire stale sessions (>24h)
-      6.  Active session elsewhere → block + notify
-      7.  Concurrent session cap (company_user only)
-      8.  Create UserSession (store device_uuid)
-      9.  Issue tokens as cookies
-      10. Attach login notifications
+    On SESSION_CONFLICT the response includes device_type and active_since so
+    the frontend can display a meaningful prompt. If the user chooses to proceed,
+    the frontend re-submits with force_login=True to kill the old session.
     """
     if not request.data:
-        return Response({'error': 'Invalid request. No credentials provided'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {'error': 'Invalid request. No credentials provided.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     username = request.data.get('username')
     password = request.data.get('password')
 
     if not username or not password:
-        return Response({'error': 'Please provide username and password'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {'error': 'Please provide username and password.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
-    # ── 1: Credentials + is_active ────────────────────────────────────────────
+    force_login = bool(request.data.get('force_login', False))
+
+    # ── 1+2: Credentials + is_active ─────────────────────────────────────────
     user = authenticate(username=username, password=password)
 
     if not user:
@@ -295,12 +170,18 @@ def login_view(request):
                 )
         except User.DoesNotExist:
             pass
-        return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+        return Response(
+            {'error': 'Invalid credentials.'},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
 
     if not user.is_active:
-        return Response({'error': 'Account is inactive. Contact administrator.'}, status=status.HTTP_403_FORBIDDEN)
+        return Response(
+            {'error': 'Account is inactive. Contact administrator.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
-    # ── 2: Entity checks ──────────────────────────────────────────────────────
+    # ── 3: Entity checks ──────────────────────────────────────────────────────
     company = user.company
     if company:
         if not company.is_active:
@@ -328,16 +209,16 @@ def login_view(request):
 
     is_apk = _is_apk_request(request)
 
-    # ── 3: web-only roles cannot log in via APK ──────────────────────────────
-    if user.role in (UserRole.SUPERADMIN, UserRole.COMPANY_ADMIN) and is_apk:
+    # ── 4: Platform restriction ───────────────────────────────────────────────
+    if user.role in ('superadmin', 'company_admin') and is_apk:
         return Response(
             {'error': 'This account can only log in via the web dashboard.'},
             status=status.HTTP_403_FORBIDDEN,
         )
 
-    # ── 4: Device approval check (APK, company_user only) ────────────────────
+    # ── 5: Device approval check (APK + company_user only) ───────────────────
     device_uuid = None
-    if is_apk and user.role == UserRole.COMPANY_USER:
+    if is_apk and user.role == 'company_user':
         device_uuid = (
             request.data.get('uuid') or request.data.get('device_uuid') or ''
         ).strip() or None
@@ -352,8 +233,9 @@ def login_view(request):
             )
 
         approved = UserApprovedDevice.objects.filter(
-            user=user, device_uuid=device_uuid, is_revoked=False
+            user=user, device_uuid=device_uuid, is_revoked=False,
         ).exists()
+
         if not approved:
             DevicePendingApproval.objects.get_or_create(
                 user=user,
@@ -365,33 +247,79 @@ def login_view(request):
             )
             return Response(
                 {
-                    'error': (
-                        'Initial login on this device. '
-                        'Contact your company admin for approval.'
-                    ),
+                    'error': 'Initial login on this device. Contact your company admin for approval.',
                     'error_code': 'DEVICE_PENDING',
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-    # ── 5-8: Session check + creation (atomic — prevents concurrent-login race) ─
-    # select_for_update acquires a row-level lock on this user row so that two
-    # simultaneous logins for the same username are serialised: the second waits
-    # at the lock until the first commits (or rolls back), then re-runs the check
-    # and finds an active session already present.
+    # ── 5b: Hard block — company_user with no tier cannot login ──────────────
+    if user.role == 'company_user' and (not user.tier or user.tier == UserTier.NONE):
+        return Response({
+            'error': 'Your account has no tier assigned. Contact your company administrator.',
+            'error_code': 'NO_TIER_ASSIGNED',
+        }, status=status.HTTP_403_FORBIDDEN)
+
+    # ── 6–8: Session conflict + tier check + session creation (atomic) ────────
     with transaction.atomic():
+        # Row-level lock: serialises concurrent logins for the same user.
         User.objects.select_for_update().get(pk=user.pk)
 
-        # ── 5: Auto-expire stale sessions (>24h) ──────────────────────────────
-        _expire_stale_sessions(user)
+        existing_session = UserSession.objects.filter(
+            user=user, is_active=True,
+        ).select_related('user').first()
 
-        # ── 6: Active session elsewhere ───────────────────────────────────────
-        block = _enforce_single_session(user)
-        if block:
-            return block
+        if existing_session:
+            # Ghost session detection: Redis key absent can mean two things —
+            # either the session genuinely expired (TTL elapsed naturally) or
+            # Redis evicted/restarted while the session was still active.
+            # We use last_seen_at age against the correct timeout to tell them apart.
+            # No extra DB read — existing_session is already in memory.
+            if not session_key_exists(str(existing_session.session_uid)):
+                idle_seconds = (
+                    timezone.now() - existing_session.last_seen_at
+                ).total_seconds()
+                session_timeout = get_session_timeout(str(existing_session.device_type))
 
-        # ── 7: Concurrent session cap (company_user only, superadmin exempt) ──
-        if user.role == UserRole.COMPANY_USER and company:
+                if idle_seconds > session_timeout:
+                    # Genuinely expired: last activity is older than the idle
+                    # timeout. The Celery sweep hasn't cleaned this row yet.
+                    # Safe to treat as ghost — clear it and allow login.
+                    existing_session.is_active = False
+                    existing_session.save(update_fields=['is_active'])
+                    existing_session = None
+                else:
+                    # Redis key is absent but last_seen_at is recent — Redis was
+                    # evicted or restarted. The session is still legitimately active.
+                    # Repopulate the cache so subsequent requests work correctly,
+                    # then fall through to SESSION_CONFLICT below.
+                    set_session_cache(
+                        str(existing_session.session_uid),
+                        existing_session.user_id,
+                        str(existing_session.device_type),
+                    )
+
+        if existing_session:
+            if not force_login:
+                return Response(
+                    {
+                        'error': (
+                            'You are already logged in on another device. '
+                            'Log out from there first, or choose to log out remotely.'
+                        ),
+                        'error_code': 'SESSION_CONFLICT',
+                        'conflict': {
+                            'device_type': existing_session.device_type,
+                            'active_since': existing_session.created_at.isoformat(),
+                        },
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            else:
+                kill_session(existing_session)
+
+        # ── 7: Tier / concurrent session cap (company_user only) ──────────────
+        if user.role == 'company_user' and company:
             if company.total_user_count > 0:
                 active_count = UserSession.objects.filter(
                     user__company=company, is_active=True,
@@ -402,212 +330,160 @@ def login_view(request):
                         status=status.HTTP_403_FORBIDDEN,
                     )
 
-            if user.tier == 'premium' and company.premium_user_count > 0:
+            if user.tier == UserTier.PREMIUM and company.premium_user_count > 0:
                 premium_active = UserSession.objects.filter(
-                    user__company=company, user__tier='premium', is_active=True,
+                    user__company=company, user__tier=UserTier.PREMIUM, is_active=True,
                 ).count()
                 if premium_active >= company.premium_user_count:
                     return Response(
-                        {'error': 'All premium tier slots are in use. Another premium user must log out first.'},
+                        {'error': 'All premium tier slots are in use.'},
                         status=status.HTTP_403_FORBIDDEN,
                     )
 
-            if user.tier == 'intermediate' and company.intermediate_user_count > 0:
+            if user.tier == UserTier.INTERMEDIATE and company.intermediate_user_count > 0:
                 intermediate_active = UserSession.objects.filter(
-                    user__company=company, user__tier='intermediate', is_active=True,
+                    user__company=company, user__tier=UserTier.INTERMEDIATE, is_active=True,
                 ).count()
                 if intermediate_active >= company.intermediate_user_count:
                     return Response(
-                        {'error': 'All intermediate tier slots are in use. Another intermediate user must log out first.'},
+                        {'error': 'All intermediate tier slots are in use.'},
                         status=status.HTTP_403_FORBIDDEN,
                     )
 
         # ── 8: Create session ──────────────────────────────────────────────────
-        session_uid = _create_session(user, request, device_uuid=device_uuid)
+        session = UserSession.objects.create(
+            user=user,
+            session_uid=uuid.uuid4(),
+            device_type=_detect_device_type(request),
+            user_agent=(request.META.get('HTTP_USER_AGENT') or '')[:500],
+            is_active=True,
+            last_seen_at=timezone.now(),
+            device_uuid=device_uuid,
+        )
+        session_uid = str(session.session_uid)
+        device_type = str(session.device_type)
+        set_session_cache(session_uid, user.pk, device_type)
 
+    # ── 9: Issue cookie ───────────────────────────────────────────────────────
     user.last_login = timezone.now()
     user.save(update_fields=['last_login'])
 
-    # ── 9: Issue tokens as cookies ────────────────────────────────────────────
-    response = _build_token_response(user, company, session_uid)
+    response = Response({
+        'message': 'Login successful.',
+        'user': _user_payload(user, company),
+        'session_timeout_seconds': get_session_timeout(device_type),
+    })
+    _set_session_cookie(response, session_uid, device_type)
 
-    # ── 10: Login notifications ───────────────────────────────────────────────
+    # ── 10: Side effects ──────────────────────────────────────────────────────
     try:
         from .notifications import get_login_notifications
         notifications = get_login_notifications(user, company)
         if notifications:
             response.data['notifications'] = notifications
-    except Exception as _exc:
-        logger.warning(f"Failed to compute login notifications: {_exc}")
+    except Exception as exc:
+        logger.warning(f'Failed to compute login notifications: {exc}')
 
     log_action(
         actor=user, action=AuditLog.ActionType.LOGIN,
         target_model='CustomUser', target_id=user.pk,
         target_display=user.username,
         details={'device_type': str(_detect_device_type(request))},
-        ip_address=request.META.get('REMOTE_ADDR'),
+        ip_address=_get_client_ip(request),
     )
 
     return response
 
 
+# ── Logout ────────────────────────────────────────────────────────────────────
+
 @api_view(['POST'])
+@permission_classes([AllowAny])
 def logout_view(request):
     """
-    Logout — mark the UserSession inactive and clear tokens.
-    Both web and APK use cookie-based auth; session_uid read from access_token cookie.
+    Logout. Clears the pqr_session cookie and invalidates the session.
+    AllowAny so the cookie is always cleared even if the session is already expired.
     """
-    logout_user = get_user_from_request(request)
+    session_uid = request.COOKIES.get(COOKIE_NAME)
+    logged_out_user = getattr(request, 'user', None)
+    if logged_out_user and not logged_out_user.is_authenticated:
+        logged_out_user = None
 
-    session_uid = _get_session_uid_from_request(request)
-    if not session_uid:
-        # Fallback: APK may pass session_uid in body
-        session_uid = request.data.get('session_uid') if hasattr(request, 'data') else None
-
-    session_obj = None
     if session_uid:
-        session_obj = UserSession.objects.filter(session_uid=session_uid).first()
-        UserSession.objects.filter(session_uid=session_uid).update(is_active=False)
-
-    # Blacklist the refresh token so it cannot be used for /token/refresh after logout.
-    #
-    # Primary path — token string (cookie or APK body):
-    #   RefreshToken(str).blacklist() is simplejwt's own method; it creates the
-    #   OutstandingToken record if missing, then writes BlacklistedToken. Works
-    #   even when the access token is already expired (no session_uid needed).
-    #
-    # Fallback path — JTI from the session record:
-    #   Used when the refresh cookie/body is absent. Requires OutstandingToken to
-    #   already exist (created at login time by simplejwt).
-    refresh_token_str = (
-        request.COOKIES.get('refresh_token')
-        or (request.data.get('refresh_token') if hasattr(request, 'data') else None)
-    )
-    if refresh_token_str:
         try:
-            RefreshToken(refresh_token_str).blacklist()
-        except Exception as exc:
-            logger.warning(f'Could not blacklist refresh token on logout: {exc}')
-    elif session_obj and session_obj.refresh_jti:
-        try:
-            from rest_framework_simplejwt.token_blacklist.models import (
-                OutstandingToken, BlacklistedToken,
-            )
-            outstanding = OutstandingToken.objects.get(jti=session_obj.refresh_jti)
-            BlacklistedToken.objects.get_or_create(token=outstanding)
-        except OutstandingToken.DoesNotExist:
-            logger.warning(f'OutstandingToken not found for jti={session_obj.refresh_jti} on logout')
-        except Exception as exc:
-            logger.error(f'Failed to blacklist refresh token on logout (JTI path): {exc}')
+            session = UserSession.objects.get(session_uid=session_uid, is_active=True)
+            kill_session(session)
+            if not logged_out_user:
+                logged_out_user = session.user
+        except UserSession.DoesNotExist:
+            delete_session_cache(session_uid)
 
-    if logout_user:
+    if logged_out_user:
         log_action(
-            actor=logout_user, action=AuditLog.ActionType.LOGOUT,
-            target_model='CustomUser', target_id=logout_user.pk,
-            target_display=logout_user.username,
-            ip_address=request.META.get('REMOTE_ADDR'),
+            actor=logged_out_user, action=AuditLog.ActionType.LOGOUT,
+            target_model='CustomUser', target_id=logged_out_user.pk,
+            target_display=logged_out_user.username,
+            ip_address=_get_client_ip(request),
         )
 
-    return _build_logout_response('Logged out successfully')
+    response = Response({'message': 'Logged out successfully.'})
+    _clear_session_cookie(response)
+    return response
 
+
+# ── Keepalive ─────────────────────────────────────────────────────────────────
 
 @api_view(['POST'])
-def refresh_token_view(request):
+@permission_classes([IsAuthenticated])
+def session_keepalive(request):
     """
-    Token refresh. Reads refresh_token from cookie; issues new access_token cookie.
-    Updates UserSession.last_seen_at to keep the session alive (resets 24h TTL).
+    Lightweight session keepalive. Resets the Redis TTL and updates last_seen_at.
+    Called by the web frontend when the user is active (interaction-event-driven,
+    at most once per 5 minutes). APK uses passive debounce via regular requests.
+    Returns the remaining session timeout so the frontend can sync its idle timer.
     """
-    refresh_token_str = request.COOKIES.get('refresh_token')
-    session_uid_hint  = request.COOKIES.get('session_uid')
+    session_uid = request.auth.session_uid
+    device_type = request.auth.device_type
+    user = request.user
 
-    if not refresh_token_str:
-        return Response({'error': 'No refresh token found'}, status=status.HTTP_401_UNAUTHORIZED)
+    set_session_cache(session_uid, user.pk, device_type)
 
-    try:
-        refresh = RefreshToken(refresh_token_str)
-        session_uid = refresh.get('session_uid') or session_uid_hint
+    UserSession.objects.filter(
+        session_uid=session_uid, is_active=True,
+    ).update(last_seen_at=timezone.now())
 
-        if session_uid:
-            if not UserSession.objects.filter(session_uid=session_uid, is_active=True).exists():
-                return Response({'error': 'Session has been terminated.'}, status=status.HTTP_401_UNAUTHORIZED)
-            UserSession.objects.filter(
-                session_uid=session_uid, is_active=True,
-            ).update(last_seen_at=timezone.now())
+    response = Response({
+        'alive': True,
+        'session_timeout_seconds': get_session_timeout(device_type),
+    })
+    # Refresh the cookie on every keepalive so the browser cookie expiry tracks
+    # user activity, preventing SESSION_CONFLICT when idle logout fires after
+    # the original login cookie has already expired.
+    _set_session_cookie(response, session_uid, device_type)
+    return response
 
-        new_access_token = str(refresh.access_token)
-        response = Response({'message': 'Token refreshed successfully'})
-        response.set_cookie(
-            key='access_token', value=new_access_token,
-            httponly=True, secure=not settings.DEBUG,
-            samesite='Lax', max_age=900, path='/',
-        )
-        return response
 
-    except TokenError:
-        return Response({'error': 'Invalid or expired refresh token'}, status=status.HTTP_401_UNAUTHORIZED)
-
+# ── Verify Auth ───────────────────────────────────────────────────────────────
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def verify_auth(request):
-    """Auth check — works for both web (cookie) and APK (Bearer)."""
-    user = get_user_from_request(request)
-    if not user:
-        return Response({'error': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
-
-    company = user.company
-    valid_till = None
-    if company and company.product_to_date:
-        valid_till = company.product_to_date.strftime('%d-%m-%Y')
-
+    """
+    Auth check called on page load and tab focus. Returns current user payload.
+    request.user is already resolved by SessionAuthentication — one Redis read total.
+    Uses _user_payload for a consistent shape with the login response (including state).
+    """
     return Response({
         'authenticated': True,
-        'user': {
-            'id':             user.id,
-            'username':       user.username,
-            'email':          user.email,
-            'role':           user.role,
-            'tier':           user.tier,
-            'is_verified':    user.is_verified,
-            'company_name':   company.company_name   if company else None,
-            'company_id':     company.company_id     if company else None,
-            'valid_till':     valid_till,
-            'license_status': company.authentication_status if company else None,
-        },
+        'user': _user_payload(request.user, request.user.company),
+        'session_timeout_seconds': get_session_timeout(request.auth.device_type),
     })
 
 
-@api_view(['GET'])
-def protected_view(request):
-    """Dev test endpoint — verifies token; not exposed in production."""
-    user = get_user_from_request(request)
-    if not user:
-        return Response({'error': 'Not authenticated'}, status=status.HTTP_401_UNAUTHORIZED)
-    return Response({
-        'message': f'Hello {user.username}!',
-        'user': {'id': user.id, 'username': user.username, 'email': user.email, 'role': user.role},
-    })
-
-
-# ── Self-service password reset ───────────────────────────────────────────────
-#
-# Flow:
-#   1. POST /auth/forgot-password   { email }
-#      → Always returns 200 (no email enumeration).
-#      → If email found, generates a PasswordResetTokenGenerator token,
-#        encodes uid in base64, and sends a link to the frontend reset page.
-#
-#   2. POST /auth/reset-password    { uid, token, new_password }
-#      → Validates the token (auto-expires after PASSWORD_RESET_TIMEOUT,
-#        default 3 days in Django). Sets the new password on success.
-#
-# Required settings (add to settings.py / .env):
-#   EMAIL_BACKEND  — e.g. 'django.core.mail.backends.smtp.EmailBackend'
-#   EMAIL_HOST, EMAIL_PORT, EMAIL_HOST_USER, EMAIL_HOST_PASSWORD, EMAIL_USE_TLS
-#   DEFAULT_FROM_EMAIL
-#   FRONTEND_URL   — base URL of the React app, e.g. 'http://localhost:5173'
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Password Reset ────────────────────────────────────────────────────────────
 
 @api_view(['POST'])
+@permission_classes([AllowAny])
 def forgot_password(request):
     """
     Initiate self-service password reset.
@@ -620,7 +496,6 @@ def forgot_password(request):
     try:
         user = User.objects.get(email__iexact=email, is_active=True)
     except User.DoesNotExist:
-        # Silent success — don't reveal whether the email exists
         return Response({'message': 'If an account with that email exists, a reset link has been sent.'}, status=status.HTTP_200_OK)
 
     uid   = urlsafe_base64_encode(force_bytes(user.pk))
@@ -649,14 +524,13 @@ def forgot_password(request):
         )
         logger.info(f"Password reset email sent to {user.email} (user_id={user.pk})")
     except Exception as exc:
-        # Log the failure but still return 200 — the token is valid and the
-        # admin can manually share the link if needed.
         logger.error(f"Failed to send password reset email to {user.email}: {exc}")
 
     return Response({'message': 'If an account with that email exists, a reset link has been sent.'}, status=status.HTTP_200_OK)
 
 
 @api_view(['POST'])
+@permission_classes([AllowAny])
 def reset_password(request):
     """
     Complete self-service password reset.
@@ -689,13 +563,21 @@ def reset_password(request):
         target_model='CustomUser', target_id=user.pk,
         target_display=user.username,
         details={'self_service': True},
-        ip_address=request.META.get('REMOTE_ADDR'),
+        ip_address=_get_client_ip(request),
     )
 
-    # Invalidate all active sessions so the old password can no longer be used
-    # (sessions hold JWTs signed before the password change).
-    from ...models import UserSession as _UserSession
-    _UserSession.objects.filter(user=user, is_active=True).update(is_active=False)
+    # Fix 5: kill all active sessions — DB and Redis both.
+    # The original code only bulk-updated the DB, leaving Redis keys alive for up
+    # to 20 minutes. An attacker holding a stolen cookie could still authenticate
+    # during that window because SessionAuthentication finds the Redis key first.
+    active_sessions = list(
+        UserSession.objects.filter(user=user, is_active=True).values_list('session_uid', flat=True)
+    )
+    UserSession.objects.filter(user=user, is_active=True).update(is_active=False)
+    for uid in active_sessions:
+        uid_str = str(uid)
+        set_session_revoked(uid_str)
+        delete_session_cache(uid_str)
 
     logger.info(f"Password reset completed for user_id={user.pk} ({user.username})")
     return Response({'message': 'Password reset successfully. Please log in with your new password.'}, status=status.HTTP_200_OK)

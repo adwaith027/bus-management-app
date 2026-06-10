@@ -4,7 +4,6 @@ from pathlib import Path
 import time
 import logging
 import requests
-import threading
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from django.conf import settings
@@ -14,13 +13,14 @@ from django.db import transaction
 from django.http import JsonResponse
 from ...serializers.company import CompanySerializer
 from rest_framework.response import Response
-from .auth import get_user_from_cookie
 from django.forms.models import model_to_dict
 from django.contrib.auth import get_user_model
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from ...permissions import LicensePermission
 from django.db.utils import OperationalError, ProgrammingError
 from django.db.models import Sum, Q, Count, Case, When, IntegerField
-from ...models import Company, TransactionData, TripData, Route, VehicleType, MosambeeTransaction, Dealer, ETMDevice, UserSession, UserRole
+from ...models import Company, TransactionData, TripData, Route, VehicleType, MosambeeTransaction, Dealer, ETMDevice, UserSession, UserRole, UserTier
 from ..utils import _is_superadmin, _is_executive, _is_dealer_admin, _is_company_admin
 from .audit_logs import log_action
 from ...models import AuditLog
@@ -44,6 +44,42 @@ def check_datetime(date_str):
         return date_str
     except Exception:
         return None
+
+
+def _check_user_count_reduction(company, new_total, new_premium, new_inter):
+    """
+    Block reducing user counts below currently assigned users.
+    Returns (ok: bool, errors: list[str]).
+    Called before saving new count values on an existing company.
+    """
+    stats = User.objects.filter(
+        company=company,
+        role=UserRole.COMPANY_USER,
+        is_active=True,
+    ).exclude(tier=UserTier.NONE).aggregate(
+        total         = Count('id'),
+        premium_count = Count(Case(When(tier=UserTier.PREMIUM,      then=1), output_field=IntegerField())),
+        inter_count   = Count(Case(When(tier=UserTier.INTERMEDIATE, then=1), output_field=IntegerField())),
+    )
+
+    errors = []
+    if new_total is not None and new_total < stats['total']:
+        errors.append(
+            f'Cannot reduce total_user_count to {new_total}: '
+            f'{stats["total"]} users currently have a tier assigned. '
+            'Remove tier assignments first.'
+        )
+    if new_premium is not None and new_premium < stats['premium_count']:
+        errors.append(
+            f'Cannot reduce premium_user_count to {new_premium}: '
+            f'{stats["premium_count"]} users are currently premium.'
+        )
+    if new_inter is not None and new_inter < stats['inter_count']:
+        errors.append(
+            f'Cannot reduce intermediate_user_count to {new_inter}: '
+            f'{stats["inter_count"]} users are currently intermediate.'
+        )
+    return len(errors) == 0, errors
 
 
 def _parse_license_date(raw):
@@ -242,119 +278,13 @@ def poll_license_authentication(customer_id, timeout_seconds=120, interval_secon
     }
 
 
-def background_license_polling(company_id):
-    """
-    Background function that polls license server and updates company status.
-    This runs in a separate thread.
-    """
-    logger.info(f"[BACKGROUND] Starting license polling for company ID: {company_id}")
-    
-    try:
-        # Get company from database
-        company = Company.objects.get(id=company_id)
-        
-        # Poll for authentication
-        auth_result = poll_license_authentication(company.company_id)
-
-        if not auth_result['success']:
-            # Polling failed or timed out - reset to Pending
-            logger.error(f"[BACKGROUND] Polling failed for company {company_id}: {auth_result.get('error')}")
-            company.authentication_status = Company.AuthStatus.PENDING
-            company.save()
-            return
-        
-        # Update company with license details
-        auth_data = auth_result.get('data', {})
-        auth_status = auth_result['status']
-        
-        logger.info(f"[BACKGROUND] Authentication result: {auth_status} for company: {company.company_name}")
-        
-        # Map authentication status to our model
-        if auth_status == 'Approve':
-            company.authentication_status = Company.AuthStatus.APPROVED
-        elif auth_status == 'Expired':
-            company.authentication_status = Company.AuthStatus.EXPIRED
-        elif auth_status == 'Block':
-            company.authentication_status = Company.AuthStatus.BLOCKED
-        
-        # Update license details (only if approved)
-        if auth_status == 'Approve':
-            product_from_date = auth_data.get('ProductFromDate')
-            product_to_date   = auth_data.get('ProductToDate')
-
-            company.product_registration_id = auth_data.get('ProductRegistrationId')
-            company.unique_identifier        = auth_data.get('UniqueIDentifier')
-            company.product_from_date = _parse_license_date(product_from_date)
-            company.product_to_date   = _parse_license_date(product_to_date)
-
-            def _safe_int(val, default=0):
-                try:
-                    return int(val or default)
-                except (ValueError, TypeError):
-                    return default
-
-            # NumberOfLicence — total capacity ceiling from the registration page.
-            number_of_licences = _safe_int(auth_data.get('NumberOfLicence'))
-
-            # PalmtecCount — device slots from profile mapping.
-            palmtec_count = _safe_int(auth_data.get('PalmtecCount'))
-
-            # User counts — from profile mapping (come as strings).
-            total_user_count        = _safe_int(auth_data.get('TotalUserCount'))
-            premium_user_count      = _safe_int(auth_data.get('PremiumUserCount'))
-            intermediate_user_count = _safe_int(auth_data.get('IntermediateUserCount'))
-
-            # Hard block: profile counts must not exceed NumberOfLicence.
-            if number_of_licences > 0 and (palmtec_count + total_user_count) > number_of_licences:
-                logger.error(
-                    f"[BACKGROUND] License config error for {company.company_name}: "
-                    f"palmtec({palmtec_count}) + users({total_user_count}) = "
-                    f"{palmtec_count + total_user_count} > NumberOfLicence({number_of_licences})"
-                )
-                company.authentication_status = Company.AuthStatus.PENDING
-                company.error_message = (
-                    f"License config error: device slots ({palmtec_count}) + "
-                    f"user slots ({total_user_count}) = {palmtec_count + total_user_count} "
-                    f"exceeds total licensed units ({number_of_licences}). "
-                    "Contact the license server administrator."
-                )
-                company.save()
-                return
-
-            company.number_of_licences      = number_of_licences
-            company.palmtec_count           = palmtec_count
-            company.total_user_count        = total_user_count
-            company.premium_user_count      = premium_user_count
-            company.intermediate_user_count = intermediate_user_count
-            company.error_message           = None  # clear any previous error
-
-            logger.info(f"[BACKGROUND] Updated license details for company: {company.company_name}")
-        
-        company.save()
-        logger.info(f"[BACKGROUND] Successfully updated company status to: {company.authentication_status}")
-        
-    except Company.DoesNotExist:
-        logger.error(f"[BACKGROUND] Company not found with ID: {company_id}")
-    except Exception as e:
-        logger.exception(f"[BACKGROUND] Unexpected error during background polling: {str(e)}")
-
-    # This ensures status is never stuck in VALIDATING if thread fails
-    finally:
-        try:
-            company = Company.objects.get(id=company_id)
-            if company.authentication_status == Company.AuthStatus.VALIDATING:
-                company.authentication_status = Company.AuthStatus.PENDING
-                company.save()
-        except Exception as e:
-            logger.error(f"Company stuck at VALIDATING couldn't be reverted due to exception: {e}", exc_info=True)
-
-
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def register_company_with_license_server(request, pk):
     """
     Register company with license server only.
     This does NOT validate - only gets customer_id.
-    
+
     Flow:
     1. Check if company exists
     2. Check if already registered (has company_id)
@@ -363,14 +293,8 @@ def register_company_with_license_server(request, pk):
     5. Return success with customer_id
     """
     logger.info(f"License registration requested for company ID: {pk}")
-    
-    user = get_user_from_cookie(request)
-    if not user:
-        logger.warning(f"Unauthorized registration attempt for company ID: {pk}")
-        return Response(
-            {'error': 'Authentication required'}, 
-            status=status.HTTP_401_UNAUTHORIZED
-        )
+
+    user = request.user
     
     try:
         company = Company.objects.get(pk=pk)
@@ -422,14 +346,15 @@ def register_company_with_license_server(request, pk):
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def validate_company_license(request, pk):
     """
-    START license validation by setting status to 'Validating' and 
+    START license validation by setting status to 'Validating' and
     launching background polling thread.
-    
+
     Returns immediately - polling happens in background.
     User can refresh to see updated status.
-    
+
     Flow:
     1. Check if company exists
     2. Check if company is registered (has company_id)
@@ -439,14 +364,8 @@ def validate_company_license(request, pk):
     6. Return immediately
     """
     logger.info(f"License validation requested for company ID: {pk}")
-    
-    user = get_user_from_cookie(request)
-    if not user:
-        logger.warning(f"Unauthorized license validation attempt for company ID: {pk}")
-        return Response(
-            {'error': 'Authentication required'}, 
-            status=status.HTTP_401_UNAUTHORIZED
-        )
+
+    user = request.user
     
     with transaction.atomic():
         try:
@@ -486,14 +405,12 @@ def validate_company_license(request, pk):
         company.save()
     logger.info(f"Set status to 'Validating' for company: {company.company_name}")
     
-    # Start background thread
-    thread = threading.Thread(
-        target=background_license_polling,
-        args=(company.id,),
-        daemon=True
-    )
-    thread.start()
-    logger.info(f"Started background polling thread for company ID: {pk}")
+    # Hand off to Celery — returns immediately, polling runs in the background.
+    # Unlike a daemon thread, this survives worker restarts: the task is
+    # re-queued from the broker if the worker dies mid-poll.
+    from ...tasks import poll_company_license
+    poll_company_license.delay(company.id)
+    logger.info(f"Queued poll_company_license task for company ID: {pk}")
     
     # Return immediately
     serializer = CompanySerializer(company)
@@ -542,6 +459,7 @@ def fetch_company_from_license_server(customer_id):
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def get_company_by_company_id(request, company_id):
     """
     Preview endpoint for the 'Add Existing Company' flow.
@@ -553,9 +471,7 @@ def get_company_by_company_id(request, company_id):
     Note: This is read-only — no writes happen here.
     The actual atomic create is handled by POST /import-company.
     """
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
 
     # ── Duplicate check ──────────────────────────────────────────────────────
     existing = Company.objects.filter(company_id=company_id).first()
@@ -611,6 +527,7 @@ def get_company_by_company_id(request, company_id):
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, LicensePermission])
 @transaction.atomic
 def import_company(request):
     """
@@ -625,9 +542,7 @@ def import_company(request):
       for the same company_id, only one proceeds; the other sees the duplicate
       and gets a 409.
     """
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
 
     company_id = request.data.get('company_id', '').strip()
     if not company_id:
@@ -758,6 +673,7 @@ def import_company(request):
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def all_company_data(request):
     """
     Retrieve companies based on the requesting user's role.
@@ -768,12 +684,7 @@ def all_company_data(request):
       - dealer_admin → companies under their dealer (Company.dealer FK)
       - company_admin→ only their own company
     """
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response(
-            {'error': 'Authentication required'},
-            status=status.HTTP_401_UNAUTHORIZED
-        )
+    user = request.user
 
     if _is_superadmin(user):
         # Superadmin sees all direct companies (not dealer-created sub-companies).
@@ -812,6 +723,7 @@ def _safe_int(val, default=0):
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, LicensePermission])
 @transaction.atomic
 def create_company(request):
     """
@@ -825,12 +737,11 @@ def create_company(request):
             Requires { palmtec_count, total_user_count, premium_user_count,
                        intermediate_user_count } in the request body.
             Validates dealer pool (select_for_update to prevent races).
-            On success: deducts counts from dealer.remaining_*, sets company
-            authentication_status = Approved, inherits dealer product dates.
+            On success: validates against live dealer pool properties (slots_remaining,
+            users_slots_remaining), sets company authentication_status = Approved,
+            inherits dealer product dates.
     """
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
 
     if not _is_superadmin(user) and not _is_executive(user) and not _is_dealer_admin(user):
         return Response({'error': 'Only superadmin, executive, or dealer_admin can create companies.'}, status=status.HTTP_403_FORBIDDEN)
@@ -897,16 +808,18 @@ def create_company(request):
         if dealer.authentication_status != Dealer.AuthStatus.APPROVED:
             return Response({'error': 'Dealer license is not approved. Cannot create companies.'}, status=status.HTTP_403_FORBIDDEN)
 
-        # Pool validation
+        # Pool validation (live-computed from child companies)
+        slots_rem  = dealer.slots_remaining
+        user_slots = dealer.users_slots_remaining
         errors = []
-        if dealer.remaining_palmtec_count < alloc_palmtec:
-            errors.append(f"Palmtec: requested {alloc_palmtec}, available {dealer.remaining_palmtec_count}")
-        if dealer.remaining_total_user_count < alloc_total:
-            errors.append(f"Total users: requested {alloc_total}, available {dealer.remaining_total_user_count}")
-        if dealer.remaining_premium_user_count < alloc_premium:
-            errors.append(f"Premium users: requested {alloc_premium}, available {dealer.remaining_premium_user_count}")
-        if dealer.remaining_intermediate_user_count < alloc_inter:
-            errors.append(f"Intermediate users: requested {alloc_inter}, available {dealer.remaining_intermediate_user_count}")
+        if alloc_palmtec > slots_rem:
+            errors.append(f"Palmtec: requested {alloc_palmtec}, available {slots_rem}")
+        if alloc_total > user_slots['total']:
+            errors.append(f"Total users: requested {alloc_total}, available {user_slots['total']}")
+        if alloc_premium > user_slots['premium']:
+            errors.append(f"Premium users: requested {alloc_premium}, available {user_slots['premium']}")
+        if alloc_inter > user_slots['inter']:
+            errors.append(f"Intermediate users: requested {alloc_inter}, available {user_slots['inter']}")
         if errors:
             return Response({
                 'error': 'Insufficient dealer pool capacity.',
@@ -926,18 +839,6 @@ def create_company(request):
             product_from_date=dealer.product_from_date,
             product_to_date=dealer.product_to_date,
         )
-
-        # Deduct from dealer pool (within the same atomic transaction)
-        dealer.remaining_palmtec_count           -= alloc_palmtec
-        dealer.remaining_total_user_count        -= alloc_total
-        dealer.remaining_premium_user_count      -= alloc_premium
-        dealer.remaining_intermediate_user_count -= alloc_inter
-        dealer.save(update_fields=[
-            'remaining_palmtec_count',
-            'remaining_total_user_count',
-            'remaining_premium_user_count',
-            'remaining_intermediate_user_count',
-        ])
 
         logger.info(
             f"Dealer company '{company.company_name}' created by {user.username}. "
@@ -959,7 +860,7 @@ def create_company(request):
         email=user_email_field,
         password=user_password,
         role=UserRole.COMPANY_ADMIN,
-        tier='none',
+        tier=UserTier.NONE,
         company=company,
         is_verified=True,
         created_by=user,
@@ -1078,6 +979,7 @@ def _backup_company_data(company):
 
 
 @api_view(['DELETE'])
+@permission_classes([IsAuthenticated, LicensePermission])
 @transaction.atomic
 def delete_company(request, pk):
     """
@@ -1089,9 +991,7 @@ def delete_company(request, pk):
     Transactional data (tickets, trips, schedules) is not included in the file
     but remains in the DB with a now-orphaned company_code FK.
     """
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
     if user.role != UserRole.SUPERADMIN:
         return Response({'error': 'Superadmin only'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -1101,24 +1001,6 @@ def delete_company(request, pk):
         return Response({'error': 'Company not found.'}, status=status.HTTP_404_NOT_FOUND)
 
     company_name = company.company_name
-
-    # Restore dealer pool if this was a dealer-created company
-    if company.client_type == 'dealer_company' and company.dealer_id:
-        try:
-            dealer = Dealer.objects.select_for_update().get(pk=company.dealer_id)
-            dealer.remaining_palmtec_count           += company.palmtec_count
-            dealer.remaining_total_user_count        += company.total_user_count
-            dealer.remaining_premium_user_count      += company.premium_user_count
-            dealer.remaining_intermediate_user_count += company.intermediate_user_count
-            dealer.save(update_fields=[
-                'remaining_palmtec_count',
-                'remaining_total_user_count',
-                'remaining_premium_user_count',
-                'remaining_intermediate_user_count',
-            ])
-            logger.info(f"Restored dealer pool for dealer_id={dealer.id} after deleting '{company_name}'.")
-        except Dealer.DoesNotExist:
-            logger.warning(f"Dealer not found when restoring pool for company '{company_name}'.")
 
     # Soft-deactivate all company users before deletion to avoid orphaned logins
     from django.contrib.auth import get_user_model as _get_user_model
@@ -1149,14 +1031,13 @@ def delete_company(request, pk):
 
 
 @api_view(['PUT'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def update_company_details(request, pk):
     """
     Update existing company details.
     Cannot update license-related fields directly (use validate_license endpoint).
     """
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
 
     if not any([_is_superadmin(user), _is_executive(user), _is_dealer_admin(user)]):
         return Response({'error': 'Not authorized to update company details.'}, status=status.HTTP_403_FORBIDDEN)
@@ -1175,8 +1056,21 @@ def update_company_details(request, pk):
             return Response({'error': 'You can only update companies under your dealership.'}, status=status.HTTP_403_FORBIDDEN)
     
     serializer = CompanySerializer(company, data=request.data, partial=True)
-    
+
     if serializer.is_valid():
+        # Guard: block reducing user counts below current tier assignments
+        def _si(v): return int(v) if v is not None else None
+        new_total   = _si(request.data.get('total_user_count'))
+        new_premium = _si(request.data.get('premium_user_count'))
+        new_inter   = _si(request.data.get('intermediate_user_count'))
+        if any(v is not None for v in (new_total, new_premium, new_inter)):
+            ok, errs = _check_user_count_reduction(company, new_total, new_premium, new_inter)
+            if not ok:
+                return Response({
+                    'error': 'Cannot reduce user counts below current assignments.',
+                    'details': errs,
+                }, status=status.HTTP_400_BAD_REQUEST)
+
         serializer.save()
         logger.info(f"Updated company: {company.company_name} (ID: {pk})")
         log_action(
@@ -1205,14 +1099,9 @@ def update_company_details(request, pk):
 
 # Returns collections, operations, and settlements data for a given date.
 @api_view(['GET'])
-def get_company_dashboard_metrics(request):    
-    #  Step 1: Authentication 
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response(
-            {'error': 'Authentication required'},
-            status=status.HTTP_401_UNAUTHORIZED
-        )
+@permission_classes([IsAuthenticated, LicensePermission])
+def get_company_dashboard_metrics(request):
+    user = request.user
     
     #  Step 2: Date validation ─
     selected_date = request.GET.get('date')
@@ -1494,10 +1383,9 @@ def get_company_dashboard_metrics(request):
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def get_admin_dashboard_data(request):
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
     if not _is_superadmin(user):
         return Response({'error': 'Superadmin access required.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -1575,10 +1463,10 @@ def _build_company_sync_diff(company, auth_data):
         user__company=company, is_active=True,
     ).count()
     sessions_premium = UserSession.objects.filter(
-        user__company=company, user__tier='premium', is_active=True,
+        user__company=company, user__tier=UserTier.PREMIUM, is_active=True,
     ).count()
     sessions_inter = UserSession.objects.filter(
-        user__company=company, user__tier='intermediate', is_active=True,
+        user__company=company, user__tier=UserTier.INTERMEDIATE, is_active=True,
     ).count()
 
     raw_from = auth_data.get('ProductFromDate')
@@ -1619,6 +1507,7 @@ def _build_company_sync_diff(company, auth_data):
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def sync_company_license(request, pk):
     """
     Dry-run sync: fetch latest data from license server, return old vs new diff.
@@ -1626,9 +1515,7 @@ def sync_company_license(request, pk):
 
     Access: superadmin, executive (own companies), company_admin (own company).
     """
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
 
     try:
         company = Company.objects.get(pk=pk)
@@ -1661,6 +1548,7 @@ def sync_company_license(request, pk):
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def sync_company_license_confirm(request, pk):
     """
     Apply the sync: re-fetch from license server and write new values to DB.
@@ -1669,9 +1557,7 @@ def sync_company_license_confirm(request, pk):
     Sync reduction (count decrease with excess users) is deferred — this
     endpoint only applies expansions and date updates cleanly.
     """
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
 
     try:
         company = Company.objects.get(pk=pk)
@@ -1726,11 +1612,22 @@ def sync_company_license_confirm(request, pk):
         company.authentication_status,
     )
 
+    new_total   = _si(auth_data.get('TotalUserCount'))
+    new_premium = _si(auth_data.get('PremiumUserCount'))
+    new_inter   = _si(auth_data.get('IntermediateUserCount'))
+
+    ok, errs = _check_user_count_reduction(company, new_total, new_premium, new_inter)
+    if not ok:
+        return Response({
+            'error': 'Cannot apply sync: would reduce user counts below current assignments.',
+            'details': errs,
+        }, status=status.HTTP_400_BAD_REQUEST)
+
     company.number_of_licences      = _si(auth_data.get('NumberOfLicence'))
     company.palmtec_count           = _si(auth_data.get('PalmtecCount'))
-    company.total_user_count        = _si(auth_data.get('TotalUserCount'))
-    company.premium_user_count      = _si(auth_data.get('PremiumUserCount'))
-    company.intermediate_user_count = _si(auth_data.get('IntermediateUserCount'))
+    company.total_user_count        = new_total
+    company.premium_user_count      = new_premium
+    company.intermediate_user_count = new_inter
     company.product_from_date = _parse_license_date(raw_from) or company.product_from_date
     company.product_to_date   = _parse_license_date(raw_to)   or company.product_to_date
     company.authentication_status   = new_auth_status

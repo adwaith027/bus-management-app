@@ -9,7 +9,7 @@ Severity levels: 'error' | 'warning' | 'info'
 
 from django.utils import timezone
 
-from ...models import ETMDevice, Route, RouteDepot, UserRole
+from ...models import Depot, ETMDevice, RouteDepot, UserRole
 
 # Days before expiry at which we start warning
 _EXPIRY_WARNING_DAYS = 30
@@ -65,42 +65,45 @@ def get_login_notifications(user, company):
 
     # ── 3. ETM devices allocated but missing Palmtec ID ──────────────────────
     if company and user.role == UserRole.COMPANY_ADMIN:
-        unmapped_devices = ETMDevice.objects.filter(
-            company=company,
-            allocation_status=ETMDevice.AllocationStatus.ALLOCATED,
-            palmtec_id__isnull=True,
-        ).count()
-        if unmapped_devices:
+        devices_without_palmtec = list(
+            ETMDevice.objects.filter(
+                company=company,
+                allocation_status=ETMDevice.AllocationStatus.ALLOCATED,
+                palmtec_id__isnull=True,
+            ).values_list('serial_number', flat=True)
+        )
+        if devices_without_palmtec:
             alerts.append({
-                'type':     'unmapped_devices',
-                'severity': 'info',
-                'message':  (
-                    f'{unmapped_devices} device(s) have no Palmtec ID assigned. '
-                    'Go to Device Management to enter the IDs.'
+                'type':           'unmapped_devices',
+                'severity':       'warning',
+                'message':        (
+                    f'{len(devices_without_palmtec)} ETM device(s) have no Palmtec ID assigned. '
+                    'Please assign Palmtec IDs for proper data input and management.'
                 ),
-                'count': unmapped_devices,
+                'count':          len(devices_without_palmtec),
+                'serial_numbers': devices_without_palmtec,
             })
 
-    # ── 4. Routes with no depot assigned ─────────────────────────────────────
+    # ── 4. Depots with no route mapped ────────────────────────────────────────
     if company and user.role == UserRole.COMPANY_ADMIN:
-        mapped_route_ids = RouteDepot.objects.filter(
-            route__company=company,
-        ).values_list('route_id', flat=True)
-
-        routes_without_depot = Route.objects.filter(
+        mapped_depot_ids = RouteDepot.objects.filter(
             company=company,
-            is_deleted=False,
-        ).exclude(id__in=mapped_route_ids).count()
+        ).values_list('depot_id', flat=True)
 
-        if routes_without_depot:
+        depots_without_route = Depot.objects.filter(
+            company=company,
+            is_active=True,
+        ).exclude(id__in=mapped_depot_ids).count()
+
+        if depots_without_route:
             alerts.append({
-                'type':     'unmapped_routes',
+                'type':     'unmapped_depots',
                 'severity': 'info',
                 'message':  (
-                    f'{routes_without_depot} route(s) have no depot assigned. '
-                    'Assign depot to routes to establish route-depot connection.'
+                    f'{depots_without_route} depot(s) have no route assigned. '
+                    'Assign routes to depots to establish the depot-route connection.'
                 ),
-                'count': routes_without_depot,
+                'count': depots_without_route,
             })
 
     return alerts

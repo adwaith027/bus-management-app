@@ -1,116 +1,74 @@
 """
-Session management and device approval views — company_admin only.
+Session management and device approval views.
 
-Endpoints:
-  GET  /sessions                          — list active sessions for the company
-  POST /sessions/<session_uid>/force-logout  — force-logout a specific session
-  GET  /device-approvals                  — list pending device approval requests
-  POST /device-approvals/<pk>/approve     — approve a device (with tier slot check)
-  POST /device-approvals/<pk>/reject      — reject a device
+force-logout now has two layers (DB + Redis cache delete) instead of three.
+No JWT blacklisting — there are no refresh tokens to blacklist.
+request.user and request.auth are set by SessionAuthentication.
 """
 
 import logging
-from datetime import timedelta
-
 from django.utils import timezone
-from django.conf import settings as django_settings
-from django.core.cache import cache
 from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.exceptions import TokenError
-from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
 
-from ...models import UserSession, UserApprovedDevice, DevicePendingApproval, Company, UserRole
-from .auth import get_user_from_cookie, _get_session_uid_from_request, SESSION_INACTIVITY_HOURS
-
-_ACCESS_TOKEN_TTL = int(django_settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME'].total_seconds())
+from ...models import UserSession, UserApprovedDevice, DevicePendingApproval, Company, UserTier
+from ...authentication import kill_session
+from ...permissions import LicensePermission
 
 logger = logging.getLogger(__name__)
 
-_STALE_THRESHOLD_HOURS = SESSION_INACTIVITY_HOURS
 
+# ── Internal helpers ──────────────────────────────────────────────────────────
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _kill_session(session):
-    """
-    Terminate a session with three layers:
-    1. DB: is_active=False — frees the license slot immediately
-    2. Redis: revocation key — 401 on the user's very next request
-    3. simplejwt blacklist: refresh token permanently dead
-    """
-    session.is_active = False
-    session.save(update_fields=['is_active'])
-
-    cache.set(f'busmgmt:revoked:{session.session_uid}', 1, timeout=_ACCESS_TOKEN_TTL)
-
-    if session.refresh_jti:
-        try:
-            outstanding = OutstandingToken.objects.get(jti=session.refresh_jti)
-            BlacklistedToken.objects.get_or_create(token=outstanding)
-        except OutstandingToken.DoesNotExist:
-            logger.warning(f'OutstandingToken not found for jti={session.refresh_jti}')
 
 
 def _tier_slot_available(company, user):
-    """
-    Check tier slot availability before approving a device login.
-    Returns (ok: bool, error: str | None).
-    """
     if not company or company.total_user_count == 0:
-        return True, None  # unconfigured — no cap
-
+        return True, None
     active_total = UserSession.objects.filter(
         user__company=company, is_active=True,
     ).count()
     if active_total >= company.total_user_count:
         return False, 'All login slots are in use. Deactivate a user first.'
-
-    if user.tier == 'premium' and company.premium_user_count > 0:
+    if user.tier == UserTier.PREMIUM and company.premium_user_count > 0:
         active_premium = UserSession.objects.filter(
-            user__company=company, user__tier='premium', is_active=True,
+            user__company=company, user__tier=UserTier.PREMIUM, is_active=True,
         ).count()
         if active_premium >= company.premium_user_count:
             return False, 'All premium tier slots are in use.'
-
-    if user.tier == 'intermediate' and company.intermediate_user_count > 0:
+    if user.tier == UserTier.INTERMEDIATE and company.intermediate_user_count > 0:
         active_intermediate = UserSession.objects.filter(
-            user__company=company, user__tier='intermediate', is_active=True,
+            user__company=company, user__tier=UserTier.INTERMEDIATE, is_active=True,
         ).count()
         if active_intermediate >= company.intermediate_user_count:
             return False, 'All intermediate tier slots are in use.'
-
     return True, None
 
 
-# ── Session management ────────────────────────────────────────────────────────
+# ── Session listing — company_admin ───────────────────────────────────────────
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def list_sessions(request):
-    """
-    List all active UserSession records for this company's users.
-    company_admin only.
-    """
-    requester = get_user_from_cookie(request)
-    if not requester:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    if requester.role != UserRole.COMPANY_ADMIN or not requester.company:
-        return Response({'error': 'Company admin access required.'}, status=status.HTTP_403_FORBIDDEN)
+    """List active sessions for this company. company_admin only."""
+    user = request.user
+    if user.role != 'company_admin' or not user.company:
+        return Response(
+            {'error': 'Company admin access required.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
-    stale_cutoff = timezone.now() - timedelta(hours=_STALE_THRESHOLD_HOURS)
-    requester_session_uid = _get_session_uid_from_request(request)
+    current_session_uid = request.auth.session_uid
 
     sessions = UserSession.objects.filter(
-        user__company=requester.company,
+        user__company=user.company,
         is_active=True,
     ).select_related('user').order_by('-created_at')
 
-    data = []
-    for s in sessions:
-        is_stale = s.last_seen_at and s.last_seen_at < stale_cutoff
-        data.append({
+    data = [
+        {
             'session_uid':        str(s.session_uid),
             'user_id':            s.user_id,
             'username':           s.user.username,
@@ -119,78 +77,80 @@ def list_sessions(request):
             'device_uuid':        s.device_uuid or None,
             'login_time':         s.created_at,
             'last_active':        s.last_seen_at,
-            'is_stale':           bool(is_stale),
-            'is_current_session': str(s.session_uid) == requester_session_uid,
-        })
-
-    return Response({'message': 'Success', 'data': data}, status=status.HTTP_200_OK)
+            'is_current_session': str(s.session_uid) == current_session_uid,
+        }
+        for s in sessions
+    ]
+    return Response({'message': 'Success', 'data': data})
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def force_logout_session(request, session_uid):
-    """
-    Force-logout a session by its uid.
-    company_admin can only target sessions of users in their own company.
-    """
-    requester = get_user_from_cookie(request)
-    if not requester:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    if requester.role != UserRole.COMPANY_ADMIN or not requester.company:
-        return Response({'error': 'Company admin access required.'}, status=status.HTTP_403_FORBIDDEN)
+    """Force-logout a session by uid. company_admin only."""
+    user = request.user
+    if user.role != 'company_admin' or not user.company:
+        return Response(
+            {'error': 'Company admin access required.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     try:
         session = UserSession.objects.select_related('user').get(
             session_uid=session_uid, is_active=True,
         )
     except UserSession.DoesNotExist:
-        return Response({'error': 'Session not found or already inactive.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(
+            {'error': 'Session not found or already inactive.'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
 
-    if session.user.company_id != requester.company_id:
-        return Response({'error': 'Not authorized to manage this session.'}, status=status.HTTP_403_FORBIDDEN)
+    if session.user.company_id != user.company_id:
+        return Response(
+            {'error': 'Not authorised to manage this session.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
-    if session.user_id == requester.id:
-        return Response({'error': 'Cannot force logout your own session.'}, status=status.HTTP_400_BAD_REQUEST)
+    if session.user_id == user.id:
+        return Response(
+            {'error': 'Cannot force logout your own session.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
-    _kill_session(session)
+    kill_session(session)
     logger.info(
-        f"company_admin '{requester.username}' force-logged-out "
+        f"company_admin '{user.username}' force-logged-out "
         f"session {session_uid} for user '{session.user.username}'"
     )
     return Response(
         {'message': f"Session for '{session.user.username}' has been terminated."},
-        status=status.HTTP_200_OK,
     )
 
 
-# ── Superadmin session management ─────────────────────────────────────────────
+# ── Session listing — superadmin ──────────────────────────────────────────────
 
-_ADMIN_ROLES = (UserRole.SUPERADMIN, UserRole.COMPANY_ADMIN, UserRole.DEALER_ADMIN, UserRole.EXECUTIVE, UserRole.PRODUCTION)
+_ADMIN_ROLES = ('superadmin', 'company_admin', 'dealer_admin', 'executive', 'production')
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def list_all_sessions(request):
-    """
-    Superadmin: list active sessions for all admin-level accounts (excludes company_user).
-    company_admin manages their own company_users via /sessions.
-    """
-    requester = get_user_from_cookie(request)
-    if not requester:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    if requester.role != UserRole.SUPERADMIN:
-        return Response({'error': 'Superadmin access required.'}, status=status.HTTP_403_FORBIDDEN)
+    """Superadmin: list active sessions for all admin-level accounts."""
+    if request.user.role != 'superadmin':
+        return Response(
+            {'error': 'Superadmin access required.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
-    stale_cutoff = timezone.now() - timedelta(hours=_STALE_THRESHOLD_HOURS)
-    requester_session_uid = _get_session_uid_from_request(request)
+    current_session_uid = request.auth.session_uid
 
     sessions = UserSession.objects.filter(
         is_active=True,
         user__role__in=_ADMIN_ROLES,
     ).select_related('user', 'user__company').order_by('-created_at')
 
-    data = []
-    for s in sessions:
-        is_stale = s.last_seen_at and s.last_seen_at < stale_cutoff
-        data.append({
+    data = [
+        {
             'session_uid':        str(s.session_uid),
             'user_id':            s.user_id,
             'username':           s.user.username,
@@ -200,60 +160,61 @@ def list_all_sessions(request):
             'device_uuid':        s.device_uuid or None,
             'login_time':         s.created_at,
             'last_active':        s.last_seen_at,
-            'is_stale':           bool(is_stale),
-            'is_current_session': str(s.session_uid) == requester_session_uid,
-        })
-
-    return Response({'message': 'Success', 'data': data}, status=status.HTTP_200_OK)
+            'is_current_session': str(s.session_uid) == current_session_uid,
+        }
+        for s in sessions
+    ]
+    return Response({'message': 'Success', 'data': data})
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def force_logout_session_admin(request, session_uid):
-    """
-    Superadmin: force-logout any admin-level session.
-    """
-    requester = get_user_from_cookie(request)
-    if not requester:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    if requester.role != UserRole.SUPERADMIN:
-        return Response({'error': 'Superadmin access required.'}, status=status.HTTP_403_FORBIDDEN)
+    """Superadmin: force-logout any admin-level session."""
+    if request.user.role != 'superadmin':
+        return Response(
+            {'error': 'Superadmin access required.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     try:
         session = UserSession.objects.select_related('user').get(
             session_uid=session_uid, is_active=True,
         )
     except UserSession.DoesNotExist:
-        return Response({'error': 'Session not found or already inactive.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(
+            {'error': 'Session not found or already inactive.'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
 
-    if str(session.session_uid) == _get_session_uid_from_request(request):
-        return Response({'error': 'Cannot force logout your own session.'}, status=status.HTTP_400_BAD_REQUEST)
+    if str(session.session_uid) == request.auth.session_uid:
+        return Response(
+            {'error': 'Cannot force logout your own session.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
-    _kill_session(session)
+    kill_session(session)
     logger.info(
-        f"superadmin '{requester.username}' force-logged-out "
+        f"superadmin '{request.user.username}' force-logged-out "
         f"session {session_uid} for user '{session.user.username}'"
     )
     return Response(
         {'message': f"Session for '{session.user.username}' has been terminated."},
-        status=status.HTTP_200_OK,
     )
+
 
 # ── Device approvals ──────────────────────────────────────────────────────────
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def list_pending_approvals(request):
-    """
-    List pending device approval requests for this company's users.
-    company_admin only.
-    """
-    requester = get_user_from_cookie(request)
-    if not requester:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    if requester.role != UserRole.COMPANY_ADMIN or not requester.company:
+    """List pending device approval requests for this company. company_admin only."""
+    user = request.user
+    if user.role != 'company_admin' or not user.company:
         return Response({'error': 'Company admin access required.'}, status=status.HTTP_403_FORBIDDEN)
 
     pending = DevicePendingApproval.objects.filter(
-        user__company=requester.company,
+        user__company=user.company,
         status=DevicePendingApproval.Status.PENDING,
     ).select_related('user').order_by('-requested_at')
 
@@ -269,20 +230,15 @@ def list_pending_approvals(request):
         }
         for p in pending
     ]
-    return Response({'message': 'Success', 'data': data}, status=status.HTTP_200_OK)
+    return Response({'message': 'Success', 'data': data})
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def approve_device(request, approval_id):
-    """
-    Approve a device login request.
-    Checks tier slot availability before approving.
-    Sets user.is_verified = True on first approval.
-    """
-    requester = get_user_from_cookie(request)
-    if not requester:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    if requester.role != UserRole.COMPANY_ADMIN or not requester.company:
+    """Approve a device login request. Checks tier slot availability before approving."""
+    user = request.user
+    if user.role != 'company_admin' or not user.company:
         return Response({'error': 'Company admin access required.'}, status=status.HTTP_403_FORBIDDEN)
 
     try:
@@ -292,29 +248,25 @@ def approve_device(request, approval_id):
     except DevicePendingApproval.DoesNotExist:
         return Response({'error': 'Approval request not found or already handled.'}, status=status.HTTP_404_NOT_FOUND)
 
-    if approval.user.company_id != requester.company_id:
+    if approval.user.company_id != user.company_id:
         return Response({'error': 'Not authorized to approve this request.'}, status=status.HTTP_403_FORBIDDEN)
 
-    # Check tier slot availability at approval time.
-    ok, err = _tier_slot_available(requester.company, approval.user)
+    ok, err = _tier_slot_available(user.company, approval.user)
     if not ok:
         return Response({'error': err}, status=status.HTTP_403_FORBIDDEN)
 
-    # Create approved device record.
     UserApprovedDevice.objects.get_or_create(
         user=approval.user,
         device_uuid=approval.device_uuid,
-        defaults={'approved_by': requester},
+        defaults={'approved_by': user},
     )
 
-    # Mark is_verified on first ever approval.
     if not approval.user.is_verified:
         approval.user.is_verified = True
         approval.user.save(update_fields=['is_verified'])
 
-    # Mark approval as handled.
     approval.status = DevicePendingApproval.Status.APPROVED
-    approval.reviewed_by = requester
+    approval.reviewed_by = user
     approval.reviewed_at = timezone.now()
     approval.save(update_fields=['status', 'reviewed_by', 'reviewed_at'])
 
@@ -323,7 +275,7 @@ def approve_device(request, approval_id):
     ).exists()
 
     logger.info(
-        f"company_admin '{requester.username}' approved device "
+        f"company_admin '{user.username}' approved device "
         f"{approval.device_uuid[:16]}… for user '{approval.user.username}'"
     )
     return Response(
@@ -341,12 +293,11 @@ def approve_device(request, approval_id):
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def reject_device(request, approval_id):
     """Reject a device login request."""
-    requester = get_user_from_cookie(request)
-    if not requester:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    if requester.role != UserRole.COMPANY_ADMIN or not requester.company:
+    user = request.user
+    if user.role != 'company_admin' or not user.company:
         return Response({'error': 'Company admin access required.'}, status=status.HTTP_403_FORBIDDEN)
 
     try:
@@ -356,19 +307,18 @@ def reject_device(request, approval_id):
     except DevicePendingApproval.DoesNotExist:
         return Response({'error': 'Approval request not found or already handled.'}, status=status.HTTP_404_NOT_FOUND)
 
-    if approval.user.company_id != requester.company_id:
+    if approval.user.company_id != user.company_id:
         return Response({'error': 'Not authorized to reject this request.'}, status=status.HTTP_403_FORBIDDEN)
 
     approval.status = DevicePendingApproval.Status.REJECTED
-    approval.reviewed_by = requester
+    approval.reviewed_by = user
     approval.reviewed_at = timezone.now()
     approval.save(update_fields=['status', 'reviewed_by', 'reviewed_at'])
 
     logger.info(
-        f"company_admin '{requester.username}' rejected device "
+        f"company_admin '{user.username}' rejected device "
         f"{approval.device_uuid[:16]}… for user '{approval.user.username}'"
     )
     return Response(
         {'message': f"Device request rejected for '{approval.user.username}'."},
-        status=status.HTTP_200_OK,
     )

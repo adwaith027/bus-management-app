@@ -110,9 +110,7 @@ def _validate_crew_assignment_payload(company, payload, exclude_assignment_id=No
 
 @api_view(['GET'])
 def get_employee_types(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     emp_types = EmployeeType.objects.filter(company=company).order_by('id')
     serializer = EmployeeTypeSerializer(emp_types, many=True)
@@ -121,9 +119,7 @@ def get_employee_types(request):
 
 @api_view(['POST'])
 def create_employee_type(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     serializer = EmployeeTypeSerializer(data=request.data)
     if serializer.is_valid():
@@ -135,9 +131,7 @@ def create_employee_type(request):
 
 @api_view(['PUT'])
 def update_employee_type(request, pk):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     obj, err = _get_object_or_404(EmployeeType, pk, company)
     if err:
@@ -155,9 +149,7 @@ def update_employee_type(request, pk):
 
 @api_view(['GET'])
 def get_employees(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     show_deleted = request.query_params.get('show_deleted', 'false').lower() == 'true'
     qs = Employee.objects.filter(company=company)
@@ -173,9 +165,7 @@ def get_employees(request):
 
 @api_view(['POST'])
 def create_employee(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     serializer = EmployeeSerializer(data=request.data, context={'company': company})
     if serializer.is_valid():
@@ -187,9 +177,7 @@ def create_employee(request):
 
 @api_view(['PUT'])
 def update_employee(request, pk):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     obj, err = _get_object_or_404(Employee, pk, company)
     if err:
@@ -207,9 +195,7 @@ def update_employee(request, pk):
 
 @api_view(['GET'])
 def get_crew_assignments(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     qs = CrewAssignment.objects.filter(company=company).select_related(
         'driver', 'conductor', 'cleaner', 'vehicle'
@@ -220,9 +206,7 @@ def get_crew_assignments(request):
 
 @api_view(['POST'])
 def create_crew_assignment(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     serializer_payload = {
         'driver': request.data.get('driver'),
@@ -244,9 +228,7 @@ def create_crew_assignment(request):
 
 @api_view(['PUT'])
 def update_crew_assignment(request, pk):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     obj, err = _get_object_or_404(CrewAssignment, pk, company)
     if err:
@@ -272,9 +254,7 @@ def update_crew_assignment(request, pk):
 
 @api_view(['DELETE'])
 def delete_crew_assignment(request, pk):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     obj, err = _get_object_or_404(CrewAssignment, pk, company)
     if err:
@@ -288,9 +268,7 @@ def delete_crew_assignment(request, pk):
 
 @api_view(['GET'])
 def get_employee_types_dropdown(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     data = list(
         EmployeeType.objects.filter(company=company)
@@ -302,9 +280,7 @@ def get_employee_types_dropdown(request):
 
 @api_view(['GET'])
 def get_employees_by_type_dropdown(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     requested_role = request.query_params.get('type')
     exclude_assigned = request.query_params.get('exclude_assigned', 'false').lower() == 'true'

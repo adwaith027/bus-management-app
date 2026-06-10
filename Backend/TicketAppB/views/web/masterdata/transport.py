@@ -11,7 +11,6 @@ from ....models import BusType, Stage, Route, VehicleType, RouteStage, RouteBusT
 from django.db.models import Count
 from ....serializers.masterdata import BusTypeSerializer, StageSerializer, RouteSerializer, RouteListSerializer, VehicleTypeSerializer
 from ...utils import _get_authenticated_company_admin, _get_object_or_404
-from ..auth import get_user_from_cookie
 
 
 logger = logging.getLogger(__name__)
@@ -21,9 +20,7 @@ logger = logging.getLogger(__name__)
 
 @api_view(['GET'])
 def get_bus_types(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     bus_types = BusType.objects.filter(company=company).order_by('id')
     serializer = BusTypeSerializer(bus_types, many=True)
@@ -32,9 +29,7 @@ def get_bus_types(request):
 
 @api_view(['POST'])
 def create_bus_type(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     serializer = BusTypeSerializer(data=request.data)
     if serializer.is_valid():
@@ -46,9 +41,7 @@ def create_bus_type(request):
 
 @api_view(['PUT'])
 def update_bus_type(request, pk):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     obj, err = _get_object_or_404(BusType, pk, company)
     if err:
@@ -66,9 +59,7 @@ def update_bus_type(request, pk):
 
 @api_view(['GET'])
 def get_stages(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     show_deleted = request.query_params.get('show_deleted', 'false').lower() == 'true'
     qs = Stage.objects.filter(company=company)
@@ -84,9 +75,7 @@ def get_stages(request):
 
 @api_view(['POST'])
 def create_stage(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     serializer = StageSerializer(data=request.data)
     if serializer.is_valid():
@@ -98,9 +87,7 @@ def create_stage(request):
 
 @api_view(['PUT'])
 def update_stage(request, pk):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     obj, err = _get_object_or_404(Stage, pk, company)
     if err:
@@ -118,9 +105,7 @@ def update_stage(request, pk):
 
 @api_view(['GET'])
 def get_routes(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     show_deleted = request.query_params.get('show_deleted', 'false').lower() == 'true'
     qs = Route.objects.filter(company=company)
@@ -139,9 +124,7 @@ def get_routes(request):
 
 @api_view(['GET'])
 def get_route_detail(request, pk):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     obj, err = _get_object_or_404(Route, pk, company)
     if err:
@@ -159,9 +142,7 @@ def get_route_detail(request, pk):
 
 @api_view(['POST'])
 def create_route(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     serializer = RouteSerializer(data=request.data, context={'company': company})
     if serializer.is_valid():
@@ -188,9 +169,7 @@ def create_route(request):
 
 @api_view(['PUT'])
 def update_route(request, pk):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     obj, err = _get_object_or_404(Route, pk, company)
     if err:
@@ -294,9 +273,7 @@ def _save_route_depots(route, depot_ids, company, user):
 
 @api_view(['GET'])
 def get_vehicles(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     show_deleted = request.query_params.get('show_deleted', 'false').lower() == 'true'
     qs = VehicleType.objects.filter(company=company)
@@ -312,9 +289,7 @@ def get_vehicles(request):
 
 @api_view(['POST'])
 def create_vehicle(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     serializer = VehicleTypeSerializer(data=request.data, context={'company': company})
     if serializer.is_valid():
@@ -326,9 +301,7 @@ def create_vehicle(request):
 
 @api_view(['PUT'])
 def update_vehicle(request, pk):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     obj, err = _get_object_or_404(VehicleType, pk, company)
     if err:
@@ -346,9 +319,7 @@ def update_vehicle(request, pk):
 
 @api_view(['GET'])
 def get_bus_types_dropdown(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     data = list(
         BusType.objects.filter(company=company, is_active=True)
@@ -360,9 +331,7 @@ def get_bus_types_dropdown(request):
 
 @api_view(['GET'])
 def get_stages_dropdown(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     data = list(
         Stage.objects.filter(company=company, is_deleted=False)
@@ -374,9 +343,7 @@ def get_stages_dropdown(request):
 
 @api_view(['GET'])
 def get_vehicles_dropdown(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     from ....models import CrewAssignment
     exclude_assigned = request.query_params.get('exclude_assigned', 'false').lower() == 'true'
@@ -396,9 +363,7 @@ def get_vehicles_dropdown(request):
 
 @api_view(['GET'])
 def get_depots_dropdown(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     data = list(
         Depot.objects.filter(company=company)
@@ -412,9 +377,7 @@ def get_depots_dropdown(request):
 
 @api_view(['GET'])
 def get_fare_editor(request, route_id):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     route, err = _get_object_or_404(Route, route_id, company)
     if err:
@@ -488,9 +451,7 @@ def get_fare_editor(request, route_id):
 
 @api_view(['POST'])
 def update_fare_table(request, route_id):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     route, err = _get_object_or_404(Route, route_id, company)
     if err:
@@ -555,9 +516,7 @@ def create_route_wizard(request):
     Creates a route, its stages, and fare data in one atomic transaction.
     Replaces the 3-step wizard flow: route info → fare entry → stage names.
     """
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     data = request.data
     route_code   = str(data.get('route_code', '')).strip()
@@ -723,9 +682,7 @@ def update_route_stage(request, pk):
     Update the stage_name and/or distance for a single RouteStage entry.
     Matches EXE's 'Edit Data > Stage' functionality.
     """
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     try:
         rs = RouteStage.objects.select_related('stage', 'route').get(
@@ -773,9 +730,7 @@ class RouteExcelImportView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request):
-        user = get_user_from_cookie(request)
-        if not user:
-            return Response({'message': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+        user = self.request.user
         if user.role != UserRole.COMPANY_ADMIN:
             return Response({'message': 'Only company admins can import routes.'}, status=status.HTTP_403_FORBIDDEN)
         company = user.company

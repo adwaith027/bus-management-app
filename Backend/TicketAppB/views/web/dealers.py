@@ -19,13 +19,14 @@ from django.conf import settings
 from django.db import transaction
 from rest_framework import status
 from rest_framework.response import Response
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model
 
-from ...models import Dealer, Company, ETMDevice, AuditLog, UserRole
+from ...models import Dealer, Company, ETMDevice, AuditLog, UserRole, UserTier
 from ...serializers.dealers import DealerSerializer
 from ...serializers.company import CompanySerializer
-from .auth import get_user_from_cookie
+from ...permissions import LicensePermission
 from ..utils import _is_superadmin, _is_dealer_admin
 from .audit_logs import log_action
 
@@ -189,19 +190,6 @@ def _populate_dealer_counts(dealer, auth_data):
     dealer.intermediate_user_count = new_inter
     dealer.error_message           = None
 
-    # Compute how much is already allocated to existing companies
-    from django.db.models import Sum
-    allocated = Company.objects.filter(dealer=dealer, is_active=True).aggregate(
-        palmtec  = Sum('palmtec_count'),
-        total    = Sum('total_user_count'),
-        premium  = Sum('premium_user_count'),
-        inter    = Sum('intermediate_user_count'),
-    )
-    dealer.remaining_palmtec_count           = max(0, new_palmtec - _safe_int(allocated['palmtec']))
-    dealer.remaining_total_user_count        = max(0, new_total   - _safe_int(allocated['total']))
-    dealer.remaining_premium_user_count      = max(0, new_premium - _safe_int(allocated['premium']))
-    dealer.remaining_intermediate_user_count = max(0, new_inter   - _safe_int(allocated['inter']))
-
     from .company import check_datetime as _check_datetime
     raw_from = auth_data.get('ProductFromDate')
     raw_to   = auth_data.get('ProductToDate')
@@ -220,14 +208,13 @@ def _populate_dealer_counts(dealer, auth_data):
 # ── Views ─────────────────────────────────────────────────────────────────────
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def create_dealer(request):
     """
     Create a new dealer record (superadmin only).
     Status starts as Pending — call /register-dealer-license/<pk> next.
     """
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
     if not _is_superadmin(user):
         return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -257,7 +244,7 @@ def create_dealer(request):
         email=email,
         password=password,
         role=UserRole.DEALER_ADMIN,
-        tier='none',
+        tier=UserTier.NONE,
         dealer=dealer,
         is_verified=True,
         created_by=user,
@@ -277,15 +264,14 @@ def create_dealer(request):
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def register_dealer_with_license_server(request, pk):
     """
     Step 2 of dealer registration: send dealer details to the license server
     and save the returned customer_id (product_registration_id).
     Superadmin only.
     """
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
     if not _is_superadmin(user):
         return Response({'error': 'Superadmin only'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -326,15 +312,14 @@ def register_dealer_with_license_server(request, pk):
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def validate_dealer_license(request, pk):
     """
     Step 3: start background polling for dealer license approval.
     On approval, populates total counts and initialises remaining pool counts.
     Superadmin only.
     """
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
     if not _is_superadmin(user):
         return Response({'error': 'Superadmin only'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -381,10 +366,9 @@ def validate_dealer_license(request, pk):
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def get_all_dealers(request):
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
     if not _is_superadmin(user):
         return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -394,10 +378,9 @@ def get_all_dealers(request):
 
 
 @api_view(['PUT'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def update_dealer_details(request, pk):
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
     if not _is_superadmin(user):
         return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -423,6 +406,7 @@ def update_dealer_details(request, pk):
 # ── Dealer delete ─────────────────────────────────────────────────────────────
 
 @api_view(['DELETE'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def delete_dealer(request, pk):
     """
     Hard-delete a dealer. Superadmin only.
@@ -436,9 +420,7 @@ def delete_dealer(request, pk):
       - All dealer users soft-deactivated (is_active=False)
       - Dealer record hard-deleted (ETMDevice.dealer → SET_NULL via CASCADE)
     """
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
     if not _is_superadmin(user):
         return Response({'error': 'Superadmin only'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -510,6 +492,7 @@ def update_dealer_mapping(request, pk):
 # ── Dealer Dashboard ──────────────────────────────────────────────────────────
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def dealer_dashboard(request):
     """
     Dealer admin dashboard — companies with per-company device breakdowns.
@@ -517,9 +500,7 @@ def dealer_dashboard(request):
     """
     from django.db.models import Count, Q
 
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
 
     if _is_superadmin(user):
         dealer_id = request.query_params.get('dealer')
@@ -543,10 +524,10 @@ def dealer_dashboard(request):
         ETMDevice.objects.filter(company_id__in=company_ids)
         .values('company_id')
         .annotate(
-            total   = Count('id'),
-            active  = Count('id', filter=Q(allocation_status=ETMDevice.AllocationStatus.ALLOCATED)),
-            pending = Count('id', filter=Q(allocation_status=ETMDevice.AllocationStatus.DEALER_POOL)),
-            expired = Count('id', filter=Q(allocation_status=ETMDevice.AllocationStatus.INACTIVE)),
+            total     = Count('id'),
+            active    = Count('id', filter=Q(allocation_status=ETMDevice.AllocationStatus.ALLOCATED, is_active=True)),
+            pending   = Count('id', filter=Q(allocation_status=ETMDevice.AllocationStatus.DEALER_POOL)),
+            suspended = Count('id', filter=Q(is_active=False)),
         )
     )
     device_map = {row['company_id']: row for row in device_counts}
@@ -556,10 +537,10 @@ def dealer_dashboard(request):
         dc = device_map.get(company.id, {})
         company_dict = CompanySerializer(company).data
         company_dict['devices'] = {
-            'total':   dc.get('total', 0),
-            'active':  dc.get('active', 0),
-            'pending': dc.get('pending', 0),
-            'expired': dc.get('expired', 0),
+            'total':     dc.get('total', 0),
+            'active':    dc.get('active', 0),
+            'pending':   dc.get('pending', 0),
+            'suspended': dc.get('suspended', 0),
         }
         companies_data.append(company_dict)
 
@@ -568,10 +549,11 @@ def dealer_dashboard(request):
         'data': {
             'companies': companies_data,
             'summary': {
-                'total_companies': len(companies_data),
-                'total_devices':   sum(d['devices']['total']   for d in companies_data),
-                'active_devices':  sum(d['devices']['active']  for d in companies_data),
-                'pending_devices': sum(d['devices']['pending'] for d in companies_data),
+                'total_companies':    len(companies_data),
+                'total_devices':      sum(d['devices']['total']     for d in companies_data),
+                'active_devices':     sum(d['devices']['active']    for d in companies_data),
+                'pending_devices':    sum(d['devices']['pending']   for d in companies_data),
+                'suspended_devices':  sum(d['devices']['suspended'] for d in companies_data),
             },
         },
     }, status=status.HTTP_200_OK)
@@ -621,11 +603,8 @@ def _build_dealer_sync_diff(dealer, auth_data):
             "Contact the license server administrator."
         )
 
-    # For dealers, "in use" = already allocated to child companies
-    allocated_palmtec = dealer.palmtec_count - dealer.remaining_palmtec_count
-    allocated_total   = dealer.total_user_count - dealer.remaining_total_user_count
-    allocated_premium = dealer.premium_user_count - dealer.remaining_premium_user_count
-    allocated_inter   = dealer.intermediate_user_count - dealer.remaining_intermediate_user_count
+    # Live-computed allocations from child companies
+    given = dealer.users_given_to_companies
 
     from .company import check_datetime as _check_datetime
     raw_from = auth_data.get('ProductFromDate')
@@ -640,10 +619,11 @@ def _build_dealer_sync_diff(dealer, auth_data):
             'total_user_count':        dealer.total_user_count,
             'premium_user_count':      dealer.premium_user_count,
             'intermediate_user_count': dealer.intermediate_user_count,
-            'remaining_palmtec_count':           dealer.remaining_palmtec_count,
-            'remaining_total_user_count':        dealer.remaining_total_user_count,
-            'remaining_premium_user_count':      dealer.remaining_premium_user_count,
-            'remaining_intermediate_user_count': dealer.remaining_intermediate_user_count,
+            'slots_remaining':            dealer.slots_remaining,
+            'devices_total':              dealer.devices_total,
+            'devices_in_pool':            dealer.devices_in_pool,
+            'devices_at_clients':         dealer.devices_at_clients,
+            'devices_capacity_remaining': dealer.devices_capacity_remaining,
             'product_from_date': str(dealer.product_from_date) if dealer.product_from_date else None,
             'product_to_date':   str(dealer.product_to_date)   if dealer.product_to_date   else None,
         },
@@ -658,25 +638,24 @@ def _build_dealer_sync_diff(dealer, auth_data):
             'authentication_status': auth_data.get('Authenticationstatus'),
         },
         'in_use': {
-            'palmtec_allocated_to_companies': allocated_palmtec,
-            'total_users_allocated':          allocated_total,
-            'premium_users_allocated':        allocated_premium,
-            'intermediate_users_allocated':   allocated_inter,
+            'palmtec_allocated_to_companies': dealer.slots_given_to_companies,
+            'total_users_allocated':          given['total'],
+            'premium_users_allocated':        given['premium'],
+            'intermediate_users_allocated':   given['inter'],
         },
         'error': error,
     }
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def sync_dealer_license(request, pk):
     """
     Dry-run sync for dealer: fetch latest data from license server, return diff.
     Does NOT save. Call /confirm to apply.
     Superadmin and executive only.
     """
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
     if not _is_superadmin(user):
         return Response({'error': 'Superadmin access required.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -698,14 +677,13 @@ def sync_dealer_license(request, pk):
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def sync_dealer_license_confirm(request, pk):
     """
     Apply dealer sync: re-fetch from license server and write new values.
     Updates total counts and recalculates remaining pool.
     """
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
     if not _is_superadmin(user):
         return Response({'error': 'Superadmin access required.'}, status=status.HTTP_403_FORBIDDEN)
 

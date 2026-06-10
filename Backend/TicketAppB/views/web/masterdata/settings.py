@@ -15,9 +15,7 @@ logger = logging.getLogger(__name__)
 
 @api_view(['GET'])
 def get_currencies(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     currencies = Currency.objects.filter(company=company).order_by('id')
     serializer = CurrencySerializer(currencies, many=True)
@@ -26,9 +24,7 @@ def get_currencies(request):
 
 @api_view(['POST'])
 def create_currency(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     serializer = CurrencySerializer(data=request.data)
     if serializer.is_valid():
@@ -40,9 +36,7 @@ def create_currency(request):
 
 @api_view(['PUT'])
 def update_currency(request, pk):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     obj, err = _get_object_or_404(Currency, pk, company)
     if err:
@@ -60,9 +54,7 @@ def update_currency(request, pk):
 
 @api_view(['GET', 'PUT'])
 def get_settings(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     if request.method == 'GET':
         try:
@@ -90,9 +82,7 @@ def get_settings(request):
 @api_view(['GET'])
 def list_company_devices(request):
     """GET /masterdata/device-settings/devices — device picker list."""
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
 
     devices = ETMDevice.objects.filter(
         company=company,
@@ -109,18 +99,14 @@ def list_company_devices(request):
 
 @api_view(['GET'])
 def list_profiles(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
     profiles = SettingsProfile.objects.filter(company=company).order_by('name')
     return Response({'message': 'Success', 'data': SettingsProfileSerializer(profiles, many=True).data}, status=status.HTTP_200_OK)
 
 
 @api_view(['POST'])
 def create_profile(request):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
     serializer = SettingsProfileSerializer(data=request.data)
     if serializer.is_valid():
         serializer.save(company=company, created_by=user)
@@ -130,9 +116,7 @@ def create_profile(request):
 
 @api_view(['GET', 'PUT', 'DELETE'])
 def profile_detail(request, profile_id):
-    user, company, err = _get_authenticated_company_admin(request)
-    if err:
-        return err
+    user, company = _get_authenticated_company_admin(request)
     try:
         profile = SettingsProfile.objects.get(id=profile_id, company=company)
     except SettingsProfile.DoesNotExist:

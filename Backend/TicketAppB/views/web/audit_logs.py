@@ -13,10 +13,12 @@ from datetime import datetime, timedelta
 from django.utils import timezone as tz
 from django.utils.dateparse import parse_date
 from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from ...models import AuditLog
+from ...permissions import LicensePermission
 from ..utils import _is_superadmin
 
 logger = logging.getLogger(__name__)
@@ -87,6 +89,7 @@ def _serialize_entry(entry):
 # ── Views ─────────────────────────────────────────────────────────────────────
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def list_audit_logs(request):
     """
     GET /audit-logs
@@ -101,10 +104,7 @@ def list_audit_logs(request):
       ?page=<int>         — 1-based page number (default 1)
       ?page_size=<int>    — records per page (default 50, max 200)
     """
-    from .auth import get_user_from_cookie
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
     if not _is_superadmin(user):
         return Response({'error': 'Superadmin only'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -167,15 +167,13 @@ def list_audit_logs(request):
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def audit_log_action_types(request):
     """
     GET /audit-logs/action-types
     Returns the list of valid action type choices for frontend filter dropdowns.
     """
-    from .auth import get_user_from_cookie
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
     if not _is_superadmin(user):
         return Response({'error': 'Superadmin only'}, status=status.HTTP_403_FORBIDDEN)
 

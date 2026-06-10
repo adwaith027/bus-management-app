@@ -8,9 +8,10 @@ from django.conf import settings
 from django.db import IntegrityError
 from django.http import JsonResponse
 from django.utils import timezone
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 
-from ..web.auth import get_user_from_request as get_user_from_cookie  # APK: Bearer header
+from ...permissions import LicensePermission
 
 logger = logging.getLogger('ticket.palmtec')
 
@@ -192,10 +193,9 @@ def _parse_odometer_dat(file_path, company_instance, palmtec_id=None):
 
 # POST /ticket-app/apk/upload/odometer-dat
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def uploadOdometerDat(request):
-    user = get_user_from_cookie(request)
-    if not user:
-        return JsonResponse({'error': 'Unauthorized'}, status=401)
+    user = request.user
 
     company = getattr(user, 'company', None)
     if not company:
@@ -231,10 +231,9 @@ def uploadOdometerDat(request):
 
 # POST /ticket-app/apk/upload/expense-dat
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def uploadExpenseDat(request):
-    user = get_user_from_cookie(request)
-    if not user:
-        return JsonResponse({'error': 'Unauthorized'}, status=401)
+    user = request.user
 
     company = getattr(user, 'company', None)
     if not company:

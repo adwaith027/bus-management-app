@@ -1,5 +1,6 @@
 from rest_framework import status
 from rest_framework.response import Response
+from rest_framework.exceptions import AuthenticationFailed, PermissionDenied, ValidationError as DRFValidationError
 from django.core.cache import cache
 from ..models.auth import UserRole
 
@@ -48,25 +49,25 @@ def _get_company(company_id):
 
 
 def _get_authenticated_company_admin(request):
-    from .web.auth import get_user_from_cookie
-    user = get_user_from_cookie(request)
-    if not user:
-        return None, None, Response(
-            {'error': 'Authentication required'},
-            status=status.HTTP_401_UNAUTHORIZED
-        )
+    """
+    Validates that the request comes from an authenticated company_admin with a
+    mapped company. Raises DRF exceptions on failure — DRF catches these
+    automatically and returns the correct HTTP response (401/403/400), so callers
+    never need to check a return value for errors.
+
+    Usage:
+        user, company = _get_authenticated_company_admin(request)
+        # proceed — no error check needed
+    """
+    user = request.user
+    if not user or not user.is_authenticated:
+        raise AuthenticationFailed('Authentication required.')
     if user.role != UserRole.COMPANY_ADMIN:
-        return None, None, Response(
-            {'error': 'Only company admins can access this.'},
-            status=status.HTTP_403_FORBIDDEN
-        )
+        raise PermissionDenied('Only company admins can access this.')
     company = user.company
     if not company:
-        return None, None, Response(
-            {'error': 'No company mapped to this user.'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    return user, company, None
+        raise DRFValidationError({'error': 'No company mapped to this user.'})
+    return user, company
 
 
 def _get_object_or_404(model, pk, company):

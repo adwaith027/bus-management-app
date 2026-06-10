@@ -7,25 +7,25 @@ PUT  /global-settings    → superadmin only — update support contact info
 """
 
 from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from ...models import GlobalSettings
-from .auth import get_user_from_cookie
+from ...permissions import LicensePermission
 from ..utils import _is_superadmin
 
 
 # ── About page (read — any role) ─────────────────────────────────────────────
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def about(request):
     """
     Returns the developer/support contact information shown on every About page.
     Accessible to all authenticated users regardless of role.
     """
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
 
     gs = GlobalSettings.get()
     return Response({
@@ -41,15 +41,14 @@ def about(request):
 # ── GlobalSettings CRUD (superadmin only) ────────────────────────────────────
 
 @api_view(['GET', 'PUT'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def global_settings(request):
     """
     GET  — Return the full GlobalSettings record (superadmin).
     PUT  — Update support contact info (superadmin).
            Accepts any subset of { support_company_name, support_email, support_phone }.
     """
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
     if not _is_superadmin(user):
         return Response({'error': 'Superadmin only'}, status=status.HTTP_403_FORBIDDEN)
 

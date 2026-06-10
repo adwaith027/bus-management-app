@@ -32,7 +32,6 @@ from ....models.master_data import (
 )
 from ....models.operations import ExpenseMaster, Expense, CrewAssignment, InspectorDetails
 from ....models.company import Company
-from ..auth import get_user_from_cookie
 from ...utils import _is_superadmin
 
 
@@ -68,9 +67,7 @@ class MdbImportView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request):
-        user = get_user_from_cookie(request)
-        if not user:
-            return Response({'message': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+        user = self.request.user
         if not _is_superadmin(user):
             return Response({'message': 'Superadmin only.'}, status=status.HTTP_403_FORBIDDEN)
 

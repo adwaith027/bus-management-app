@@ -6,18 +6,10 @@ from datetime import datetime, timedelta
 from .models import (
     RawDataLog, TransactionData, Direction, RouteStage,
     ScheduleData, TripData, Employee, VehicleType,
+    ETMDevice, DeviceRejectionLog, Company,
 )
 from .views.utils import _get_route_for_palmtec
 
-
-@shared_task
-def blacklist_refresh_token(refresh_token_str):
-    from rest_framework_simplejwt.tokens import RefreshToken
-    from rest_framework_simplejwt.exceptions import TokenError
-    try:
-        RefreshToken(refresh_token_str).blacklist()
-    except TokenError:
-        pass
 
 
 def _fail(log, msg):
@@ -54,15 +46,18 @@ def _resolve_schedule(palmtec_id, company_id, schedule_no, schedule_start_date):
     ).first()
 
 
-def _resolve_trip(palmtec_id, company_id, trip_no, trip_start_date):
+def _resolve_trip(palmtec_id, company_id, trip_no, trip_start_date, schedule_no=None):
     if not trip_no or not trip_start_date:
         return None
-    return TripData.objects.filter(
+    qs = TripData.objects.filter(
         palmtec_id=palmtec_id,
         company_code_id=company_id,
         trip_no=trip_no,
         start_date=trip_start_date,
-    ).first()
+    )
+    if schedule_no is not None:
+        qs = qs.filter(schedule_no=schedule_no)
+    return qs.first()
 
 
 def _resolve_employee(employee_code, company_id):
@@ -83,6 +78,53 @@ def _resolve_vehicle(bus_reg_num, company_id):
         company_id=company_id,
         is_deleted=False,
     ).first()
+
+
+def _validate_device(log, palmtec_id_raw, company):
+    """
+    Validate that the device sending this payload:
+      1. Is registered (ETMDevice exists with this palmtec_id under this company)
+      2. Is allocated (not stock/pool/inactive status)
+      3. Is active (not deactivated)
+
+    Returns (device, None) on success.
+    Returns (None, failure_reason_string) and writes DeviceRejectionLog on failure.
+    Caller must call _fail(log, reason) and return if device is None.
+    """
+    try:
+        palmtec_id = int(palmtec_id_raw)
+    except (TypeError, ValueError):
+        return None, f'Invalid palmtec_id format: {palmtec_id_raw}'
+
+    device = ETMDevice.objects.filter(
+        palmtec_id=palmtec_id,
+        company=company,
+        allocation_status=ETMDevice.AllocationStatus.ALLOCATED,
+    ).first()
+
+    if device is None:
+        reason = f'Device lock: palmtec_id={palmtec_id} not registered to company {company.company_id}'
+        DeviceRejectionLog.objects.create(
+            palmtec_id_claimed=palmtec_id,
+            company_id_claimed=company.company_id,
+            raw_payload=log.raw_payload,
+            source=log.source,
+            rejection_reason=DeviceRejectionLog.RejectionReason.DEVICE_NOT_REGISTERED,
+        )
+        return None, reason
+
+    if not device.is_active:
+        reason = f'Device inactive: palmtec_id={palmtec_id} is deactivated'
+        DeviceRejectionLog.objects.create(
+            palmtec_id_claimed=palmtec_id,
+            company_id_claimed=company.company_id,
+            raw_payload=log.raw_payload,
+            source=log.source,
+            rejection_reason=DeviceRejectionLog.RejectionReason.DEVICE_INACTIVE,
+        )
+        return None, reason
+
+    return device, None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -124,6 +166,14 @@ def process_transaction_data(self, log_id):
 
             def _p(i, default=None):
                 return parts[i] if len(parts) > i and parts[i].strip() else default
+
+            # Device lock + inactive check
+            device, lock_reason = _validate_device(log, _p(2), company)
+            if device is None:
+                _fail(log, lock_reason)
+                return
+            device.last_seen_at = timezone.now()
+            device.save(update_fields=['last_seen_at'])
 
             required = {
                 'palmtec_id':    _p(2),
@@ -199,7 +249,7 @@ def process_transaction_data(self, log_id):
             schedule_no     = int(_p(28))
             schedule_start_date = _parse_date(_p(6))
 
-            trip_obj     = _resolve_trip(str(_p(2)), company.id, trip_no, trip_start_date)
+            trip_obj     = _resolve_trip(str(_p(2)), company.id, trip_no, trip_start_date, schedule_no)
             schedule_obj = (trip_obj.schedule_id if trip_obj else None) or \
                            _resolve_schedule(str(_p(2)), company.id, schedule_no, schedule_start_date)
 
@@ -235,8 +285,11 @@ def process_transaction_data(self, log_id):
                         refund_status        = int(_p(23)) if _p(23) else None,
                         refund_amount        = Decimal(_p(24, '0')),
                         bus_no               = _p(27),
+                        bus_id               = _resolve_vehicle(_p(27), company.id),
                         driver               = _p(29),
+                        driver_id            = _resolve_employee(_p(29), company.id),
                         conductor            = _p(30),
+                        conductor_id         = _resolve_employee(_p(30), company.id),
                         up_down_trip         = up_down_trip,
                         trip_start_date      = trip_start_date,
                         trip_start_time      = _parse_time(_p(33)),
@@ -303,6 +356,14 @@ def process_trip_open_data(self, log_id):
             def _p(i, default=None):
                 return parts[i] if len(parts) > i and parts[i].strip() else default
 
+            # Device lock + inactive check
+            device, lock_reason = _validate_device(log, _p(2), company)
+            if device is None:
+                _fail(log, lock_reason)
+                return
+            device.last_seen_at = timezone.now()
+            device.save(update_fields=['last_seen_at'])
+
             required = {'route_code': _p(5), 'trip_no': _p(7)}
             missing = [k for k, v in required.items() if not v]
             if missing:
@@ -336,9 +397,9 @@ def process_trip_open_data(self, log_id):
             bus_obj       = _resolve_vehicle(_p(8),   company.id)
 
             # ── TripData upsert ───────────────────────────────────────────────
-            existing = _resolve_trip(_p(2), company.id, trip_no, start_date)
-            if existing:
-                # Late open arriving after ghost close
+            existing = _resolve_trip(_p(2), company.id, trip_no, start_date, schedule_no)
+            if existing and existing.auto_opened:
+                # Late open arriving after ghost close — fill in the open fields
                 update_fields = ['open_unique_code', 'bus_no', 'bus_id', 'driver', 'driver_id',
                                  'conductor', 'conductor_id', 'up_down_trip', 'start_time',
                                  'start_datetime', 'battery_percentage', 'open_raw_payload', 'updated_at']
@@ -364,6 +425,12 @@ def process_trip_open_data(self, log_id):
                     existing.schedule_start_time = schedule_start_time
                     update_fields += ['schedule_id', 'schedule_no', 'schedule_start_date', 'schedule_start_time']
                 existing.save(update_fields=update_fields)
+            elif existing and not existing.auto_opened:
+                # Duplicate TrpOp for a legitimately opened trip
+                log.status = RawDataLog.statusChoices.DUPLICATE
+                log.error_message = "TrpOp: trip already opened"
+                log.save()
+                return
             else:
                 try:
                     with transaction.atomic():
@@ -443,6 +510,14 @@ def process_trip_close_data(self, log_id):
 
             def _p(i, default=None):
                 return parts[i] if len(parts) > i and parts[i].strip() else default
+
+            # Device lock + inactive check
+            device, lock_reason = _validate_device(log, _p(2), company)
+            if device is None:
+                _fail(log, lock_reason)
+                return
+            device.last_seen_at = timezone.now()
+            device.save(update_fields=['last_seen_at'])
 
             required = {'route_code': _p(4), 'schedule_no': _p(5), 'trip_no': _p(6)}
             missing = [k for k, v in required.items() if not v]
@@ -542,7 +617,7 @@ def process_trip_close_data(self, log_id):
             )
 
             # ── TripData upsert ───────────────────────────────────────────────
-            existing = _resolve_trip(_p(2), company.id, trip_no, start_date)
+            existing = _resolve_trip(_p(2), company.id, trip_no, start_date, schedule_no)
             if existing:
                 for k, v in close_fields.items():
                     setattr(existing, k, v)
@@ -606,6 +681,14 @@ def process_schedule_open_data(self, log_id):
 
             def _p(i, default=None):
                 return parts[i] if len(parts) > i and parts[i].strip() else default
+
+            # Device lock + inactive check
+            device, lock_reason = _validate_device(log, _p(2), company)
+            if device is None:
+                _fail(log, lock_reason)
+                return
+            device.last_seen_at = timezone.now()
+            device.save(update_fields=['last_seen_at'])
 
             if not _p(4):
                 _fail(log, "Missing required fields: schedule_no")
@@ -723,6 +806,14 @@ def process_schedule_close_data(self, log_id):
 
             def _p(i, default=None):
                 return parts[i] if len(parts) > i and parts[i].strip() else default
+
+            # Device lock + inactive check
+            device, lock_reason = _validate_device(log, _p(2), company)
+            if device is None:
+                _fail(log, lock_reason)
+                return
+            device.last_seen_at = timezone.now()
+            device.save(update_fields=['last_seen_at'])
 
             required = {
                 'route_code':  _p(4),
@@ -922,7 +1013,7 @@ def process_trip_close_summary_data(self, log_id):
             )
 
             # ── Idempotency guard ─────────────────────────────────────────────
-            existing = _resolve_trip(_p(2), company.id, trip_no, start_date)
+            existing = _resolve_trip(_p(2), company.id, trip_no, start_date, schedule_no)
             if existing and existing.is_closed:
                 log.status = RawDataLog.statusChoices.DUPLICATE
                 log.error_message = "TrpClSum: trip already closed by TrpCl"
@@ -1216,3 +1307,150 @@ def cleanup_processed_raw_logs():
         processed_at__lt=cutoff,
     ).delete()
     return deleted_count
+
+
+import logging as _logging
+_sweep_logger = _logging.getLogger(__name__)
+
+@shared_task
+def sweep_stale_sessions():
+    """
+    Reconcile DB with Redis. Any UserSession with is_active=True whose Redis
+    cache key no longer exists has expired naturally (TTL elapsed) or was
+    force-logged out. Mark those sessions inactive in the DB so the admin
+    session listing stays accurate.
+    """
+    from django.core.cache import cache
+    from .models import UserSession
+    from .authentication import _CACHE_KEY_PREFIX
+
+    active_sessions = UserSession.objects.filter(is_active=True).values_list(
+        'session_uid', flat=True,
+    )
+
+    stale_ids = []
+    for session_uid in active_sessions:
+        key = f'{_CACHE_KEY_PREFIX}{session_uid}'
+        if not cache.get(key):
+            stale_ids.append(session_uid)
+
+    if stale_ids:
+        updated = UserSession.objects.filter(session_uid__in=stale_ids).update(
+            is_active=False,
+        )
+        _sweep_logger.info(f'sweep_stale_sessions: marked {updated} sessions inactive.')
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# License server polling
+# Moved from company.py threading.Thread to Celery.
+# Called via .delay(company_id) from validate_company_license view.
+# Retries up to 3 times on unexpected failure (not on deliberate status resets).
+# ─────────────────────────────────────────────────────────────────────────────
+
+import logging as _license_logger
+_lic_log = logging.getLogger(__name__) if 'logging' in dir() else __import__('logging').getLogger(__name__)
+
+
+@shared_task(bind=True, max_retries=3)
+def poll_company_license(self, company_id: int) -> None:
+    """
+    Poll the external license server for a company and update its status.
+    Replaces the background threading.Thread in validate_company_license view.
+
+    On Celery worker restart mid-poll: the task is re-queued from the broker
+    (unlike a daemon thread which dies silently on process exit). The `finally`
+    block resets VALIDATING → PENDING so the company is never stuck.
+    """
+    import logging
+    log = logging.getLogger(__name__)
+
+    from .views.web.company import poll_license_authentication, _parse_license_date
+
+    log.info(f'[poll_company_license] Starting for company_id={company_id}')
+
+    try:
+        company = Company.objects.get(id=company_id)
+    except Company.DoesNotExist:
+        log.error(f'[poll_company_license] Company {company_id} not found — aborting')
+        return
+
+    try:
+        auth_result = poll_license_authentication(company.company_id)
+
+        if not auth_result['success']:
+            log.error(f'[poll_company_license] Polling failed for {company_id}: {auth_result.get("error")}')
+            company.authentication_status = Company.AuthStatus.PENDING
+            company.save(update_fields=['authentication_status'])
+            return
+
+        auth_data   = auth_result.get('data', {})
+        auth_status = auth_result['status']
+        log.info(f'[poll_company_license] Result: {auth_status} for company {company.company_name}')
+
+        if auth_status == 'Approve':
+            company.authentication_status = Company.AuthStatus.APPROVED
+        elif auth_status == 'Expired':
+            company.authentication_status = Company.AuthStatus.EXPIRED
+        elif auth_status == 'Block':
+            company.authentication_status = Company.AuthStatus.BLOCKED
+
+        if auth_status == 'Approve':
+            def _safe_int(val, default=0):
+                try:
+                    return int(val or default)
+                except (ValueError, TypeError):
+                    return default
+
+            number_of_licences      = _safe_int(auth_data.get('NumberOfLicence'))
+            palmtec_count           = _safe_int(auth_data.get('PalmtecCount'))
+            total_user_count        = _safe_int(auth_data.get('TotalUserCount'))
+            premium_user_count      = _safe_int(auth_data.get('PremiumUserCount'))
+            intermediate_user_count = _safe_int(auth_data.get('IntermediateUserCount'))
+
+            if number_of_licences > 0 and (palmtec_count + total_user_count) > number_of_licences:
+                log.error(
+                    f'[poll_company_license] License config error for {company.company_name}: '
+                    f'palmtec({palmtec_count}) + users({total_user_count}) > '
+                    f'NumberOfLicence({number_of_licences})'
+                )
+                company.authentication_status = Company.AuthStatus.PENDING
+                company.error_message = (
+                    f'License config error: device slots ({palmtec_count}) + '
+                    f'user slots ({total_user_count}) = {palmtec_count + total_user_count} '
+                    f'exceeds total licensed units ({number_of_licences}). '
+                    'Contact the license server administrator.'
+                )
+                company.save()
+                return
+
+            company.product_registration_id = auth_data.get('ProductRegistrationId')
+            company.unique_identifier        = auth_data.get('UniqueIDentifier')
+            company.product_from_date        = _parse_license_date(auth_data.get('ProductFromDate'))
+            company.product_to_date          = _parse_license_date(auth_data.get('ProductToDate'))
+            company.number_of_licences       = number_of_licences
+            company.palmtec_count            = palmtec_count
+            company.total_user_count         = total_user_count
+            company.premium_user_count       = premium_user_count
+            company.intermediate_user_count  = intermediate_user_count
+            company.error_message            = None
+
+        company.save()
+        log.info(f'[poll_company_license] Updated company {company_id} → {company.authentication_status}')
+
+    except Exception as exc:
+        log.exception(f'[poll_company_license] Unexpected error for company {company_id}: {exc}')
+        raise self.retry(exc=exc, countdown=120)
+
+    finally:
+        # Safety net: if the task ends for any reason while status is still
+        # VALIDATING, reset to PENDING so admins can retry. This also covers
+        # the case where a Celery worker is killed mid-task (on next heartbeat
+        # Celery marks the task as failed and this finally runs on the retry).
+        try:
+            company = Company.objects.get(id=company_id)
+            if company.authentication_status == Company.AuthStatus.VALIDATING:
+                company.authentication_status = Company.AuthStatus.PENDING
+                company.save(update_fields=['authentication_status'])
+        except Exception as e:
+            log.error(f'[poll_company_license] Could not reset VALIDATING for {company_id}: {e}')

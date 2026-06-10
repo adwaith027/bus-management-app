@@ -8,12 +8,13 @@
 
 from rest_framework import status
 from rest_framework.response import Response
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model
 
 from ...models import Company, UserRole
 from ...serializers.company import CompanySerializer
-from .auth import get_user_from_cookie
+from ...permissions import LicensePermission
 from ..utils import _is_superadmin
 
 
@@ -49,6 +50,7 @@ def update_executive_mapping(request, pk):
 # ── Executive Dashboard ───────────────────────────────────────────────────────
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def executive_dashboard(request):
     """
     Executive dashboard.
@@ -59,9 +61,7 @@ def executive_dashboard(request):
 
     Also accessible to superadmin when ?executive=<user_id> is provided.
     """
-    user = get_user_from_cookie(request)
-    if not user:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
 
     if _is_superadmin(user):
         exec_id = request.query_params.get('executive')

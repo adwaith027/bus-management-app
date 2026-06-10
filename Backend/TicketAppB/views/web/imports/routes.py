@@ -9,7 +9,6 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ....models import BusType, Stage, Route, RouteStage, RouteBusType, Fare, UserRole
-from ..auth import get_user_from_cookie
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -28,9 +27,7 @@ IGNORED_COLS = {'ladies', 'senior'}
 # ── Auth helper ───────────────────────────────────────────────────────────────
 
 def _auth(request):
-    user = get_user_from_cookie(request)
-    if not user:
-        return None, None, Response({'message': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+    user = request.user
     if user.role != UserRole.COMPANY_ADMIN:
         return None, None, Response({'message': 'Company admins only.'}, status=status.HTTP_403_FORBIDDEN)
     if not user.company:

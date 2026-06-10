@@ -1,59 +1,101 @@
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework import status
 import secrets
-from ..models import ETMDevice
+from ..models import ETMDevice, DeviceRejectionLog
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.http import HttpResponse
 
 import os
 
-# ---- etm initial data send ----
-# ---- we need to add some sort of flag to the etmdevice so that we know which all fetched intial setup data.we can set its status active ----
-# ---- another is checking if max device limit reached for a company of active devices. ----
+
 @csrf_exempt
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def get_etm_intial_data(request):
-    # to generate not so obvious(secrets module) random 4-digit value
     uniqueIdentifier = secrets.randbelow(exclusive_upper_bound=8999)
     serialNumber = request.GET.get('serialnumber')
+    mosambee_tid = request.GET.get('mosambee_tid')
+
     if not serialNumber:
         return Response({"message": "Serial number is required"}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        etm_object = ETMDevice.objects.get(serial_number=serialNumber)
+        etm_object = ETMDevice.objects.select_related('company').get(serial_number=serialNumber)
     except ETMDevice.DoesNotExist:
         return Response({"message": "Serial number is unmapped"}, status=status.HTTP_404_NOT_FOUND)
 
-    # get company fk from ETMDevice table
-    company_obj = etm_object.company
+    # Gate 1: device must be allocated to a company
+    if etm_object.allocation_status != ETMDevice.AllocationStatus.ALLOCATED:
+        DeviceRejectionLog.objects.create(
+            serial_number_claimed=serialNumber,
+            rejection_reason=DeviceRejectionLog.RejectionReason.NOT_ALLOCATED,
+            source='getEtmSetupDetails',
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
+        return Response({"message": "Device is not allocated to any company."}, status=status.HTTP_403_FORBIDDEN)
+
+    # Gate 2: device must have a company assigned
+    if etm_object.company is None:
+        DeviceRejectionLog.objects.create(
+            serial_number_claimed=serialNumber,
+            rejection_reason=DeviceRejectionLog.RejectionReason.NO_COMPANY,
+            source='getEtmSetupDetails',
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
+        return Response({"message": "Device has no company assigned."}, status=status.HTTP_403_FORBIDDEN)
+
+    # Gate 3: device must be active
+    if not etm_object.is_active:
+        DeviceRejectionLog.objects.create(
+            serial_number_claimed=serialNumber,
+            palmtec_id_claimed=etm_object.palmtec_id,
+            company_id_claimed=etm_object.company.company_id,
+            rejection_reason=DeviceRejectionLog.RejectionReason.DEVICE_INACTIVE,
+            source='getEtmSetupDetails',
+            ip_address=request.META.get('REMOTE_ADDR'),
+        )
+        return Response({"message": "Device is deactivated."}, status=status.HTTP_403_FORBIDDEN)
     
-    # get company details from Company table
+    # to collectively update the fields once the changes/ additions are noted
+    updated_fields=[]
+
+    # Mark setup as fetched (only on first time)
+    if not etm_object.has_fetched_setup:
+        etm_object.has_fetched_setup = True
+        etm_object.setup_fetched_at  = timezone.now()
+        # extend takes iterable, it should be passed inside extend() 
+        updated_fields.extend(['has_fetched_setup', 'setup_fetched_at'])
+
+    if mosambee_tid and not etm_object.mosambee_tid:
+        etm_object.mosambee_tid = mosambee_tid
+        updated_fields.extend(['mosambee_tid'])
+
+    if updated_fields:
+        etm_object.save(update_fields=updated_fields)
+
+    company_obj  = etm_object.company
     customerCode = company_obj.company_id
     try:
         customerCode = int(customerCode)
-    except ValueError:
+    except (ValueError, TypeError):
         pass
-    companyName = company_obj.company_name
-    customerName = company_obj.contact_person
 
-    # get device_type from ETMDevice table
-    devicetype = etm_object.DeviceType.ETM
-    
     licenseUrl = os.environ.get('LICENSE_SERVER_BASE_URL') or 'http://202.88.237.210:8093/LicenceMgmt/public/api'
-    version = os.environ.get('ETM_VERSION')
+    version    = os.environ.get('ETM_VERSION')
 
     data = {
         "upiDeviceSerialNumber": serialNumber,
-        "uniqueIdentifier": str(uniqueIdentifier),
-        "customerCode": customerCode,
-        "customerName": customerName if customerName else companyName,
-        "cLicenseURL": licenseUrl,
-        "versionDetails": version,
-        "devicetype": devicetype,
-        "company": companyName,
-        "date": timezone.now().strftime("%d-%m-%Y %H:%M:%S")
+        "uniqueIdentifier":      str(uniqueIdentifier),
+        "customerCode":          customerCode,
+        "customerName":          company_obj.contact_person or company_obj.company_name,
+        "cLicenseURL":           licenseUrl,
+        "versionDetails":        version,
+        "devicetype":            etm_object.DeviceType.ETM,
+        "company":               company_obj.company_name,
+        "date":                  timezone.now().strftime("%d-%m-%Y %H:%M:%S"),
     }
 
     return Response({"status": "success", "statusCode": status.HTTP_200_OK, "message": "Device Details Fetch Succesfully!", "data": data})

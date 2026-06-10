@@ -17,42 +17,89 @@ from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.db.models import Q as models_Q
 from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from ...models import Company, CustomUser, AuditLog, UserRole
+from ...models import Company, CustomUser, AuditLog, UserRole, UserTier
 from ...serializers.auth import UserSerializer
-from .auth import get_user_from_cookie
+from ...permissions import LicensePermission
 from ..utils import _is_superadmin, _is_dealer_admin, _is_company_admin
 from .audit_logs import log_action
 
 
 User = get_user_model()
 
-_VALID_TIERS = {'basic', 'intermediate', 'premium'}
+_VALID_TIERS = {UserTier.BASIC, UserTier.INTERMEDIATE, UserTier.PREMIUM}
+# 'none' is excluded — it's the unassigned state, not a selectable tier
 
 
 # ── Slot helpers ──────────────────────────────────────────────────────────────
 
-def _check_tier_availability(company, tier):
+def _check_tier_availability(company, new_tier, exclude_user_id=None):
     """
-    Check that the requested tier is licensed for this company.
-    Returns (ok: bool, error: str | None).
+    Check whether a tier slot is available for assignment.
+    Called at user creation and at tier change.
 
-    User creation is unlimited — concurrent login caps are enforced at login time.
-    This check only gates whether the tier itself is configured (count > 0).
+    exclude_user_id: pass the PK of the user being edited so their current
+    tier is not double-counted when changing from one tier to another.
+
+    Returns (ok: bool, error: str | None).
     """
     if not company:
         return True, None
 
-    if company.total_user_count == 0:
-        return False, 'No user licenses allocated for this company. Contact administrator.'
+    qs = CustomUser.objects.filter(
+        company=company,
+        role=UserRole.COMPANY_USER,
+        is_active=True,
+    )
+    if exclude_user_id:
+        qs = qs.exclude(pk=exclude_user_id)
 
-    if tier == 'premium' and company.premium_user_count == 0:
-        return False, 'Premium tier is not available for this company.'
+    # Check total cap first
+    total_limit = company.total_user_count or 0
+    if total_limit > 0:
+        total_assigned = qs.exclude(tier=UserTier.NONE).count()
+        if total_assigned >= total_limit:
+            return False, (
+                f'All user tier slots are in use ({total_assigned}/{total_limit}). '
+                'Remove a tier assignment before adding a new one.'
+            )
 
-    if tier == 'intermediate' and company.intermediate_user_count == 0:
-        return False, 'Intermediate tier is not available for this company.'
+    if new_tier == UserTier.PREMIUM:
+        premium_limit = company.premium_user_count or 0
+        if premium_limit == 0:
+            return False, 'Premium tier is not available for this company.'
+        premium_assigned = qs.filter(tier=UserTier.PREMIUM).count()
+        if premium_assigned >= premium_limit:
+            return False, (
+                f'All premium slots are in use ({premium_assigned}/{premium_limit}). '
+                'Remove a premium user first.'
+            )
+
+    elif new_tier == UserTier.INTERMEDIATE:
+        inter_limit = company.intermediate_user_count or 0
+        if inter_limit == 0:
+            return False, 'Intermediate tier is not available for this company.'
+        inter_assigned = qs.filter(tier=UserTier.INTERMEDIATE).count()
+        if inter_assigned >= inter_limit:
+            return False, (
+                f'All intermediate slots are in use ({inter_assigned}/{inter_limit}). '
+                'Remove an intermediate user first.'
+            )
+
+    elif new_tier == UserTier.BASIC:
+        if total_limit > 0:
+            basic_limit = total_limit - (company.premium_user_count or 0) - (company.intermediate_user_count or 0)
+            basic_assigned = qs.filter(tier=UserTier.BASIC).count()
+            if basic_limit <= 0:
+                return False, 'No basic slots configured for this company.'
+            if basic_assigned >= basic_limit:
+                return False, (
+                    f'All basic slots are in use ({basic_assigned}/{basic_limit}). '
+                    'Remove a basic user or increase total user count.'
+                )
 
     return True, None
 
@@ -64,10 +111,9 @@ _check_user_slot = _check_tier_availability
 # ── Create user ───────────────────────────────────────────────────────────────
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def create_user(request):
-    requester = get_user_from_cookie(request)
-    if not requester:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    requester = request.user
 
     if not request.data:
         return Response({'error': 'Invalid Input'}, status=status.HTTP_400_BAD_REQUEST)
@@ -140,10 +186,12 @@ def create_user(request):
         tier = 'none'
 
     elif role == UserRole.COMPANY_USER:
-        tier = requested_tier if requested_tier in _VALID_TIERS else 'basic'
-        ok, err = _check_tier_availability(company_instance, tier)
-        if not ok:
-            return Response({'error': err}, status=status.HTTP_403_FORBIDDEN)
+        # Default to none — user cannot login until tier assigned by company_admin
+        tier = requested_tier if requested_tier in _VALID_TIERS else UserTier.NONE
+        if tier != UserTier.NONE:
+            ok, err = _check_tier_availability(company_instance, tier)
+            if not ok:
+                return Response({'error': err}, status=status.HTTP_409_CONFLICT)
 
     else:
         tier = 'none'
@@ -178,10 +226,9 @@ def create_user(request):
 # ── List users ────────────────────────────────────────────────────────────────
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def get_all_users(request):
-    requester = get_user_from_cookie(request)
-    if not requester:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    requester = request.user
 
     if _is_superadmin(requester):
         direct_company_ids = Company.objects.filter(client_type='direct').values_list('id', flat=True)
@@ -218,6 +265,7 @@ def get_all_users(request):
 # ── Update user ───────────────────────────────────────────────────────────────
 
 @api_view(['PUT'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def update_user(request, user_id):
     """
     Update username, email, and/or tier for a user.
@@ -230,9 +278,7 @@ def update_user(request, user_id):
     Tier changes are validated against remaining tier slots.
     Role and company cannot be changed here — create a new user instead.
     """
-    requester = get_user_from_cookie(request)
-    if not requester:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    requester = request.user
 
     try:
         target = User.objects.select_related('company', 'dealer').get(pk=user_id)
@@ -276,16 +322,27 @@ def update_user(request, user_id):
     if User.objects.filter(email=new_email).exclude(pk=user_id).exists():
         return Response({'error': 'Email already registered to another user.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # ── Tier change (company_user only — company_admin always has tier=none) ────
+    # ── Tier change (company_user only, company_admin only) ───────────────────
     old_tier = target.tier
     tier_changed = False
     if new_tier and target.role == UserRole.COMPANY_USER:
-        if new_tier not in _VALID_TIERS:
-            return Response({'error': f'Invalid tier. Choose from: {", ".join(_VALID_TIERS)}'}, status=status.HTTP_400_BAD_REQUEST)
+        if new_tier not in _VALID_TIERS and new_tier != UserTier.NONE:
+            return Response(
+                {'error': f'Invalid tier. Choose from: {", ".join(_VALID_TIERS)}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if new_tier != target.tier:
-            ok, err = _check_tier_availability(target.company, new_tier)
-            if not ok:
-                return Response({'error': err}, status=status.HTTP_403_FORBIDDEN)
+            if not _is_company_admin(requester):
+                return Response(
+                    {'error': 'Only company admin can assign or change user tiers.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if new_tier != UserTier.NONE:
+                ok, err = _check_tier_availability(
+                    target.company, new_tier, exclude_user_id=target.pk
+                )
+                if not ok:
+                    return Response({'error': err}, status=status.HTTP_409_CONFLICT)
             target.tier = new_tier
             tier_changed = True
 
@@ -322,6 +379,7 @@ def update_user(request, user_id):
 # ── Activate / Deactivate (soft-delete) ───────────────────────────────────────
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def toggle_user_active(request, user_id):
     """
     Toggle a user's is_active flag.
@@ -330,9 +388,7 @@ def toggle_user_active(request, user_id):
 
     Authorization mirrors update_user.
     """
-    requester = get_user_from_cookie(request)
-    if not requester:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    requester = request.user
 
     try:
         target = User.objects.select_related('company').get(pk=user_id)
@@ -372,6 +428,18 @@ def toggle_user_active(request, user_id):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+    # ── Reactivation checks (inactive → active) ───────────────────────────────
+    if not target.is_active and target.role == UserRole.COMPANY_USER:
+        if not target.tier or target.tier == UserTier.NONE:
+            return Response(
+                {'error': 'Cannot reactivate this user: no tier is assigned. Assign a tier first.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if target.company:
+            ok, err = _check_tier_availability(target.company, target.tier)
+            if not ok:
+                return Response({'error': err}, status=status.HTTP_409_CONFLICT)
+
     was_active = target.is_active
     new_state = not target.is_active
     target.is_active = new_state
@@ -405,6 +473,7 @@ def toggle_user_active(request, user_id):
 # ── Tier / slot capacity ──────────────────────────────────────────────────────
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def user_capacity(request):
     """
     Return tier slot usage and remaining capacity for the requester's company.
@@ -414,9 +483,7 @@ def user_capacity(request):
     superadmin:    ?company_id=<id> query param.
     dealer_admin:  ?company_id=<id> restricted to their dealer.
     """
-    requester = get_user_from_cookie(request)
-    if not requester:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    requester = request.user
 
     if _is_company_admin(requester):
         company = requester.company
@@ -451,9 +518,9 @@ def user_capacity(request):
         role=UserRole.COMPANY_USER,
     ).aggregate(
         total       = Count('id'),
-        basic_count = Count(Case(When(tier='basic',        then=Value(1)), output_field=IntegerField())),
-        inter_count = Count(Case(When(tier='intermediate', then=Value(1)), output_field=IntegerField())),
-        prem_count  = Count(Case(When(tier='premium',      then=Value(1)), output_field=IntegerField())),
+        basic_count = Count(Case(When(tier=UserTier.BASIC,         then=Value(1)), output_field=IntegerField())),
+        inter_count = Count(Case(When(tier=UserTier.INTERMEDIATE, then=Value(1)), output_field=IntegerField())),
+        prem_count  = Count(Case(When(tier=UserTier.PREMIUM,      then=Value(1)), output_field=IntegerField())),
     )
 
     def _remaining(limit, used):
@@ -494,11 +561,10 @@ def user_capacity(request):
 # ── Admin password reset ──────────────────────────────────────────────────────
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated, LicensePermission])
 def change_user_password(request, user_id):
     """Superadmin directly sets a new password for any user (UI button)."""
-    requester = get_user_from_cookie(request)
-    if not requester:
-        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+    requester = request.user
     if requester.role != UserRole.SUPERADMIN:
         return Response({'error': 'Only superadmin can reset another user\'s password.'}, status=status.HTTP_403_FORBIDDEN)
 
