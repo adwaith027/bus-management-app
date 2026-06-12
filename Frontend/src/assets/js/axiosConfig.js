@@ -59,10 +59,12 @@ api.interceptors.response.use(
             return Promise.reject(error);
         }
 
-        // Never intercept auth endpoints — let the calling code handle errors
+        // Never intercept auth/session endpoints — let the calling code handle errors.
+        // /verify-auth is handled by the idle timer's onSessionInvalid callback.
         if (
             error.config?.url?.includes('/login') ||
-            error.config?.url?.includes('/logout')
+            error.config?.url?.includes('/logout') ||
+            error.config?.url?.includes('/verify-auth')
         ) {
             return Promise.reject(error);
         }

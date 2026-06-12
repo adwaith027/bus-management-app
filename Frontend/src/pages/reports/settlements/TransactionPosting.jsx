@@ -425,12 +425,22 @@ export default function TransactionPosting() {
                   <div className="space-y-3">
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <p className="text-xs text-slate-400 uppercase tracking-wider">Transaction ID</p>
+                        <p className="text-xs text-slate-400 uppercase tracking-wider">Ticket Transaction ID</p>
                         <p className="text-sm font-mono mt-0.5">{selectedTxn.transactionID}</p>
                       </div>
                       <div>
+                        <p className="text-xs text-slate-400 uppercase tracking-wider">Application Transaction ID</p>
+                        <p className="text-sm font-mono mt-0.5">{selectedTxn.tgTransactionId || 'N/A'}</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
                         <p className="text-xs text-slate-400 uppercase tracking-wider">Invoice</p>
                         <p className="text-sm font-semibold text-blue-700 mt-0.5">{selectedTxn.invoiceNumber || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-400 uppercase tracking-wider">BQR Merchant ID</p>
+                        <p className="text-sm mt-0.5">{selectedTxn.narration || 'N/A'}</p>
                       </div>
                     </div>
                     <div className="bg-white p-3 rounded-lg border border-blue-100">
@@ -450,7 +460,12 @@ export default function TransactionPosting() {
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <p className="text-xs text-slate-400 uppercase tracking-wider">Card</p>
-                        <p className="text-sm mt-0.5">{selectedTxn.cardType} •••• {selectedTxn.transactionCardNumber?.slice(-4)}</p>
+                        <p className="text-sm mt-0.5">
+                          {selectedTxn.cardType}{' '}
+                          {selectedTxn.transactionCardNumber
+                            ? `${selectedTxn.transactionCardNumber.slice(0, 3)} •••• ${selectedTxn.transactionCardNumber.slice(-4)}`
+                            : 'N/A'}
+                        </p>
                       </div>
                       <div>
                         <p className="text-xs text-slate-400 uppercase tracking-wider">Checksum</p>

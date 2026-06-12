@@ -135,8 +135,11 @@ export default function DeviceDownload() {
   const [routes,         setRoutes]         = useState([]);
   const [routesLoading,  setRoutesLoading]  = useState(false);
   const [selectedRoutes, setSelectedRoutes] = useState([]);
+  const [devices,        setDevices]        = useState([]);
+  const [devicesLoading, setDevicesLoading] = useState(false);
+  const [selectedDevice, setSelectedDevice] = useState('');
   const [downloading,    setDownloading]    = useState(false);
-  const [progress,       setProgress]       = useState([]);  // [{label, status: 'pending'|'done'|'error', file}]
+  const [progress,       setProgress]       = useState([]);
   const [done,           setDone]           = useState(false);
   const [error,          setError]          = useState('');
 
@@ -153,9 +156,21 @@ export default function DeviceDownload() {
       .finally(() => setRoutesLoading(false));
   }, [scheduleSelected]);
 
+  // Fetch device list when settings is ticked
+  const settingsSelected = selected.settings;
+  useEffect(() => {
+    if (!settingsSelected) { setSelectedDevice(''); return; }
+    setDevicesLoading(true);
+    api.get('/get_company_devices')
+      .then(res => setDevices(res.data.data || []))
+      .catch(() => setError('Failed to load devices.'))
+      .finally(() => setDevicesLoading(false));
+  }, [settingsSelected]);
+
   const toggleOption = key => {
     setSelected(prev => ({ ...prev, [key]: !prev[key] }));
     if (key === 'schedule' && selected.schedule) setSelectedRoutes([]);
+    if (key === 'settings' && selected.settings) setSelectedDevice('');
     setDone(false);
     setProgress([]);
     setError('');
@@ -164,7 +179,7 @@ export default function DeviceDownload() {
   const toggleAll = () => {
     const allOn = Object.values(selected).every(Boolean);
     setSelected({ settings: !allOn, schedule: !allOn, crew: !allOn, vehicles: !allOn, expenses: !allOn });
-    if (allOn) setSelectedRoutes([]);
+    if (allOn) { setSelectedRoutes([]); setSelectedDevice(''); }
     setDone(false);
     setProgress([]);
     setError('');
@@ -193,7 +208,7 @@ export default function DeviceDownload() {
 
     // Build ordered task list — settings always first
     const tasks = [];
-    if (selected.settings)  tasks.push({ label: 'Settings (BUS.DAT)',         endpoint: '/device/settings',               filename: 'BUS.DAT'          });
+    if (selected.settings)  tasks.push({ label: 'Settings (BUS.DAT)',         endpoint: `/device/settings?serialnumber=${encodeURIComponent(selectedDevice)}`, filename: 'BUS.DAT'          });
     if (selected.crew)      tasks.push({ label: 'Driver Schedule (CREW.DAT)', endpoint: '/device/crew',                   filename: 'CREW.DAT'         });
     if (selected.vehicles)  tasks.push({ label: 'Vehicle Details (VEHICLE.DAT)', endpoint: '/device/vehicles',            filename: 'VEHICLE.DAT'      });
     if (selected.expenses)  tasks.push({ label: 'Expense Details (EXPENSEDET.DAT)', endpoint: '/device/expenses',         filename: 'EXPENSEDET.DAT'   });
@@ -272,6 +287,31 @@ export default function DeviceDownload() {
                   <p className="text-xs text-slate-400">{opt.desc}</p>
                 </div>
               </label>
+
+              {/* Device selection row — shown inline when Settings is checked */}
+              {opt.key === 'settings' && selected.settings && (
+                <div className="px-5 pb-4 ml-8">
+                  {devicesLoading ? (
+                    <p className="text-xs text-slate-400">Loading devices…</p>
+                  ) : devices.length === 0 ? (
+                    <p className="text-xs text-red-500">No allocated devices found for this company.</p>
+                  ) : (
+                    <select
+                      value={selectedDevice}
+                      onChange={e => setSelectedDevice(e.target.value)}
+                      className="text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-600
+                        hover:border-slate-400 focus:outline-none focus:border-slate-500 bg-white"
+                    >
+                      <option value="">Choose device…</option>
+                      {devices.map(d => (
+                        <option key={d.id} value={d.serial_number}>
+                          {d.serial_number}{d.palmtec_id ? ` (${d.palmtec_id})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              )}
 
               {/* Route selection row — shown inline when Schedule is checked */}
               {opt.key === 'schedule' && selected.schedule && (
@@ -362,7 +402,12 @@ export default function DeviceDownload() {
       {/* Download button */}
       <button
         onClick={handleDownloadClick}
-        disabled={!anySelected || downloading || (scheduleSelected && selectedRoutes.length === 0 && !showRouteModal)}
+        disabled={
+          !anySelected ||
+          downloading ||
+          (scheduleSelected && selectedRoutes.length === 0) ||
+          (settingsSelected && !selectedDevice)
+        }
         className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-slate-800 text-white
           text-sm font-semibold rounded-xl hover:bg-slate-700 transition-colors
           disabled:opacity-40 disabled:cursor-not-allowed"
@@ -373,6 +418,9 @@ export default function DeviceDownload() {
         {downloading ? 'Downloading…' : 'Download'}
       </button>
 
+      {settingsSelected && !selectedDevice && !downloading && (
+        <p className="text-xs text-slate-400 text-center mt-2">Select a device to download Settings (BUS.DAT).</p>
+      )}
       {scheduleSelected && selectedRoutes.length === 0 && !downloading && (
         <p className="text-xs text-slate-400 text-center mt-2">Select at least one route to download schedule files.</p>
       )}
