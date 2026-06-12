@@ -80,6 +80,82 @@ def _resolve_vehicle(bus_reg_num, company_id):
     ).first()
 
 
+def _get_or_create_ghost_schedule(palmtec_id, company, schedule_no, schedule_start_date,
+                                   schedule_start_time, ghost_note):
+    """
+    Return the ScheduleData for this (palmtec_id, company, schedule_no, start_date).
+    If it doesn't exist yet, create a ghost row (auto_opened=True) so downstream
+    FKs have something to point at.  On concurrent-worker IntegrityError, re-fetch.
+    """
+    existing = _resolve_schedule(palmtec_id, company.id, schedule_no, schedule_start_date)
+    if existing:
+        return existing
+    start_datetime = (
+        timezone.make_aware(datetime.combine(schedule_start_date, schedule_start_time))
+        if schedule_start_date and schedule_start_time else None
+    )
+    try:
+        with transaction.atomic():
+            return ScheduleData.objects.create(
+                palmtec_id     = palmtec_id,
+                schedule_no    = schedule_no,
+                start_date     = schedule_start_date,
+                start_time     = schedule_start_time,
+                start_datetime = start_datetime,
+                auto_opened    = True,
+                ghost_note     = ghost_note,
+                company_code   = company,
+            )
+    except IntegrityError:
+        return _resolve_schedule(palmtec_id, company.id, schedule_no, schedule_start_date)
+
+
+def _get_or_create_ghost_trip(palmtec_id, company, route, schedule_obj,
+                               schedule_no, schedule_start_date, schedule_start_time,
+                               trip_no, start_date, start_time,
+                               bus_no, bus_obj, driver, driver_obj,
+                               conductor, conductor_obj, ghost_note):
+    """
+    Return the TripData for this (palmtec_id, company, schedule_no, trip_no, start_date).
+    If it doesn't exist yet, create a ghost row (auto_opened=True, is_closed=False)
+    with whatever fields the calling event already knows.
+    On concurrent-worker IntegrityError, re-fetch.
+    """
+    existing = _resolve_trip(palmtec_id, company.id, trip_no, start_date, schedule_no)
+    if existing:
+        return existing
+    start_datetime = (
+        timezone.make_aware(datetime.combine(start_date, start_time))
+        if start_date and start_time else None
+    )
+    try:
+        with transaction.atomic():
+            return TripData.objects.create(
+                palmtec_id          = palmtec_id,
+                route_id            = route,
+                schedule_id         = schedule_obj,
+                schedule_no         = schedule_no,
+                schedule_start_date = schedule_start_date,
+                schedule_start_time = schedule_start_time,
+                trip_no             = trip_no,
+                start_date          = start_date,
+                start_time          = start_time,
+                start_datetime      = start_datetime,
+                bus_no              = bus_no,
+                bus_id              = bus_obj,
+                driver              = driver,
+                driver_id           = driver_obj,
+                conductor           = conductor,
+                conductor_id        = conductor_obj,
+                is_closed           = False,
+                auto_opened         = True,
+                ghost_note          = ghost_note,
+                company_code        = company,
+            )
+    except IntegrityError:
+        return _resolve_trip(palmtec_id, company.id, trip_no, start_date, schedule_no)
+
+
 def _validate_device(log, palmtec_id_raw, company):
     """
     Validate that the device sending this payload:
@@ -249,9 +325,48 @@ def process_transaction_data(self, log_id):
             schedule_no     = int(_p(28))
             schedule_start_date = _parse_date(_p(6))
 
-            trip_obj     = _resolve_trip(str(_p(2)), company.id, trip_no, trip_start_date, schedule_no)
-            schedule_obj = (trip_obj.schedule_id if trip_obj else None) or \
-                           _resolve_schedule(str(_p(2)), company.id, schedule_no, schedule_start_date)
+            # ── Resolve or ghost-create schedule ─────────────────────────────
+            # Ticket carries schedule_no + schedule_start_date/time — enough to
+            # create a ghost ScheduleData if ShdOpn hasn't arrived yet.
+            schedule_obj = _resolve_schedule(str(_p(2)), company.id, schedule_no, schedule_start_date)
+            if not schedule_obj and schedule_no and schedule_start_date:
+                schedule_obj = _get_or_create_ghost_schedule(
+                    palmtec_id          = str(_p(2)),
+                    company             = company,
+                    schedule_no         = schedule_no,
+                    schedule_start_date = schedule_start_date,
+                    schedule_start_time = _parse_time(_p(7)),
+                    ghost_note          = "Ticket received; ShdOpn missing",
+                )
+
+            # ── Resolve or ghost-create trip ──────────────────────────────────
+            # Ticket carries trip_no + trip_start_date/time, bus, crew — enough
+            # to create a ghost TripData if TrpOp hasn't arrived yet.
+            trip_obj = _resolve_trip(str(_p(2)), company.id, trip_no, trip_start_date, schedule_no)
+            if not trip_obj and trip_no and trip_start_date:
+                trip_obj = _get_or_create_ghost_trip(
+                    palmtec_id          = str(_p(2)),
+                    company             = company,
+                    route               = route,
+                    schedule_obj        = schedule_obj,
+                    schedule_no         = schedule_no,
+                    schedule_start_date = schedule_start_date,
+                    schedule_start_time = _parse_time(_p(7)),
+                    trip_no             = trip_no,
+                    start_date          = trip_start_date,
+                    start_time          = _parse_time(_p(33)),
+                    bus_no              = _p(27),
+                    bus_obj             = _resolve_vehicle(_p(27), company.id),
+                    driver              = _p(29),
+                    driver_obj          = _resolve_employee(_p(29), company.id),
+                    conductor           = _p(30),
+                    conductor_obj       = _resolve_employee(_p(30), company.id),
+                    ghost_note          = "Ticket received; TrpOp missing",
+                )
+
+            # Keep schedule_obj in sync with whatever the trip resolved to
+            if trip_obj and trip_obj.schedule_id:
+                schedule_obj = trip_obj.schedule_id
 
             try:
                 with transaction.atomic():
@@ -391,10 +506,23 @@ def process_trip_open_data(self, log_id):
             battery             = int(_p(15)) if _p(15) else None
 
             # ── Resolve FKs ───────────────────────────────────────────────────
-            schedule_obj  = _resolve_schedule(_p(2), company.id, schedule_no, schedule_start_date)
             driver_obj    = _resolve_employee(_p(9),  company.id)
             conductor_obj = _resolve_employee(_p(10), company.id)
             bus_obj       = _resolve_vehicle(_p(8),   company.id)
+
+            # ── Resolve or ghost-create schedule ─────────────────────────────
+            # TrpOp carries schedule_no + schedule_start_date/time — enough to
+            # create a ghost ScheduleData if ShdOpn hasn't arrived yet.
+            schedule_obj = _resolve_schedule(_p(2), company.id, schedule_no, schedule_start_date)
+            if not schedule_obj and schedule_no and schedule_start_date:
+                schedule_obj = _get_or_create_ghost_schedule(
+                    palmtec_id          = _p(2),
+                    company             = company,
+                    schedule_no         = schedule_no,
+                    schedule_start_date = schedule_start_date,
+                    schedule_start_time = schedule_start_time,
+                    ghost_note          = "TrpOp received; ShdOpn missing",
+                )
 
             # ── TripData upsert ───────────────────────────────────────────────
             existing = _resolve_trip(_p(2), company.id, trip_no, start_date, schedule_no)
@@ -402,19 +530,21 @@ def process_trip_open_data(self, log_id):
                 # Late open arriving after ghost close — fill in the open fields
                 update_fields = ['open_unique_code', 'bus_no', 'bus_id', 'driver', 'driver_id',
                                  'conductor', 'conductor_id', 'up_down_trip', 'start_time',
-                                 'start_datetime', 'battery_percentage', 'open_raw_payload', 'updated_at']
-                existing.open_unique_code  = _p(1)
-                existing.bus_no            = _p(8)
-                existing.bus_id            = bus_obj
-                existing.driver            = _p(9)
-                existing.driver_id         = driver_obj
-                existing.conductor         = _p(10)
-                existing.conductor_id      = conductor_obj
-                existing.up_down_trip      = up_down_trip
-                existing.start_time        = start_time
-                existing.start_datetime    = start_datetime
+                                 'start_datetime', 'battery_percentage', 'open_raw_payload',
+                                 'auto_opened', 'updated_at']
+                existing.open_unique_code   = _p(1)
+                existing.bus_no             = _p(8)
+                existing.bus_id             = bus_obj
+                existing.driver             = _p(9)
+                existing.driver_id          = driver_obj
+                existing.conductor          = _p(10)
+                existing.conductor_id       = conductor_obj
+                existing.up_down_trip       = up_down_trip
+                existing.start_time         = start_time
+                existing.start_datetime     = start_datetime
                 existing.battery_percentage = battery
-                existing.open_raw_payload  = log.raw_payload
+                existing.open_raw_payload   = log.raw_payload
+                existing.auto_opened        = False
                 if existing.ghost_note:
                     existing.ghost_note = None
                     update_fields.append('ghost_note')
@@ -426,11 +556,19 @@ def process_trip_open_data(self, log_id):
                     update_fields += ['schedule_id', 'schedule_no', 'schedule_start_date', 'schedule_start_time']
                 existing.save(update_fields=update_fields)
             elif existing and not existing.auto_opened:
-                # Duplicate TrpOp for a legitimately opened trip
-                log.status = RawDataLog.statusChoices.DUPLICATE
-                log.error_message = "TrpOp: trip already opened"
-                log.save()
-                return
+                # Machine restart: same device/trip/date, different unique_code.
+                # Original open fields (start_time, battery, crew, open_raw_payload)
+                # must not change — existing tickets reference them. Record the
+                # re-open in ghost_note only; full payload preserved in raw_data_log.
+                note = (
+                    f"re-opened: machine restart | reopen_code={_p(1)}"
+                    f" | at={timezone.now().isoformat()}"
+                )
+                existing.ghost_note = (
+                    existing.ghost_note + " | " + note
+                    if existing.ghost_note else note
+                )
+                existing.save(update_fields=['ghost_note', 'updated_at'])
             else:
                 try:
                     with transaction.atomic():
@@ -714,24 +852,40 @@ def process_schedule_open_data(self, log_id):
             ).first()
 
             if existing:
-                # Late open arriving after ghost close — fill open fields
-                existing.open_unique_code = _p(1)
-                existing.driver           = _p(7)
-                existing.driver_id        = driver_obj
-                existing.conductor        = _p(8)
-                existing.conductor_id     = conductor_obj
-                existing.bus_no           = _p(9)
-                existing.bus_id           = bus_obj
-                existing.start_time       = start_time
-                existing.start_datetime   = start_datetime
-                existing.battery_open     = battery
-                existing.open_raw_payload = log.raw_payload
-                existing.ghost_note       = None
-                existing.save(update_fields=[
-                    'open_unique_code', 'driver', 'driver_id', 'conductor', 'conductor_id',
-                    'bus_no', 'bus_id', 'start_time', 'start_datetime', 'battery_open',
-                    'open_raw_payload', 'ghost_note', 'updated_at',
-                ])
+                if existing.auto_opened:
+                    # Ghost schedule (ShdCls arrived before ShdOpn) — fill in the open fields
+                    existing.open_unique_code = _p(1)
+                    existing.driver           = _p(7)
+                    existing.driver_id        = driver_obj
+                    existing.conductor        = _p(8)
+                    existing.conductor_id     = conductor_obj
+                    existing.bus_no           = _p(9)
+                    existing.bus_id           = bus_obj
+                    existing.start_time       = start_time
+                    existing.start_datetime   = start_datetime
+                    existing.battery_open     = battery
+                    existing.open_raw_payload = log.raw_payload
+                    existing.ghost_note       = None
+                    existing.auto_opened      = False
+                    existing.save(update_fields=[
+                        'open_unique_code', 'driver', 'driver_id', 'conductor', 'conductor_id',
+                        'bus_no', 'bus_id', 'start_time', 'start_datetime', 'battery_open',
+                        'open_raw_payload', 'ghost_note', 'auto_opened', 'updated_at',
+                    ])
+                else:
+                    # Machine restart: same device/schedule/date, different unique_code.
+                    # Original open fields (start_time, battery, crew, open_raw_payload)
+                    # must not change — existing tickets reference them. Record the
+                    # re-open in ghost_note only; full payload preserved in raw_data_log.
+                    note = (
+                        f"re-opened: machine restart | reopen_code={_p(1)}"
+                        f" | at={timezone.now().isoformat()}"
+                    )
+                    existing.ghost_note = (
+                        existing.ghost_note + " | " + note
+                        if existing.ghost_note else note
+                    )
+                    existing.save(update_fields=['ghost_note', 'updated_at'])
             else:
                 try:
                     with transaction.atomic():
