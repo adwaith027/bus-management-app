@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from django.db.models import Q, Sum, Count
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
-from ...models import TransactionData, TripData, ScheduleData, Stage, ExpenseData, Route, RouteStage, VehicleType
+from ...models import TransactionData, TripData, ScheduleData, Stage, ExpenseData, Route, RouteStage, VehicleType, MosambeeTransaction
 from ...permissions import LicensePermission
 from ..utils import _meets_tier, _TIER_ERROR
 
@@ -863,3 +863,43 @@ def expense_report(request):
             for date in all_dates
         ]
     })
+
+
+# GET /reports/mosambee-transactions
+# Mosambee transaction posting data for the company on a given date.
+# Params: date (YYYY-MM-DD)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
+def mosambee_transaction_report(request):
+    user = request.user
+    date_str = request.GET.get('date')
+    if not date_str:
+        return Response({'error': 'date is required'}, status=400)
+
+    qs = MosambeeTransaction.objects.filter(
+        company=user.company,
+        transaction_date=date_str,
+    ).order_by('transaction_datetime')
+
+    records = [
+        {
+            'Application Transaction ID': t.tgTransactionId,
+            'Ticket Transaction ID': str(t.transactionID),
+            'BQR Merchant ID': t.narration,
+            'Ticket Date': '',
+            'Ticket Time': '',
+            'Ticket Number': '',
+            'Palmtec ID': '',
+            'Payer ID': (
+                t.transactionCardNumber[:3]
+                + 'x' * (len(t.transactionCardNumber) - 7)
+                + t.transactionCardNumber[-4:]
+                if t.transactionCardNumber and len(t.transactionCardNumber) > 7
+                else t.transactionCardNumber
+            ),
+            'Transaction Amount': str(t.transactionAmount),
+        }
+        for t in qs
+    ]
+
+    return Response({'date': date_str, 'data': records})

@@ -97,6 +97,15 @@ class MosambeeTransaction(models.Model):
     first_received_at = models.DateTimeField(auto_now_add=True)
     last_received_at = models.DateTimeField(auto_now=True)
     
+    company = models.ForeignKey(
+        'Company',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='mosambee_transactions',
+        db_index=True,
+    )
+
     name = models.CharField(max_length=100)
     merchantId = models.CharField(max_length=45, db_index=True)
     businessName = models.CharField(max_length=100, null=True, blank=True)
@@ -243,6 +252,15 @@ class MosambeeTransaction(models.Model):
 
 
 class MosambeePayoutCallback(models.Model):
+    company = models.ForeignKey(
+        'Company',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='mosambee_payout_callbacks',
+        db_index=True,
+    )
+
     statementId = models.CharField(max_length=150, unique=True, db_index=True)
     payoutAmount = models.DecimalField(max_digits=15, decimal_places=2)
     utrNumber = models.CharField(max_length=150, db_index=True)

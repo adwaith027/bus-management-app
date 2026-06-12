@@ -33,6 +33,8 @@ class MosambeeTransactionSerializer(serializers.ModelSerializer):
             'payment_status_display',
             'invoiceNumber',
             'billNumber',
+            'tgTransactionId',
+            'narration',
             'related_ticket_number',
             'related_ticket_amount',
             'related_ticket_date',

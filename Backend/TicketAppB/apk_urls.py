@@ -27,7 +27,8 @@ urlpatterns = [
     path('reports/bus-summary',   apk_views.bus_summary_report,   name='apk_bus_summary'),
     path('reports/payment-type',  apk_views.payment_type_report,  name='apk_payment_type'),
     path('reports/farewise',      apk_views.farewise_report,      name='apk_farewise'),
-    path('reports/expense',       apk_views.expense_report,       name='apk_expense'),
+    path('reports/expense',                apk_views.expense_report,                name='apk_expense'),
+    path('reports/mosambee-transactions',  apk_views.mosambee_transaction_report,   name='apk_mosambee_transactions'),
 
     # etm version for apk
     path('device/getEtmVersion', setup_data_views.get_etm_device_version_for_apk),
@@ -38,7 +39,8 @@ urlpatterns = [
     path('device/crew',        apk_download_views.get_crew_file),
     path('device/vehicles',    apk_download_views.get_vehicles_file),
     path('device/expenses',    apk_download_views.get_expenses_file),
-    # Route group
+    # Route group — individual files or single bundled ZIP
+    path('device/masterdata',  apk_download_views.get_masterdata_bundle),
     path('device/routelst',    apk_download_views.get_routelst_file),
     path('device/stagelst',    apk_download_views.get_stagelst_file),
     path('device/languagedat', apk_download_views.get_languagedat_file),
