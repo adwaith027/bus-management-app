@@ -71,7 +71,8 @@ urlpatterns = [
     path('delete-depoteva/<int:pk>', depot_views.delete_depot, name='delete_depot'),
 
     # palmtec initial setup data
-    path('getEtmSetupDetails',setup_data_views.get_etm_intial_data),
+    path('getEtmSetupDetails', setup_data_views.get_etm_intial_data),
+    path('get_company_devices', setup_data_views.get_company_devices_for_download),
 
     # ticket data — device push (ETM → server)
     path('getScheduleOpen', palmtec_ingest.getScheduleOpenDataFromDevice, name='get_schedule_open_data'),

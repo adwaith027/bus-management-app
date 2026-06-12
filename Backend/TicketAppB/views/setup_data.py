@@ -1,9 +1,10 @@
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 import secrets
 from ..models import ETMDevice, DeviceRejectionLog
+from ..permissions import LicensePermission
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.http import HttpResponse
@@ -101,7 +102,41 @@ def get_etm_intial_data(request):
     return Response({"status": "success", "statusCode": status.HTTP_200_OK, "message": "Device Details Fetch Succesfully!", "data": data})
 
 
+
+
 # ---- send etm version to apk ----
 @api_view(["GET"])
+@permission_classes([AllowAny])
 def get_etm_device_version_for_apk(request):
-    return "PVT_GEN_12"
+    return HttpResponse("PVT_GEN_12", content_type="text/plain")
+
+
+# ---- list allocated devices for web download page picker ----
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
+def get_company_devices_for_download(request):
+    """
+    GET /get_company_devices
+    Returns allocated devices for the logged-in company admin.
+    Used by the web Device Download page to populate the device selector.
+    """
+    user = request.user
+    company = getattr(user, 'company', None)
+    if not company:
+        return Response({'error': 'No company associated with this account.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    devices = ETMDevice.objects.filter(
+        company=company,
+        allocation_status=ETMDevice.AllocationStatus.ALLOCATED,
+        is_active=True,
+    ).order_by('palmtec_id')
+
+    data = [
+        {
+            'id': d.id,
+            'serial_number': d.serial_number,
+            'palmtec_id': d.palmtec_id,
+        }
+        for d in devices
+    ]
+    return Response({'message': 'success', 'data': data}, status=status.HTTP_200_OK)
