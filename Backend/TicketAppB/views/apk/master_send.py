@@ -1,4 +1,6 @@
+import io
 import struct
+import zipfile
 import logging
 from django.http import HttpResponse, JsonResponse
 from ...models import Settings, Route, Employee, VehicleType, ExpenseMaster, Stage, Fare, Currency, RouteStage, Company, SettingsProfile, ETMDevice
@@ -46,93 +48,97 @@ def _i(val):
 
 # ─── File packers ──────────────────────────────────────────────────────────────
 
-def _pack_busdat(s):
+def _pack_busdat(p, cs):
     """
-    Build BUS.DAT binary from Settings model.
+    Build BUS.DAT binary from SettingsProfile (p) + company Settings (cs).
     Structure: SETUP (~640 bytes) + HARDWARE_SETUP (64 bytes) = 704 bytes total.
     Matches VB6 Type SETUP + HARDWARE_SETUP definitions in mdFunctions.bas.
+
+    p  = SettingsProfile  — per-device fields (passwords, display text, fare %, flags)
+    cs = Settings         — company-level fields (connectivity, currency, ph_no2/3, etc.)
+                            May be None if company has no Settings record; falls back to zeros.
     """
     # ── SETUP section ──────────────────────────────────────────────────────────
-    data  = _s(s.main_display, 18)
-    data += _s(s.main_display2, 23)
-    data += _s(s.header1, 32)
-    data += _s(s.header2, 32)
-    data += _s(s.header3, 32)
-    data += _s(s.footer1, 32)
-    data += _s(s.footer2, 32)
+    data  = _s(p.main_display, 18)
+    data += _s(p.main_display2, 23)
+    data += _s(p.header1, 32)
+    data += _s(p.header2, 32)
+    data += _s(p.header3, 32)
+    data += _s(p.footer1, 32)
+    data += _s(p.footer2, 32)
     data += b'\x00'                          # PaperFeed
-    data += _s('', 6)                          # palmtec_id moved to SettingsProfile
+    data += _s(str(p.palmtec_id), 6)        # PalmtecID — from SettingsProfile
     data += b'\x00'                          # DefaultFull
-    data += _b(s.half_per)
-    data += _b(s.con_per)
-    data += _f(s.st_max_amt)
-    data += _f(s.st_min_con)
-    data += _b(s.phy_per)
+    data += _b(p.half_per)
+    data += _b(p.con_per)
+    data += _f(p.st_max_amt)
+    data += _f(cs.st_min_con if cs else 0)  # company Settings
+    data += _b(p.phy_per)
     data += b'\x00'                          # LuggageUnitRateEdit
-    data += _f(s.luggage_unit_rate)
-    data += _b(s.stage_updation_msg)
+    data += _f(p.luggage_unit_rate)
+    data += _b(p.stage_updation_msg)
     data += b'\x00'                          # StageDisplayFont
     data += b'\x00'                          # UseDuplicate
     data += b'\x00'                          # UseDup1
-    data += _bool(s.roundoff)
-    data += _bool(s.round_up)
-    data += _s(s.currency, 8)
-    data += _i(s.round_amt)
+    data += _bool(p.roundoff)
+    data += _bool(p.round_up)
+    data += _s(cs.currency if cs else '', 8) # company Settings
+    data += _i(p.round_amt)
     data += b'\x00'                          # ucbAdjust
     data += b'\x00'                          # ucbReviewPasswd
     data += b'\x00'                          # ucbReportPasswd
     data += b'\x00'                          # ucbSTFromStage
-    data += _bool(s.st_fare_edit)
-    data += _s(s.master_pwd, 11)             # cMasterClearPassword
-    data += _b(s.report_flag)
-    data += _bool(s.next_fare_flag)
-    data += _b(s.stage_updation_msg)         # UpdateStageMsg
-    data += _bool(s.remove_ticket_flag)
-    data += _bool(s.stage_font_flag)
+    data += _bool(p.st_fare_edit)
+    data += _s(p.master_pwd, 11)             # cMasterClearPassword
+    data += _b(cs.report_flag if cs else 0) # company Settings
+    data += _bool(p.next_fare_flag)
+    data += _b(p.stage_updation_msg)         # UpdateStageMsg
+    data += _bool(p.remove_ticket_flag)
+    data += _bool(p.stage_font_flag)
     data += b'\x00'                          # EnableStageDefault
     data += b'\x00'                          # PrinterSel
-    data += _bool(s.odometer_entry)
-    data += _bool(s.ticket_no_big_font)
-    data += _bool(s.crew_check)
-    data += b'\x00' * 13                       # PhNo (no ph_no field in Settings model)
+    data += _bool(p.odometer_entry)
+    data += _bool(p.ticket_no_big_font)
+    data += _bool(p.crew_check)
+    data += b'\x00' * 13                     # PhNo (zeroed — device uses its own)
     data += b'\x00'                          # TripSMS
-    data += _bool(s.schedulesend_enable)     # ScheduleSMS
+    data += _bool(p.schedulesend_enable)     # ScheduleSMS
     data += b'\x00'                          # TicketRpt
     data += b'\x00'                          # Busno
     data += b'\x00'                          # Driver
     data += b'\x00'                          # Conductor
-    data += _bool(s.inspect_rpt)
+    data += _bool(p.inspect_rpt)
     data += b'\x00'                          # RepeatST
-    data += b'\x01' if s.sendbill_enable == '1' else b'\x00'
-    data += _bool(s.tripsend_enable)
-    data += _bool(s.schedulesend_enable)
-    data += _bool(s.sendpend)
-    data += _s(s.ph_no2, 13)                 # PhNo2
-    data += _s(s.access_point, 24)
-    data += _s(s.dest_adds, 32)
-    data += _s(s.username, 16)
-    data += _s(s.password, 16)
-    data += _s(s.uploadpath, 32)
-    data += _s(s.downloadpath, 32)
-    data += _s(s.http_url, 64)
-    data += _bool(s.gprs_enable)
+    data += b'\x01' if (cs and cs.sendbill_enable == '1') else b'\x00'  # company Settings
+    data += _bool(p.tripsend_enable)
+    data += _bool(p.schedulesend_enable)
+    data += _bool(cs.sendpend if cs else False)  # company Settings
+    data += _s(cs.ph_no2 if cs else '', 13)      # company Settings
+    data += _s(cs.access_point if cs else '', 24) # company Settings
+    data += _s(cs.dest_adds if cs else '', 32)    # company Settings
+    data += _s(cs.username if cs else '', 16)     # company Settings
+    data += _s(cs.password if cs else '', 16)     # company Settings
+    data += _s(cs.uploadpath if cs else '', 32)   # company Settings
+    data += _s(cs.downloadpath if cs else '', 32) # company Settings
+    data += _s(cs.http_url if cs else '', 64)     # company Settings
+    data += _bool(cs.gprs_enable if cs else False) # company Settings
     data += b'\x00'                          # MsgPrompt
-    data += b'\x01' if s.exp_enable == '1' else b'\x00'
-    data += b'\x01' if s.smart_card == '1' else b'\x00'
+    data += b'\x01' if p.exp_enable else b'\x00'
+    data += b'\x01' if (cs and cs.smart_card == '1') else b'\x00'  # company Settings
     data += b'\x00'                          # Modomon
-    data += b'\x01' if s.ftp_enable == '1' else b'\x00'
+    data += b'\x01' if (cs and cs.ftp_enable == '1') else b'\x00'  # company Settings
     data += _s('', 11)                       # RemovePswd
     data += b'\x00'                          # StageReport_E_D
-    data += _bool(s.st_roundoff_enable)
-    data += _i(s.st_roundoff_amt)
-    data += _bool(s.simple_report)
-    data += _b(s.report_font)
-    data += _bool(s.multiple_pass)
-    data += _bool(s.inspector_sms)
+    data += _bool(p.st_roundoff_enable)
+    data += _i(p.st_roundoff_amt)
+    data += _bool(p.simple_report)
+    data += _b(p.report_font)
+    data += _bool(p.multiple_pass)
+    data += _bool(p.inspector_sms)
     data += b'\x00'                          # StageEntry
-    data += _s(s.ph_no3, 13)
-    data += _bool(s.auto_shut_down)
-    data += _bool(s.userpswd_enable)
+    data += _s(cs.ph_no3 if cs else '', 13)  # company Settings
+    data += _bool(p.auto_shut_down)
+    data += _bool(p.userpswd_enable)
     data += b'\x00'                          # DieselEntryEnable
     data += b'\x00'                          # TripTimeEnable
     data += b'\x00'                          # TripCloseReport
@@ -148,8 +154,8 @@ def _pack_busdat(s):
     data += b'\x00' * 4
     # Pdate (4 bytes): Day, Month, Year(2 bytes) — zeroed
     data += b'\x00' * 4
-    data += _s(s.master_pwd, 11)             # MSR_PSWD
-    data += _s(s.user_pwd, 11)              # USR_PSWD
+    data += _s(p.master_pwd, 11)             # MSR_PSWD
+    data += _s(p.user_pwd, 11)              # USR_PSWD
     data += _s('', 11)                       # SPR_PSWD (supervisor)
     data += b'\x80'                          # val_contrast  (default mid)
     data += b'\x80'                          # val_brightness
@@ -166,11 +172,11 @@ def _pack_busdat(s):
     data += b'\x00'                          # rf_baud
     data += b'\x00'                          # connecting_medium
     data += b'\x00'                          # footer_stat
-    data += _b(s.language_option)           # select_language
+    data += _b(p.language_option)           # select_language
     data += b'\x00'                          # login_mode
     data += b'\x00'                          # ucKPLight_opt
     data += _i(0)                            # usShuntdownTime
-    data += _b(s.language_option)           # LangNo
+    data += _b(p.language_option)           # LangNo
     data += b'\x00' * 2                     # ucTemp
 
     return data  # 704 bytes total
@@ -360,7 +366,7 @@ def get_routes_list(request):
     """
     company = _get_company(request)
     if not company:
-        return JsonResponse({'message': 'Unauthorized'}, status=401)
+        return JsonResponse({'message': 'No company associated with this account'}, status=400)
 
     routes = (
         Route.objects
@@ -381,20 +387,24 @@ def get_settings_file(request):
     """
     company = _get_company(request)
     if not company:
-        return HttpResponse('UNAUTHORIZED', status=401)
+        return HttpResponse('NO_COMPANY', status=400)
 
     serialnumber = request.GET.get('serialnumber')
     if not serialnumber:
-        return HttpResponse('SERIAL_NUMBER_NOT_PROVIDED', status=401)
+        return HttpResponse('SERIAL_NUMBER_NOT_PROVIDED', status=400)
 
     try:
-        palmtec_id = ETMDevice.objects.get(company=company,serialnumber=serialnumber).palmtec_id
-        # s = Settings.objects.get(company=company)
-        s = SettingsProfile.objects.get(company=company,palmtec_id=palmtec_id)
+        palmtec_id = ETMDevice.objects.get(company=company, serial_number=serialnumber).palmtec_id
+        profile = SettingsProfile.objects.get(company=company, palmtec_id=palmtec_id)
+    except ETMDevice.DoesNotExist:
+        return HttpResponse('DEVICE_NOT_FOUND', status=404)
     except SettingsProfile.DoesNotExist:
         return HttpResponse('SETTINGS_NOT_FOUND', status=404)
 
-    binary = _pack_busdat(s)
+    # Company-level settings — may not exist yet, pass None and _pack_busdat handles fallback
+    company_settings = Settings.objects.filter(company=company).first()
+
+    binary = _pack_busdat(profile, company_settings)
     response = HttpResponse(binary, content_type='application/octet-stream')
     response['Content-Disposition'] = 'attachment; filename="BUS.DAT"'
     return response
@@ -409,7 +419,7 @@ def get_crew_file(request):
     """
     company = _get_company(request)
     if not company:
-        return HttpResponse('UNAUTHORIZED', status=401)
+        return HttpResponse('NO_COMPANY', status=400)
 
     employees = (
         Employee.objects
@@ -432,7 +442,7 @@ def get_vehicles_file(request):
     """
     company = _get_company(request)
     if not company:
-        return HttpResponse('UNAUTHORIZED', status=401)
+        return HttpResponse('NO_COMPANY', status=400)
 
     vehicles = (
         VehicleType.objects
@@ -455,7 +465,7 @@ def get_expenses_file(request):
     """
     company = _get_company(request)
     if not company:
-        return HttpResponse('UNAUTHORIZED', status=401)
+        return HttpResponse('NO_COMPANY', status=400)
 
     expenses = (
         ExpenseMaster.objects
@@ -478,7 +488,7 @@ def get_routelst_file(request):
     """
     company = _get_company(request)
     if not company:
-        return HttpResponse('UNAUTHORIZED', status=401)
+        return HttpResponse('NO_COMPANY', status=400)
 
     route_codes = _parse_route_codes(request)
     routes = Route.objects.filter(company=company, is_deleted=False)
@@ -527,7 +537,7 @@ def get_stagelst_file(request):
     """
     company = _get_company(request)
     if not company:
-        return HttpResponse('UNAUTHORIZED', status=401)
+        return HttpResponse('NO_COMPANY', status=400)
 
     route_stages = _get_ordered_route_stages(company, _parse_route_codes(request))
     binary = _pack_stagelst_global(route_stages)
@@ -546,7 +556,7 @@ def get_languagedat_file(request):
     """
     company = _get_company(request)
     if not company:
-        return HttpResponse('UNAUTHORIZED', status=401)
+        return HttpResponse('NO_COMPANY', status=400)
 
     route_stages = _get_ordered_route_stages(company, _parse_route_codes(request))
     binary = _pack_languagedat(route_stages)
@@ -567,7 +577,7 @@ def get_rtedat_file(request):
     """
     company = _get_company(request)
     if not company:
-        return HttpResponse('UNAUTHORIZED', status=401)
+        return HttpResponse('NO_COMPANY', status=400)
 
     route_codes = _parse_route_codes(request)
 
@@ -595,10 +605,76 @@ def get_currency_file(request):
     """
     company = _get_company(request)
     if not company:
-        return HttpResponse('UNAUTHORIZED', status=401)
+        return HttpResponse('NO_COMPANY', status=400)
 
     currencies = Currency.objects.filter(company=company).order_by('pk')
     binary = _pack_currencydat(currencies)
     response = HttpResponse(binary, content_type='application/octet-stream')
     response['Content-Disposition'] = 'attachment; filename="CURRENCY.DAT"'
+    return response
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, LicensePermission])
+def get_masterdata_bundle(request):
+    """
+    GET /device/masterdata[?route_codes=R01,R02]
+    Returns a ZIP containing all route-dependent master data files.
+
+    All files are built from the same DB snapshot so stage indices in RTE.DAT
+    are guaranteed to match STAGE.LST positions.
+
+    ZIP always contains:
+      ROUTELST.LST  — route list (64 bytes/route)
+      STAGE.LST     — stage names + distances (16 bytes/stage)
+      RTE.DAT       — route headers + fare tables + stage ID arrays
+
+    ZIP also contains (when any stage in the set has local-language data):
+      LANGUAGE.DAT  — local-language stage names (24 bytes/stage)
+
+    route_codes (optional): comma-separated e.g. ?route_codes=R01,R02
+    Omit to include all company routes.
+    """
+    company = _get_company(request)
+    if not company:
+        return HttpResponse('NO_COMPANY', status=400)
+
+    route_codes = _parse_route_codes(request)
+
+    # ── Single DB snapshot for all files ──────────────────────────────────────
+    routes_qs = Route.objects.filter(company=company, is_deleted=False)
+    if route_codes:
+        routes_qs = routes_qs.filter(route_code__in=route_codes)
+    routes = list(
+        routes_qs
+        .select_related('bus_type')
+        .prefetch_related('route_stages__stage')
+        .order_by('route_code')
+    )
+
+    route_stages = _get_ordered_route_stages(company, route_codes)
+    stage_index  = {rs.pk: i for i, rs in enumerate(route_stages, start=1)}
+
+    # ── Build binaries ─────────────────────────────────────────────────────────
+    routelst_bin = _pack_routelst_all(routes)
+    stage_bin    = _pack_stagelst_global(route_stages)
+    rte_bin      = _pack_rtedat(routes, stage_index)
+    lang_bin     = (
+        _pack_languagedat(route_stages)
+        if any(rs.stage_local_lang for rs in route_stages)
+        else None
+    )
+
+    # ── Pack into ZIP (ZIP_STORED = no compression, device reads raw bytes) ────
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_STORED) as zf:
+        zf.writestr('ROUTELST.LST', routelst_bin)
+        zf.writestr('STAGE.LST',    stage_bin)
+        zf.writestr('RTE.DAT',      rte_bin)
+        if lang_bin:
+            zf.writestr('LANGUAGE.DAT', lang_bin)
+    buf.seek(0)
+
+    response = HttpResponse(buf.read(), content_type='application/zip')
+    response['Content-Disposition'] = 'attachment; filename="masterdata.zip"'
     return response
