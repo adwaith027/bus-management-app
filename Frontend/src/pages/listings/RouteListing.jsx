@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Route, Plus, Eye, Pencil, Search, X, ChevronUp, ChevronDown, Trash2, Upload,
+import { Route, Plus, Eye, Pencil, Search, X, Upload,
          AlertCircle, AlertTriangle, CheckCircle2, Download, FileSpreadsheet, MapPinned,
          Info, IndianRupee, Warehouse } from 'lucide-react';
 import { useFilteredList } from '../../assets/js/useFilteredList';
@@ -18,12 +18,10 @@ const FARE_TYPES = [
 const ROUTE_FLAGS = [
   { name: 'half',       label: 'Half Fare'           },
   { name: 'luggage',    label: 'Luggage'              },
-  { name: 'student',    label: 'Student Concession'   },
   { name: 'adjust',     label: 'Fare Adjustment'      },
-  { name: 'conc',       label: 'General Concession'   },
+  { name: 'conc',       label: 'Concession'           },
   { name: 'ph',         label: 'PH Concession'        },
   { name: 'pass_allow', label: 'Pass Holders'         },
-  { name: 'use_stop',   label: 'Stop-based Fare'      },
 ];
 
 export default function RouteListing() {
@@ -43,8 +41,8 @@ export default function RouteListing() {
   const emptyForm = {
     route_code: '', route_name: '', min_fare: '', fare_type: '',
     bus_type: '', bus_type_name: '', start_from: 0, is_deleted: false,
-    half: false, luggage: false, student: false, adjust: false,
-    conc: false, ph: false, pass_allow: false, use_stop: false,
+    half: false, luggage: false, adjust: false,
+    conc: false, ph: false, pass_allow: false,
     route_stages: [],
     depot_ids: [],
   };
@@ -77,15 +75,20 @@ export default function RouteListing() {
   const emptyWizard = {
     route_code: '', route_name: '', no_of_stages: '3', min_fare: '', fare_type: '1',
     bus_type: '',
-    half: false, luggage: false, student: false, adjust: false,
-    conc: false, ph: false, pass_allow: false, use_stop: false,
+    half: false, luggage: false, adjust: false,
+    conc: false, ph: false, pass_allow: false,
     depot_ids: [],
     fare_list: [],
     fare_matrix: [],
     stages: [],
   };
   const [wizardData, setWizardData] = useState(emptyWizard);
-  const [stageInput, setStageInput] = useState({ stage_name: '', distance: '' });
+  const [stageInput, setStageInput] = useState({ stage_name: '', distance: '', stage_code: '' });
+
+  // ── Section 3c: Wizard "similar stage" confirm modal ─────────────────────
+  // null | { stage_name, stage_code, distance, similar, confirmedSimilar }
+  const [stageModal, setStageModal] = useState(null);
+  const [stageModalError, setStageModalError] = useState('');
 
   // ── beforeunload guard during wizard ────────────────────────────────────
   useEffect(() => {
@@ -140,6 +143,67 @@ export default function RouteListing() {
     } catch (err) {
       console.error('Error fetching stages:', err);
     }
+  };
+
+  // Existing company stages whose name is a substring match (either direction,
+  // case-insensitive) of `name` but not an exact match — exact matches reuse
+  // silently elsewhere and are never flagged as "similar".
+  const findSimilarStages = (name) => {
+    const q = (name || '').trim().toLowerCase();
+    if (!q) return [];
+    return stages.filter(s => {
+      const sname = s.stage_name.toLowerCase();
+      if (sname === q) return false;
+      // Skip trivial substring hits against very short existing names (e.g. "A").
+      if (sname.length < 3 && sname.length < q.length) return false;
+      return sname.includes(q) || q.includes(sname);
+    });
+  };
+
+  // Only used by the route-creation wizard, to confirm creating a genuinely
+  // new stage when a similarly-named one already exists.
+  const openCreateStageModal = (name, distance) => {
+    const pending = wizardData.stages.map(s => s.stage_code);
+    setStageModalError('');
+    setStageModal({
+      stage_name: name, stage_code: suggestStageCode(pending),
+      distance, similar: findSimilarStages(name), confirmedSimilar: false,
+    });
+  };
+
+  const closeStageModal = () => {
+    setStageModal(null);
+    setStageModalError('');
+  };
+
+  const saveStageModal = () => {
+    if (!stageModal) return;
+    const stage_name = stageModal.stage_name.trim();
+    const stage_code = stageModal.stage_code.trim();
+    if (!stage_name || !stage_code) {
+      setStageModalError('Stage name and code are required.');
+      return;
+    }
+    if (stageModal.similar.length > 0 && !stageModal.confirmedSimilar) {
+      setStageModalError('Similar stage(s) exist above — confirm to create a new one anyway.');
+      return;
+    }
+    const pending = wizardData.stages.map(s => s.stage_code);
+    if (isStageCodeTaken(stage_code, pending)) {
+      setStageModalError('Code already in use.');
+      return;
+    }
+
+    setWizardData(prev => ({
+      ...prev,
+      stages: [...prev.stages, {
+        stage_name, stage_code, distance: stageModal.distance || '0',
+        confirmed_similar: stageModal.confirmedSimilar,
+      }],
+    }));
+    setStageInput({ stage_name: '', distance: '', stage_code: suggestStageCode([...pending, stage_code]) });
+    setTimeout(() => stageNameRef.current?.focus(), 50);
+    closeStageModal();
   };
 
   const fetchDepots = async () => {
@@ -265,14 +329,7 @@ export default function RouteListing() {
     });
   };
 
-  // ── Section 9: RouteStage helpers (edit modal) ────────────────────────────
-  const addStage = () => {
-    setFormData(prev => ({
-      ...prev,
-      route_stages: [...prev.route_stages, { stage: '', sequence_no: prev.route_stages.length + 1, distance: '', stage_local_lang: '' }]
-    }));
-  };
-
+  // ── Section 9: RouteStage helpers (edit modal) — rename + distance only ──
   const updateStage = (index, field, value) => {
     setFormData(prev => {
       const updated = [...prev.route_stages];
@@ -281,24 +338,28 @@ export default function RouteListing() {
     });
   };
 
-  const removeStage = (index) => {
-    setFormData(prev => {
-      const updated = prev.route_stages.filter((_, i) => i !== index);
-      updated.forEach((s, i) => { s.sequence_no = i + 1; });
-      return { ...prev, route_stages: updated };
-    });
+  // Existing stages matching what's typed so far (wizard quick-pick to reuse).
+  const stageSuggestions = (query) => {
+    const q = (query || '').trim().toLowerCase();
+    if (!q) return [];
+    return stages.filter(s => s.stage_name.toLowerCase().includes(q)).slice(0, 8);
   };
 
-  const moveStage = (index, direction) => {
-    if (direction === 'up' && index === 0) return;
-    if (direction === 'down' && index === formData.route_stages.length - 1) return;
-    setFormData(prev => {
-      const updated = [...prev.route_stages];
-      const targetIndex = direction === 'up' ? index - 1 : index + 1;
-      [updated[index], updated[targetIndex]] = [updated[targetIndex], updated[index]];
-      updated.forEach((s, i) => { s.sequence_no = i + 1; });
-      return { ...prev, route_stages: updated };
-    });
+  // ── Stage code suggestion / clash check (wizard new-stage creation only) ──
+  const suggestStageCode = (pendingCodes = []) => {
+    const used = new Set(stages.map(s => String(s.stage_code)));
+    pendingCodes.forEach(c => { if (c) used.add(String(c)); });
+    const nums = [...used].map(c => parseInt(c, 10)).filter(n => !Number.isNaN(n));
+    let next = (nums.length ? Math.max(...nums) : 1000) + 1;
+    while (used.has(String(next))) next++;
+    return String(next);
+  };
+
+  const isStageCodeTaken = (code, pendingCodes = []) => {
+    if (!code) return false;
+    const used = new Set(stages.map(s => String(s.stage_code)));
+    pendingCodes.forEach(c => { if (c) used.add(String(c)); });
+    return used.has(String(code));
   };
 
   // ── Section 10: Inline fare helpers (modal) ───────────────────────────────
@@ -318,6 +379,11 @@ export default function RouteListing() {
   };
 
   const isReadOnly = modalMode === 'view';
+
+  const closeEditViewModal = () => {
+    if (!isReadOnly && !window.confirm('Close without saving? All unsaved changes will be lost.')) return;
+    setIsModalOpen(false);
+  };
 
   // ── Section 11: Wizard functions ─────────────────────────────────────────
   const openWizard = () => {
@@ -389,7 +455,7 @@ export default function RouteListing() {
 
   const goToStep3 = () => {
     setWizardData(prev => ({ ...prev, stages: [] }));
-    setStageInput({ stage_name: '', distance: '' });
+    setStageInput({ stage_name: '', distance: '', stage_code: suggestStageCode() });
     setWizardStep(3);
     setTimeout(() => stageNameRef.current?.focus(), 100);
   };
@@ -412,18 +478,49 @@ export default function RouteListing() {
   };
 
   const saveStageEntry = () => {
-    if (!stageInput.stage_name.trim()) {
+    const name = stageInput.stage_name.trim();
+    if (!name) {
       window.alert('Stage name is required.');
+      return;
+    }
+    const pendingCodes = wizardData.stages.map(s => s.stage_code);
+
+    // Exact match on an existing company stage — reuse it silently, no code needed.
+    const exact = stages.find(s => s.stage_name.toLowerCase() === name.toLowerCase());
+    if (exact) {
+      setWizardData(prev => ({
+        ...prev,
+        stages: [...prev.stages, { stage: exact.id, stage_name: exact.stage_name, stage_code: exact.stage_code, distance: stageInput.distance || '0' }],
+      }));
+      setStageInput({ stage_name: '', distance: '', stage_code: suggestStageCode(pendingCodes) });
+      setTimeout(() => stageNameRef.current?.focus(), 50);
+      return;
+    }
+
+    // No exact match, but something similarly-named exists — confirm before creating new.
+    const similar = findSimilarStages(name);
+    if (similar.length > 0) {
+      openCreateStageModal(name, stageInput.distance || '0');
+      return;
+    }
+
+    if (!stageInput.stage_code.trim()) {
+      window.alert('Stage code is required.');
+      return;
+    }
+    if (isStageCodeTaken(stageInput.stage_code, pendingCodes)) {
+      window.alert(`Stage code ${stageInput.stage_code} is already in use.`);
       return;
     }
     setWizardData(prev => ({
       ...prev,
       stages: [...prev.stages, {
-        stage_name: stageInput.stage_name.trim(),
+        stage_name: name,
         distance: stageInput.distance || '0',
+        stage_code: stageInput.stage_code.trim(),
       }]
     }));
-    setStageInput({ stage_name: '', distance: '' });
+    setStageInput({ stage_name: '', distance: '', stage_code: suggestStageCode([...pendingCodes, stageInput.stage_code]) });
     setTimeout(() => stageNameRef.current?.focus(), 50);
   };
 
@@ -823,7 +920,7 @@ export default function RouteListing() {
                   {wizardStep === 3 && 'Stage Names — Step 3 of 3'}
                 </h2>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
                 {[1, 2, 3].map(s => (
                   <div key={s} className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold border-2 ${
                     wizardStep === s ? 'bg-white text-slate-900 border-white' :
@@ -831,6 +928,9 @@ export default function RouteListing() {
                                       'bg-transparent text-slate-400 border-slate-500'
                   }`}>{s}</div>
                 ))}
+                <button onClick={() => closeWizard()} className="p-2 rounded-full hover:bg-slate-700 text-slate-400 hover:text-white transition-colors ml-2">
+                  <X size={18} />
+                </button>
               </div>
             </div>
 
@@ -1049,6 +1149,21 @@ export default function RouteListing() {
                           placeholder="Enter stage name"
                           className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white"
                         />
+                        {stageInput.stage_name && stageSuggestions(stageInput.stage_name).length > 0 && (
+                          <div className="border border-slate-200 rounded-lg bg-white divide-y divide-slate-100 max-h-32 overflow-y-auto">
+                            {stageSuggestions(stageInput.stage_name).map(s => (
+                              <button
+                                type="button"
+                                key={s.id}
+                                onClick={() => setStageInput(prev => ({ ...prev, stage_name: s.stage_name }))}
+                                className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs text-left hover:bg-slate-50 transition-colors"
+                              >
+                                <span className="text-slate-700">{s.stage_name}</span>
+                                <span className="text-slate-400 font-mono">{s.stage_code}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       <div className="space-y-1">
                         <label className="text-sm font-medium text-slate-700">Distance (km)</label>
@@ -1061,6 +1176,25 @@ export default function RouteListing() {
                           placeholder="0"
                           className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 bg-white"
                         />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-slate-700">Stage Code</label>
+                        <input type="text" inputMode="numeric" value={stageInput.stage_code}
+                          onChange={e => {
+                            const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 50);
+                            setStageInput(prev => ({ ...prev, stage_code: val }));
+                          }}
+                          onKeyDown={e => { if (e.key === 'Enter') saveStageEntry(); }}
+                          placeholder="e.g. 1180"
+                          className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-white ${
+                            isStageCodeTaken(stageInput.stage_code, wizardData.stages.map(s => s.stage_code))
+                              ? 'border-red-400 focus:ring-red-300'
+                              : 'border-slate-300 focus:ring-slate-500'
+                          }`}
+                        />
+                        {isStageCodeTaken(stageInput.stage_code, wizardData.stages.map(s => s.stage_code)) && (
+                          <p className="text-xs text-red-600">Code already in use.</p>
+                        )}
                       </div>
                       <button type="button" onClick={saveStageEntry} disabled={stagesEntered >= n}
                         className="w-full py-2 bg-slate-900 hover:bg-slate-700 text-white font-medium rounded-lg disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
@@ -1079,16 +1213,21 @@ export default function RouteListing() {
                           <tr className="bg-slate-800 text-white">
                             <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider w-12">S.No</th>
                             <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider">Stage Name</th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider w-20">Code</th>
                             <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider w-20">KM</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {wizardData.stages.length === 0 ? (
-                            <tr><td colSpan={3} className="px-4 py-8 text-center text-slate-400 text-sm">No stages entered yet.</td></tr>
+                            <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-400 text-sm">No stages entered yet.</td></tr>
                           ) : wizardData.stages.map((s, idx) => (
                             <tr key={idx} className="hover:bg-slate-50">
                               <td className="px-3 py-2 text-sm font-mono text-slate-600">{idx + 1}</td>
-                              <td className="px-3 py-2 text-sm font-medium text-slate-800">{s.stage_name}</td>
+                              <td className="px-3 py-2 text-sm font-medium text-slate-800">
+                                {s.stage_name}
+                                {s.stage && <span className="ml-1.5 text-[10px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded px-1 py-0.5">EXISTING</span>}
+                              </td>
+                              <td className="px-3 py-2 text-sm font-mono text-slate-500">{s.stage_code}</td>
                               <td className="px-3 py-2 text-sm text-slate-600">{s.distance}</td>
                             </tr>
                           ))}
@@ -1096,6 +1235,7 @@ export default function RouteListing() {
                             <tr key={`empty-${i}`} className="bg-slate-50/50">
                               <td className="px-3 py-2 text-sm text-slate-300">{stagesEntered + i + 1}</td>
                               <td className="px-3 py-2 text-sm text-slate-300 italic">— not entered —</td>
+                              <td className="px-3 py-2"></td>
                               <td className="px-3 py-2"></td>
                             </tr>
                           ))}
@@ -1255,7 +1395,7 @@ export default function RouteListing() {
                   {formData.route_code} — {formData.route_name}
                 </p>
               </div>
-              <button onClick={() => setIsModalOpen(false)}
+              <button onClick={closeEditViewModal}
                 className="p-2 rounded-full hover:bg-slate-700 text-slate-400 hover:text-white transition-colors">
                 <X size={18} />
               </button>
@@ -1443,21 +1583,13 @@ export default function RouteListing() {
               {/* ════ TAB: Stops ════ */}
               {activeTab === 'stops' && (
                 <div>
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <p className="text-sm font-medium text-slate-700">Route Stops</p>
-                      <p className="text-xs text-slate-500">Sequence of stops on this route</p>
-                    </div>
-                    {!isReadOnly && (
-                      <button type="button" onClick={addStage}
-                        className="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-3 py-1.5 rounded-md font-medium transition-colors">
-                        + Add Stop
-                      </button>
-                    )}
+                  <div className="mb-4">
+                    <p className="text-sm font-medium text-slate-700">Route Stops</p>
+                    <p className="text-xs text-slate-500">Rename a stop or adjust its distance — stops are fixed once the route is created.</p>
                   </div>
 
                   {formData.route_stages.length === 0 ? (
-                    <p className="text-sm text-slate-400 text-center py-10">No stops added yet</p>
+                    <p className="text-sm text-slate-400 text-center py-10">No stops on this route</p>
                   ) : isReadOnly ? (
                     /* ── Visual timeline (view mode) ── */
                     <div className="py-1">
@@ -1485,40 +1617,42 @@ export default function RouteListing() {
                       })}
                     </div>
                   ) : (
-                    /* ── Editable rows (edit mode) ── */
-                    <div className="space-y-2">
-                      {formData.route_stages.map((stop, idx) => (
-                        <div key={idx} className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg border border-slate-200">
-                          <div className="w-9 h-9 flex items-center justify-center bg-slate-800 text-white rounded-lg font-semibold text-sm shrink-0">{stop.sequence_no}</div>
-                          <div className="flex-1 min-w-0">
-                            <select value={stop.stage} onChange={e => updateStage(idx, 'stage', e.target.value)}
-                              className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white text-sm">
-                              <option value="">-- Select Stage --</option>
-                              {stages.map(s => <option key={s.id} value={s.id}>{s.stage_name} ({s.stage_code})</option>)}
-                            </select>
-                          </div>
-                          <div className="w-24 shrink-0">
-                            <input type="number" placeholder="km" value={stop.distance}
-                              onChange={e => updateStage(idx, 'distance', e.target.value)}
-                              step="0.1"
-                              className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm" />
-                          </div>
-                          <div className="flex flex-col gap-0.5">
-                            <button type="button" onClick={() => moveStage(idx, 'up')} disabled={idx === 0}
-                              className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30">
-                              <ChevronUp size={14} />
-                            </button>
-                            <button type="button" onClick={() => moveStage(idx, 'down')} disabled={idx === formData.route_stages.length - 1}
-                              className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30">
-                              <ChevronDown size={14} />
-                            </button>
-                          </div>
-                          <button type="button" onClick={() => removeStage(idx)}
-                            className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors">
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      ))}
+                    /* ── Editable rows: rename + distance only, code shown for reference ── */
+                    <div className="border border-slate-200 rounded-lg overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200">
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider w-12">#</th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Stage Name</th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider w-24">Code</th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider w-28">KM</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {formData.route_stages.map((stop, idx) => (
+                            <tr key={idx}>
+                              <td className="px-3 py-2 font-mono text-slate-500">{stop.sequence_no}</td>
+                              <td className="px-3 py-1.5">
+                                <input
+                                  type="text"
+                                  value={stop.stage_name || ''}
+                                  onChange={e => updateStage(idx, 'stage_name', e.target.value.replace(/[^a-zA-Z0-9]/g, '').slice(0, 50))}
+                                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-slate-400 font-mono">{stop.stage_code}</td>
+                              <td className="px-3 py-1.5">
+                                <input
+                                  type="number" placeholder="0" step="0.1"
+                                  value={stop.distance}
+                                  onChange={e => updateStage(idx, 'distance', e.target.value)}
+                                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg"
+                                />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   )}
                 </div>
@@ -1644,7 +1778,7 @@ export default function RouteListing() {
 
             {/* ── Footer ── */}
             <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-end gap-3">
-              <button type="button" onClick={() => setIsModalOpen(false)}
+              <button type="button" onClick={closeEditViewModal}
                 className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">
                 {isReadOnly ? 'Close' : 'Cancel'}
               </button>
@@ -1656,6 +1790,86 @@ export default function RouteListing() {
               )}
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* ── Wizard "similar stage" confirm modal ── */}
+      {stageModal && (
+        <div className="fixed inset-0 bg-slate-900/70 z-[60] flex items-center justify-center px-4" onClick={closeStageModal}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-slate-800">Create New Stage</h3>
+              <button type="button" onClick={closeStageModal} className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-slate-700">Stage Name</label>
+                <input
+                  type="text"
+                  value={stageModal.stage_name}
+                  onChange={e => {
+                    const val = e.target.value.replace(/[^a-zA-Z0-9]/g, '').slice(0, 50);
+                    setStageModal(m => ({ ...m, stage_name: val, similar: findSimilarStages(val), confirmedSimilar: false }));
+                  }}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-slate-700">Stage Code</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={stageModal.stage_code}
+                  onChange={e => setStageModal(m => ({ ...m, stage_code: e.target.value.replace(/[^0-9]/g, '').slice(0, 50) }))}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+                />
+              </div>
+
+              {stageModal.similar.length > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
+                  <p className="text-xs text-amber-800 font-medium">Similar stage{stageModal.similar.length > 1 ? 's' : ''} already exist:</p>
+                  <ul className="space-y-1">
+                    {stageModal.similar.slice(0, 5).map(s => (
+                      <li key={s.id} className="text-xs text-amber-700 flex items-center justify-between">
+                        <span>{s.stage_name}</span>
+                        <span className="font-mono text-amber-500">{s.stage_code}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <label className="flex items-center gap-2 pt-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={stageModal.confirmedSimilar}
+                      onChange={e => setStageModal(m => ({ ...m, confirmedSimilar: e.target.checked }))}
+                      className="cursor-pointer"
+                    />
+                    <span className="text-xs text-amber-800">Create a new stage anyway</span>
+                  </label>
+                </div>
+              )}
+
+              {stageModalError && <p className="text-xs text-red-600">{stageModalError}</p>}
+            </div>
+            <div className="flex items-center gap-2 mt-5">
+              <button type="button" onClick={closeStageModal}
+                className="flex-1 px-3 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveStageModal}
+                disabled={
+                  !stageModal.stage_name.trim() || !stageModal.stage_code.trim() ||
+                  (stageModal.similar.length > 0 && !stageModal.confirmedSimilar)
+                }
+                className="flex-1 px-3 py-2 text-sm font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-700 transition-colors disabled:opacity-50"
+              >
+                Add Stage
+              </button>
+            </div>
           </div>
         </div>
       )}
