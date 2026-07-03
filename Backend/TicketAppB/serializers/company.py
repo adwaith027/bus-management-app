@@ -25,6 +25,7 @@ class CompanySerializer(serializers.ModelSerializer):
             'company_name',
             'company_email',
             'gst_number',
+            'aggregator_merchant_id',
             'contact_person',
             'contact_number',
             'address',
