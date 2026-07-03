@@ -3,6 +3,7 @@ from ..models import (
     BusType, EmployeeType, Stage, Currency,
     Employee, VehicleType, CrewAssignment, Settings,
     RouteStage, Route, RouteBusType, Fare, SettingsProfile,
+    ExpenseMaster, InspectorDetails, Expense,
 )
 
 
@@ -46,6 +47,22 @@ class StageSerializer(serializers.ModelSerializer):
             'company', 'created_by', 'updated_by', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'company', 'created_by', 'updated_by', 'created_at', 'updated_at']
+
+    def validate_stage_code(self, value):
+        value = (value or '').strip()
+        if not value:
+            raise serializers.ValidationError('Stage code is required.')
+        if not value.isdigit():
+            raise serializers.ValidationError('Stage code must contain numbers only.')
+        return value
+
+    def validate_stage_name(self, value):
+        value = (value or '').strip()
+        if not value:
+            raise serializers.ValidationError('Stage name is required.')
+        if not value.isalnum():
+            raise serializers.ValidationError('Stage name must be alphanumeric.')
+        return value
 
 
 class CurrencySerializer(serializers.ModelSerializer):
@@ -133,10 +150,22 @@ class CrewAssignmentSerializer(serializers.ModelSerializer):
         ]
 
 
+def _validate_password_not_blank(value):
+    if value is not None and str(value).strip() == '':
+        raise serializers.ValidationError("Password cannot be blank.")
+    return value
+
+
 class SettingsSerializer(serializers.ModelSerializer):
     company    = serializers.PrimaryKeyRelatedField(read_only=True)
     created_by = serializers.PrimaryKeyRelatedField(read_only=True)
     updated_by = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    def validate_user_pwd(self, value):
+        return _validate_password_not_blank(value)
+
+    def validate_master_pwd(self, value):
+        return _validate_password_not_blank(value)
 
     class Meta:
         model  = Settings
@@ -148,7 +177,7 @@ class SettingsSerializer(serializers.ModelSerializer):
             'header1', 'header2', 'header3', 'footer1', 'footer2',
             'roundoff', 'round_up', 'remove_ticket_flag', 'stage_font_flag',
             'next_fare_flag', 'odometer_entry', 'ticket_no_big_font',
-            'crew_check', 'gprs_enable', 'tripsend_enable', 'schedulesend_enable',
+            'gprs_enable', 'tripsend_enable', 'schedulesend_enable',
             'sendpend', 'inspect_rpt', 'st_roundoff_enable', 'st_fare_edit',
             'multiple_pass', 'simple_report', 'inspector_sms', 'auto_shut_down',
             'userpswd_enable',
@@ -231,7 +260,7 @@ class RouteSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'route_code', 'route_name', 'min_fare', 'fare_type',
             'bus_type', 'bus_type_name',
-            'use_stop', 'half', 'luggage', 'student', 'adjust', 'conc', 'ph',
+            'half', 'luggage', 'adjust', 'conc', 'ph',
             'start_from', 'pass_allow', 'is_deleted',
             'company', 'created_by', 'updated_by', 'created_at', 'updated_at',
             'route_stages', 'route_bus_types', 'depot_ids', 'depots',
@@ -257,8 +286,8 @@ class RouteListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'route_code', 'route_name', 'min_fare', 'fare_type',
             'bus_type', 'bus_type_name',
-            'start_from', 'half', 'luggage', 'student', 'adjust', 'conc', 'ph',
-            'pass_allow', 'use_stop', 'is_deleted', 'stage_count',
+            'start_from', 'half', 'luggage', 'adjust', 'conc', 'ph',
+            'pass_allow', 'is_deleted', 'stage_count',
         ]
 
 
@@ -294,11 +323,23 @@ class SettingsProfileSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Palmtec ID is required.")
         return value
 
+    def validate_user_pwd(self, value):
+        return _validate_password_not_blank(value)
+
+    def validate_master_pwd(self, value):
+        return _validate_password_not_blank(value)
+
+    def validate_supervisor_pwd(self, value):
+        return _validate_password_not_blank(value)
+
+    def validate_remove_pwd(self, value):
+        return _validate_password_not_blank(value)
+
     class Meta:
         model  = SettingsProfile
         fields = [
             'id', 'name', 'company', 'palmtec_id',
-            'user_pwd', 'master_pwd',
+            'user_pwd', 'master_pwd', 'supervisor_pwd', 'remove_pwd',
             'half_per', 'con_per', 'phy_per', 'round_amt', 'luggage_unit_rate',
             'main_display', 'main_display2',
             'header1', 'header2', 'header3', 'footer1', 'footer2',
@@ -307,10 +348,54 @@ class SettingsProfileSerializer(serializers.ModelSerializer):
             'st_roundoff_enable', 'st_roundoff_amt',
             'roundoff', 'round_up', 'remove_ticket_flag', 'stage_font_flag',
             'next_fare_flag', 'odometer_entry', 'ticket_no_big_font',
-            'crew_check', 'tripsend_enable', 'schedulesend_enable',
+            'tripsend_enable', 'schedulesend_enable',
             'inspect_rpt', 'multiple_pass', 'simple_report', 'inspector_sms',
             'auto_shut_down', 'userpswd_enable', 'exp_enable',
             'stage_updation_msg', 'default_stage',
             'created_at', 'updated_at', 'created_by', 'updated_by',
         ]
         read_only_fields = ['id', 'company', 'created_at', 'updated_at', 'created_by', 'updated_by']
+
+
+class ExpenseMasterSerializer(serializers.ModelSerializer):
+    company    = serializers.PrimaryKeyRelatedField(read_only=True)
+    created_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    updated_by = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model  = ExpenseMaster
+        fields = [
+            'id', 'expense_code', 'expense_name', 'palmtec_id',
+            'company', 'created_by', 'updated_by', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'company', 'created_by', 'updated_by', 'created_at', 'updated_at']
+
+
+class ExpenseSerializer(serializers.ModelSerializer):
+    driver_name = serializers.CharField(source='driver.employee_name', read_only=True)
+
+    class Meta:
+        model  = Expense
+        fields = [
+            'id', 'expense_code', 'expense_name', 'expense_amount',
+            'date', 'time', 'palmtec_id',
+            'schedule_no', 'bus_number', 'receipt_no',
+            'driver', 'driver_name', 'tripmaster_ref_id',
+            'company', 'created_at',
+        ]
+        read_only_fields = fields
+
+
+class InspectorDetailsSerializer(serializers.ModelSerializer):
+    inspector_name = serializers.CharField(source='inspector.employee_name', read_only=True)
+    inspector_code = serializers.CharField(source='inspector.employee_code', read_only=True)
+
+    class Meta:
+        model  = InspectorDetails
+        fields = [
+            'id', 'tripmaster_ref_id', 'inspector', 'inspector_name', 'inspector_code',
+            'station_no', 'date', 'time', 'palmtec_id',
+            'schedule_no', 'trip_no', 'company',
+            'created_at',
+        ]
+        read_only_fields = fields
