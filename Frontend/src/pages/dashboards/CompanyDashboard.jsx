@@ -1,36 +1,12 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import api, { BASE_URL } from "../../assets/js/axiosConfig";
 import {
   Wallet, TrendingUp, Users, Route as RouteIcon,
-  Banknote, Bus, Receipt, Sparkles, Activity,
-  BarChart2, CalendarCog, Ticket, Warehouse,
-  Settings, RefreshCw, AlertCircle, Calendar,
-  CheckCircle2, PlayCircle, CircleDot,
+  Banknote, Bus, Receipt, RefreshCw, AlertCircle, Calendar,
 } from "lucide-react";
 import { KpiCard, PageHeader, Btn, DesignCard, fmt } from "@/components/design";
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
-function DashProgress({ label, active, total, color }) {
-  const pct = total > 0 ? Math.round((active / total) * 100) : 0;
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-1.5">
-        <span className="text-sm text-slate-600">{label}</span>
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-bold text-slate-800">
-            {active}<span className="text-slate-400 font-normal">/{total}</span>
-          </span>
-          <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">{pct}%</span>
-        </div>
-      </div>
-      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: color }} />
-      </div>
-    </div>
-  );
-}
-
 function CardHead({ icon: Ic, color, bg, title, meta }) {
   return (
     <div className="flex items-center justify-between mb-5">
@@ -47,14 +23,13 @@ function CardHead({ icon: Ic, color, bg, title, meta }) {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function CompanyDashboard() {
-  const navigate = useNavigate();
   const storedUser = localStorage.getItem("user") ? JSON.parse(localStorage.getItem("user")) : null;
   const companyName = storedUser?.company_name || "Company";
   const companyCode = storedUser?.company_id || "-";
 
   const [metrics, setMetrics] = useState({
     collections: { daily_cash: 0, daily_upi: 0, monthly_total: 0, prev_month_total: 0 },
-    operations:  { buses_active: 0, buses_total: 0, trips_completed: 0, trips_scheduled: 0, routes_active: 0, routes_total: 0, total_passengers: 0 },
+    operations:  { buses_active: 0, buses_idle: 0, buses_running: 0, buses_total: 0, trips_completed: 0, trips_scheduled: 0, routes_active: 0, routes_total: 0, total_passengers: 0 },
     settlements: { total_transactions: 0, verified: 0, pending_verification: 0, failed: 0 },
     recent_activity: [],
   });
@@ -87,24 +62,11 @@ export default function CompanyDashboard() {
   const monthChange = d.collections.prev_month_total > 0
     ? ((d.collections.monthly_total - d.collections.prev_month_total) / d.collections.prev_month_total * 100).toFixed(1)
     : '0';
-  const tripPct   = d.operations.trips_scheduled > 0 ? Math.round((d.operations.trips_completed / d.operations.trips_scheduled) * 100) : 0;
   const avgPerTrip = d.operations.trips_completed > 0 ? Math.round(d.operations.total_passengers / d.operations.trips_completed) : 0;
 
   const selectedDateLabel = selectedDate
     ? new Date(`${selectedDate}T00:00:00`).toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short", year: "numeric" })
     : "";
-
-  const QUICK_ACTIONS = [
-    { icon: BarChart2,   label: 'Trip Reports',  path: '/dashboard/trip-data',          color: '#3b82f6' },
-    { icon: CalendarCog, label: 'Schedules',      path: '/dashboard/schedule-data',       color: '#14b8a6' },
-    { icon: Ticket,      label: 'Ticket Data',    path: '/dashboard/ticket-data',         color: '#8b5cf6' },
-    { icon: Warehouse,   label: 'Depots',         path: '/dashboard/depots',              color: '#f59e0b' },
-    { icon: Users,       label: 'Users',          path: '/dashboard/users',               color: '#6366f1' },
-    { icon: Settings,    label: 'Settings',       path: '/dashboard/master-data/settings', color: '#64748b' },
-  ];
-
-  const ACTIVITY_ICONS = { trip_close: CheckCircle2, trip_open: PlayCircle, settlement: CheckCircle2 };
-  const ACTIVITY_COLORS = { trip_close: '#10b981', trip_open: '#3b82f6', settlement: '#8b5cf6' };
 
   return (
     <div className="p-5 lg:p-6 min-h-full bg-slate-50">
@@ -177,10 +139,10 @@ export default function CompanyDashboard() {
           loading={loading}
         />
         <KpiCard
-          title="Trip Completion"
-          value={loading ? '—' : `${tripPct}%`}
-          subtitle={loading ? '' : `${d.operations.trips_completed} of ${d.operations.trips_scheduled} scheduled`}
-          icon={RouteIcon}
+          title="Active Buses"
+          value={loading ? '—' : `${d.operations.buses_active}/${d.operations.buses_total}`}
+          subtitle={loading ? '' : `${d.operations.buses_idle} idle · ${d.operations.buses_running} running`}
+          icon={Bus}
           color="#f59e0b"
           loading={loading}
         />
@@ -248,32 +210,6 @@ export default function CompanyDashboard() {
           </div>
         </DesignCard>
 
-        {/* Operations */}
-        <DesignCard>
-          <div className="p-5">
-            <CardHead icon={Bus} bg="bg-teal-50" color="text-teal-600" title="Operations" meta="Fleet & routes" />
-            <div className="space-y-4">
-              <DashProgress label="Fleet Utilization"  active={d.operations.buses_active}      total={d.operations.buses_total}      color="#14b8a6" />
-              <DashProgress label="Trip Completion"    active={d.operations.trips_completed}   total={d.operations.trips_scheduled}  color="#3b82f6" />
-              <DashProgress label="Active Routes"      active={d.operations.routes_active}     total={d.operations.routes_total}     color="#f59e0b" />
-            </div>
-            <div className="mt-5 pt-4 border-t border-slate-100 grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-[11px] text-slate-400 font-semibold uppercase tracking-widest">Passengers</p>
-                <p className="text-xl font-bold text-slate-800 mt-0.5">{d.operations.total_passengers.toLocaleString('en-IN')}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-[11px] text-slate-400 font-semibold uppercase tracking-widest">Avg / Trip</p>
-                <p className="text-xl font-bold text-slate-800 mt-0.5">~{avgPerTrip}</p>
-              </div>
-            </div>
-          </div>
-        </DesignCard>
-      </div>
-
-      {/* ═══ ROW 2 — Settlements + Quick Actions + Activity ══════════════ */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-
         {/* Settlements */}
         <DesignCard>
           <div className="p-5">
@@ -306,73 +242,8 @@ export default function CompanyDashboard() {
             </div>
           </div>
         </DesignCard>
-
-        {/* Quick Actions */}
-        <DesignCard>
-          <div className="p-5">
-            <CardHead icon={Sparkles} bg="bg-indigo-50" color="text-indigo-600" title="Quick Actions" />
-            <div className="grid grid-cols-2 gap-2">
-              {QUICK_ACTIONS.map(({ icon: Ic, label, path, color }) => (
-                <div
-                  key={label}
-                  onClick={() => navigate(path)}
-                  className="flex items-center gap-2 px-2.5 py-2.5 rounded-xl border border-slate-100 hover:border-slate-200 hover:bg-slate-50 cursor-pointer transition-all"
-                >
-                  <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: `${color}18` }}>
-                    <Ic size={14} style={{ color }} />
-                  </div>
-                  <span className="text-xs font-medium text-slate-700">{label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </DesignCard>
-
-        {/* Recent Activity */}
-        <DesignCard>
-          <div className="p-5">
-            <CardHead icon={Activity} bg="bg-slate-100" color="text-slate-600" title="Recent Activity" />
-            {loading ? (
-              <div className="space-y-3">
-                {[1, 2, 3, 4].map(i => (
-                  <div key={i} className="flex gap-2">
-                    <div className="w-3 h-3 rounded-full bg-slate-100 animate-pulse shrink-0 mt-0.5" />
-                    <div className="flex-1">
-                      <div className="h-3 bg-slate-100 rounded animate-pulse w-3/4 mb-1" />
-                      <div className="h-2.5 bg-slate-100 rounded animate-pulse w-1/2" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : d.recent_activity && d.recent_activity.length > 0 ? (
-              <div>
-                {d.recent_activity.map((a, i) => {
-                  const Ic = ACTIVITY_ICONS[a.type] || CircleDot;
-                  const col = ACTIVITY_COLORS[a.type] || '#64748b';
-                  return (
-                    <div key={i} className="flex items-center gap-2.5 py-2.5 border-b border-slate-50 last:border-0 last:pb-0 first:pt-0">
-                      <Ic size={13} style={{ color: col }} className="shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs text-slate-700 truncate">{a.label}</p>
-                        {a.route && <p className="text-[11px] text-slate-400 truncate">{a.route}</p>}
-                      </div>
-                      <div className="text-right shrink-0">
-                        {a.amount != null && <p className="text-[11px] font-semibold text-emerald-600">{fmt.inrK(a.amount)}</p>}
-                        <p className="text-[11px] text-slate-400 tabular-nums">{a.time}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-center py-6">
-                <Activity size={20} className="text-slate-200 mx-auto mb-2" />
-                <p className="text-xs text-slate-400">No activity for this date</p>
-              </div>
-            )}
-          </div>
-        </DesignCard>
       </div>
+
     </div>
   );
 }
