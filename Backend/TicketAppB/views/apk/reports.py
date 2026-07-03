@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from django.db.models import Q, Sum, Count
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
-from ...models import TransactionData, TripData, ScheduleData, Stage, ExpenseData, Route, RouteStage, VehicleType, MosambeeTransaction
+from ...models import TransactionData, TripData, ScheduleData, Stage, ExpenseData, Route, RouteStage, VehicleType, AggregatorTransaction
 from ...permissions import LicensePermission
 from ..utils import _meets_tier, _TIER_ERROR
 
@@ -32,8 +32,6 @@ def apk_bus_list(request):
 @permission_classes([IsAuthenticated, LicensePermission])
 def apk_schedules(request):
     user = request.user
-    if not _meets_tier(user, 'intermediate'):
-        return Response(_TIER_ERROR, status=403)
 
     bus_no = request.GET.get('bus_no')
     date_str = request.GET.get('date')
@@ -46,6 +44,15 @@ def apk_schedules(request):
         bus_no=bus_no,
         start_date=date_str,
     ).order_by('schedule_no').values('schedule_no', 'is_closed')
+
+    # Range-match version (schedule opened on a past date, still open today) — disabled for now:
+    # schedules = ScheduleData.objects.filter(
+    #     company_code=user.company,
+    #     bus_no=bus_no,
+    #     start_date__lte=date_str,
+    # ).filter(
+    #     Q(end_date__gte=date_str) | Q(end_date__isnull=True)
+    # ).order_by('schedule_no').values('schedule_no', 'is_closed')
 
     data = [
         {
@@ -68,8 +75,6 @@ def apk_schedules(request):
 @permission_classes([IsAuthenticated, LicensePermission])
 def apk_dashboard(request):
     user = request.user
-    if not _meets_tier(user, 'intermediate'):
-        return Response(_TIER_ERROR, status=403)
 
     date_str = request.GET.get('date')
     if not date_str:
@@ -85,9 +90,20 @@ def apk_dashboard(request):
         is_closed=True,
     ).aggregate(total=Sum('total_collection'), upi=Sum('upi_ticket_amount'))
 
+    # Current: keyed on ticket_date (day money was actually collected)
+    # open_day = TransactionData.objects.filter(
+    #     company_code=company,
+    #     ticket_date=date_str,
+    #     trip_id__is_closed=False,
+    # ).aggregate(
+    #     total=Sum('ticket_amount'),
+    #     upi=Sum('ticket_amount', filter=Q(ticket_status='UPI')),
+    # )
+
+    # Alternate: keyed on the schedule's own start_date (same gate as bus status below)
     open_day = TransactionData.objects.filter(
         company_code=company,
-        ticket_date=date_str,
+        schedule_id__start_date=date_str,
         trip_id__is_closed=False,
     ).aggregate(
         total=Sum('ticket_amount'),
@@ -111,11 +127,26 @@ def apk_dashboard(request):
         )
     }
 
+    # Current: keyed on ticket_date
+    # open_bus_rows = {
+    #     row['bus_no']: row
+    #     for row in TransactionData.objects.filter(
+    #         company_code=company,
+    #         ticket_date=date_str,
+    #         trip_id__is_closed=False,
+    #         bus_no__isnull=False,
+    #     ).values('bus_no').annotate(
+    #         revenue=Sum('ticket_amount'),
+    #         upi_amt=Sum('ticket_amount', filter=Q(ticket_status='UPI')),
+    #     )
+    # }
+
+    # Alternate: keyed on the schedule's own start_date
     open_bus_rows = {
         row['bus_no']: row
         for row in TransactionData.objects.filter(
             company_code=company,
-            ticket_date=date_str,
+            schedule_id__start_date=date_str,
             trip_id__is_closed=False,
             bus_no__isnull=False,
         ).values('bus_no').annotate(
@@ -124,43 +155,46 @@ def apk_dashboard(request):
         )
     }
 
-    running_buses = set(
-        TripData.objects.filter(
-            company_code=company,
-            start_date=date_str,
-            is_closed=False,
-            bus_no__isnull=False,
-        ).values_list('bus_no', flat=True).distinct()
-    )
+    # Status gate: schedule > trip > tickets — a bus is running/idle only when its
+    # ScheduleData opened on this exact date (start_date == date_str), never carried
+    # over from a schedule opened on a prior date that's still open. Revenue can still
+    # accrue to this date via continuing trips, but status doesn't follow it.
+    running_buses = set()
+    closed_today_buses = set()
+    for r in ScheduleData.objects.filter(
+        company_code=company,
+        start_date=date_str,
+        bus_no__isnull=False,
+    ).values('bus_no', 'is_closed'):
+        if r['is_closed']:
+            closed_today_buses.add(r['bus_no'])
+        else:
+            running_buses.add(r['bus_no'])
 
-    buses_with_data = set(closed_bus_rows.keys()) | set(open_bus_rows.keys()) | running_buses
+    running_count = len(running_buses)
 
     bus_list = []
-    running_count = len(running_buses)
-    for bus_no in buses_with_data:
-        closed = closed_bus_rows.get(bus_no, {})
-        open_rev = open_bus_rows.get(bus_no, {})
+    for reg_num in VehicleType.objects.filter(company=company, is_deleted=False).values_list('bus_reg_num', flat=True):
+        closed = closed_bus_rows.get(reg_num, {})
+        open_rev = open_bus_rows.get(reg_num, {})
         revenue = (closed.get('revenue') or 0) + (open_rev.get('revenue') or 0)
         upi_amt = (closed.get('upi_amt') or 0) + (open_rev.get('upi_amt') or 0)
         cash_amt = revenue - upi_amt
-        status = 'running' if bus_no in running_buses else 'idle'
+
+        if reg_num in running_buses:
+            status = 'running'
+        elif reg_num in closed_today_buses:
+            status = 'idle'
+        else:
+            status = 'offline'
+
         bus_list.append({
-            'bus_no': bus_no,
+            'bus_no': reg_num,
             'status': status,
             'revenue': str(revenue),
             'cash_amt': str(cash_amt),
             'upi_amt': str(upi_amt),
         })
-
-    for reg_num in VehicleType.objects.filter(company=company, is_deleted=False).values_list('bus_reg_num', flat=True):
-        if reg_num not in buses_with_data:
-            bus_list.append({
-                'bus_no': reg_num,
-                'status': 'offline',
-                'revenue': '0.00',
-                'cash_amt': '0.00',
-                'upi_amt': '0.00',
-            })
 
     # ── Weekly chart (Mon–Sun): closed from TripData + open from TransactionData ──
     week_start = anchor - datetime.timedelta(days=anchor.weekday())
@@ -178,13 +212,27 @@ def apk_dashboard(request):
         )
     }
 
+    # Current: keyed on ticket_date
+    # open_weekly = {
+    #     str(r['ticket_date']): {'total': r['total'] or 0, 'upi': r['upi'] or 0}
+    #     for r in TransactionData.objects.filter(
+    #         company_code=company,
+    #         ticket_date__range=[week_start, week_end],
+    #         trip_id__is_closed=False,
+    #     ).values('ticket_date').annotate(
+    #         total=Sum('ticket_amount'),
+    #         upi=Sum('ticket_amount', filter=Q(ticket_status='UPI')),
+    #     )
+    # }
+
+    # Alternate: keyed on the schedule's own start_date
     open_weekly = {
-        str(r['ticket_date']): {'total': r['total'] or 0, 'upi': r['upi'] or 0}
+        str(r['schedule_id__start_date']): {'total': r['total'] or 0, 'upi': r['upi'] or 0}
         for r in TransactionData.objects.filter(
             company_code=company,
-            ticket_date__range=[week_start, week_end],
+            schedule_id__start_date__range=[week_start, week_end],
             trip_id__is_closed=False,
-        ).values('ticket_date').annotate(
+        ).values('schedule_id__start_date').annotate(
             total=Sum('ticket_amount'),
             upi=Sum('ticket_amount', filter=Q(ticket_status='UPI')),
         )
@@ -220,8 +268,6 @@ def apk_dashboard(request):
 @permission_classes([IsAuthenticated, LicensePermission])
 def apk_trips(request):
     user = request.user
-    if not _meets_tier(user, 'intermediate'):
-        return Response(_TIER_ERROR, status=403)
 
     bus_no = request.GET.get('bus_no')
     schedule_no = request.GET.get('schedule_no')
@@ -230,11 +276,22 @@ def apk_trips(request):
     if not bus_no or not schedule_no or not date_str:
         return Response({'error': 'bus_no, schedule_no and date are required'}, status=400)
 
+    # Current: gated only on the trip's own start_date
+    # trips = TripData.objects.filter(
+    #     company_code=user.company,
+    #     bus_no=bus_no,
+    #     schedule_no=int(schedule_no),
+    #     start_date=date_str,
+    # ).select_related('route_id').order_by('trip_no')
+
+    # Guard: only show trips whose own schedule also opened on this same date — a trip
+    # that started today under a schedule opened yesterday (still open) is excluded.
     trips = TripData.objects.filter(
         company_code=user.company,
         bus_no=bus_no,
         schedule_no=int(schedule_no),
         start_date=date_str,
+        schedule_id__start_date=date_str,
     ).select_related('route_id').order_by('trip_no')
 
     trip_list = []
@@ -281,8 +338,6 @@ def apk_trips(request):
 @permission_classes([IsAuthenticated, LicensePermission])
 def apk_tickets(request):
     user = request.user
-    if not _meets_tier(user, 'intermediate'):
-        return Response(_TIER_ERROR, status=403)
 
     bus_no = request.GET.get('bus_no')
     schedule_no = request.GET.get('schedule_no')
@@ -293,12 +348,23 @@ def apk_tickets(request):
         return Response({'error': 'bus_no, schedule_no, trip_no and date are required'}, status=400)
 
     try:
+        # Current: gated only on the trip's own start_date
+        # trip = TripData.objects.get(
+        #     company_code=user.company,
+        #     bus_no=bus_no,
+        #     schedule_no=int(schedule_no),
+        #     trip_no=int(trip_no),
+        #     start_date=date_str,
+        # )
+
+        # Guard: trip's own schedule must also have opened on this same date
         trip = TripData.objects.get(
             company_code=user.company,
             bus_no=bus_no,
             schedule_no=int(schedule_no),
             trip_no=int(trip_no),
             start_date=date_str,
+            schedule_id__start_date=date_str,
         )
     except TripData.DoesNotExist:
         return Response({'error': 'Trip not found'}, status=404)
@@ -311,10 +377,19 @@ def apk_tickets(request):
             for rs in RouteStage.objects.filter(route=trip.route_id).select_related('stage')
         }
 
+    # Current: also gated on ticket_date — drops tickets punched after midnight
+    # under the same still-open trip.
+    # qs = TransactionData.objects.filter(
+    #     company_code=user.company,
+    #     trip_id=trip,
+    #     ticket_date=date_str,
+    # ).order_by('ticket_time')
+
+    # trip_id already resolves to this exact trip row; all its tickets belong to
+    # it regardless of which calendar date they were punched on.
     qs = TransactionData.objects.filter(
         company_code=user.company,
         trip_id=trip,
-        ticket_date=date_str,
     ).order_by('ticket_time')
 
     totals = {'full': 0, 'half': 0, 'st': 0, 'phy': 0, 'lugg': 0, 'ladies': 0, 'senior': 0}
@@ -358,8 +433,6 @@ def apk_tickets(request):
 @permission_classes([IsAuthenticated, LicensePermission])
 def apk_passengers(request):
     user = request.user
-    if not _meets_tier(user, 'intermediate'):
-        return Response(_TIER_ERROR, status=403)
 
     bus_no = request.GET.get('bus_no')
     schedule_no = request.GET.get('schedule_no')
@@ -370,20 +443,38 @@ def apk_passengers(request):
         return Response({'error': 'bus_no, schedule_no, trip_no and date are required'}, status=400)
 
     try:
+        # Current: gated only on the trip's own start_date
+        # trip = TripData.objects.get(
+        #     company_code=user.company,
+        #     bus_no=bus_no,
+        #     schedule_no=int(schedule_no),
+        #     trip_no=int(trip_no),
+        #     start_date=date_str,
+        # )
+
+        # Guard: trip's own schedule must also have opened on this same date
         trip = TripData.objects.get(
             company_code=user.company,
             bus_no=bus_no,
             schedule_no=int(schedule_no),
             trip_no=int(trip_no),
             start_date=date_str,
+            schedule_id__start_date=date_str,
         )
     except TripData.DoesNotExist:
         return Response({'error': 'Trip not found'}, status=404)
 
+    # Current: also gated on ticket_date — drops tickets punched after midnight
+    # under the same still-open trip.
+    # qs = TransactionData.objects.filter(
+    #     company_code=user.company,
+    #     trip_id=trip,
+    #     ticket_date=date_str,
+    # )
+
     qs = TransactionData.objects.filter(
         company_code=user.company,
         trip_id=trip,
-        ticket_date=date_str,
     )
 
     # Route stages ordered by sequence — derived from the trip's own route
@@ -529,15 +620,26 @@ def duty_report(request):
             end_ticket = t['end_ticket_no']
             collection = str(t['total_collection'])
         else:
+            # Current: also gated on ticket_date — drops tickets punched after midnight
+            # under the same still-open trip.
+            # live = TransactionData.objects.filter(
+            #     company_code=user.company,
+            #     trip_id=t['id'],
+            #     ticket_date=date_str,
+            # ).aggregate(live_collection=Sum('ticket_amount'))
+            # last_ticket = TransactionData.objects.filter(
+            #     company_code=user.company,
+            #     trip_id=t['id'],
+            #     ticket_date=date_str,
+            # ).order_by('-ticket_time').values_list('ticket_number', flat=True).first()
+
             live = TransactionData.objects.filter(
                 company_code=user.company,
                 trip_id=t['id'],
-                ticket_date=date_str,
             ).aggregate(live_collection=Sum('ticket_amount'))
             last_ticket = TransactionData.objects.filter(
                 company_code=user.company,
                 trip_id=t['id'],
-                ticket_date=date_str,
             ).order_by('-ticket_time').values_list('ticket_number', flat=True).first()
             end_ticket = last_ticket
             collection = str(live['live_collection'] or '0.00')
@@ -865,18 +967,18 @@ def expense_report(request):
     })
 
 
-# GET /reports/mosambee-transactions
-# Mosambee transaction posting data for the company on a given date.
+# GET /reports/aggregator-transactions
+# Payment aggregator transaction posting data for the company on a given date.
 # Params: date (YYYY-MM-DD)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, LicensePermission])
-def mosambee_transaction_report(request):
+def aggregator_transaction_report(request):
     user = request.user
     date_str = request.GET.get('date')
     if not date_str:
         return Response({'error': 'date is required'}, status=400)
 
-    qs = MosambeeTransaction.objects.filter(
+    qs = AggregatorTransaction.objects.filter(
         company=user.company,
         transaction_date=date_str,
     ).order_by('transaction_datetime')
