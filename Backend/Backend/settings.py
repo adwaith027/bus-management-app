@@ -116,224 +116,9 @@ USE_TZ = True
 TIME_ZONE = 'Asia/Kolkata'
 
 
-# Logging Configuration
-LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'formatters': {
-        'verbose': {
-            'format': '{levelname} {asctime} {name} {module} {funcName}:{lineno} - {message}',
-            'style': '{',
-            'datefmt': '%Y-%m-%d %H:%M:%S',
-        },
-        'simple': {
-            'format': '{levelname} {asctime} {message}',
-            'style': '{',
-            'datefmt': '%Y-%m-%d %H:%M:%S',
-        },
-    },
-    'handlers': {
-        'console': {
-            'level': 'DEBUG',
-            'class': 'logging.StreamHandler',
-            'formatter': 'simple',
-        },
-        'file': {
-            'level': 'INFO',
-            'class': 'logging.handlers.RotatingFileHandler',
-            'filename': os.path.join(BASE_DIR, 'logs', 'django.log'),
-            'maxBytes': 1024 * 1024 * 15,  # 15MB
-            'backupCount': 10,
-            'formatter': 'verbose',
-        },
-        'ticket_transactions_file': {
-            'level': 'ERROR',
-            'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(BASE_DIR, 'logs', 'ticket_transactions.log'),
-            'when': 'midnight',
-            'backupCount': 30,
-            'formatter': 'verbose',
-        },
-        'tripclose_transactions_file': {
-            'level': 'ERROR',
-            'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(BASE_DIR, 'logs', 'tripclose_transactions.log'),
-            'when': 'midnight',
-            'backupCount': 30,
-            'formatter': 'verbose',
-        },
-        'mosambee_transactions_file': {
-            'level': 'ERROR',
-            'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(BASE_DIR, 'logs', 'mosambee_transactions.log'),
-            'when': 'midnight',
-            'backupCount': 30,
-            'formatter': 'verbose',
-        },
-        'mosambee_payouts_file': {
-            'level': 'ERROR',
-            'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(BASE_DIR, 'logs', 'mosambee_payouts.log'),
-            'when': 'midnight',
-            'backupCount': 30,
-            'formatter': 'verbose',
-        },
-        'palmtec_ticket_file': {
-            'level': 'INFO',
-            'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(BASE_DIR, 'logs', 'palmtec_ticket.log'),
-            'when': 'midnight',
-            'backupCount': 30,
-            'formatter': 'simple',
-        },
-        'palmtec_trip_open_file': {
-            'level': 'INFO',
-            'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(BASE_DIR, 'logs', 'palmtec_trip_open.log'),
-            'when': 'midnight',
-            'backupCount': 30,
-            'formatter': 'simple',
-        },
-        'palmtec_trip_close_file': {
-            'level': 'INFO',
-            'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(BASE_DIR, 'logs', 'palmtec_trip_close.log'),
-            'when': 'midnight',
-            'backupCount': 30,
-            'formatter': 'simple',
-        },
-        'palmtec_trip_close_summary_file': {
-            'level': 'INFO',
-            'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(BASE_DIR, 'logs', 'palmtec_trip_close_summary.log'),
-            'when': 'midnight',
-            'backupCount': 30,
-            'formatter': 'simple',
-        },
-        'palmtec_schedule_open_file': {
-            'level': 'INFO',
-            'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(BASE_DIR, 'logs', 'palmtec_schedule_open.log'),
-            'when': 'midnight',
-            'backupCount': 30,
-            'formatter': 'simple',
-        },
-        'palmtec_schedule_close_file': {
-            'level': 'INFO',
-            'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(BASE_DIR, 'logs', 'palmtec_schedule_close.log'),
-            'when': 'midnight',
-            'backupCount': 30,
-            'formatter': 'simple',
-        },
-        'palmtec_schedule_close_summary_file': {
-            'level': 'INFO',
-            'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(BASE_DIR, 'logs', 'palmtec_schedule_close_summary.log'),
-            'when': 'midnight',
-            'backupCount': 30,
-            'formatter': 'simple',
-        },
-        'palmtec_odometer_file': {
-            'level': 'INFO',
-            'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(BASE_DIR, 'logs', 'palmtec_odometer.log'),
-            'when': 'midnight',
-            'backupCount': 30,
-            'formatter': 'simple',
-        },
-        'palmtec_expense_file': {
-            'level': 'INFO',
-            'class': 'logging.handlers.TimedRotatingFileHandler',
-            'filename': os.path.join(BASE_DIR, 'logs', 'palmtec_expense.log'),
-            'when': 'midnight',
-            'backupCount': 30,
-            'formatter': 'simple',
-        },
-    },
-    'loggers': {
-        'django': {
-            'handlers': ['console', 'file'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-        'TicketAppB': {
-            'handlers': ['console', 'file'],
-            'level': 'DEBUG',
-            'propagate': False,
-        },
-        'ticket.transactions': {
-            'handlers': ['ticket_transactions_file', 'console'],
-            'level': 'ERROR',
-            'propagate': False,
-        },
-        'tripclose.transactions': {
-            'handlers': ['tripclose_transactions_file', 'console'],
-            'level': 'ERROR',
-            'propagate': False,
-        },
-        'mosambee.transactions': {
-            'handlers': ['mosambee_transactions_file', 'console'],
-            'level': 'ERROR',
-            'propagate': False,
-        },
-        'mosambee.payouts': {
-            'handlers': ['mosambee_payouts_file', 'console'],
-            'level': 'ERROR',
-            'propagate': False,
-        },
-        'ticket.palmtec.ticket': {
-            'handlers': ['palmtec_ticket_file'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-        'ticket.palmtec.trip_open': {
-            'handlers': ['palmtec_trip_open_file'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-        'ticket.palmtec.trip_close': {
-            'handlers': ['palmtec_trip_close_file'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-        'ticket.palmtec.trip_close_summary': {
-            'handlers': ['palmtec_trip_close_summary_file'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-        'ticket.palmtec.schedule_open': {
-            'handlers': ['palmtec_schedule_open_file'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-        'ticket.palmtec.schedule_close': {
-            'handlers': ['palmtec_schedule_close_file'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-        'ticket.palmtec.schedule_close_summary': {
-            'handlers': ['palmtec_schedule_close_summary_file'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-        'ticket.palmtec.odometer': {
-            'handlers': ['palmtec_odometer_file'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-        'ticket.palmtec.expense': {
-            'handlers': ['palmtec_expense_file'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-    },
-}
-
-# Create logs directory if it doesn't exist
-LOGS_DIR = os.path.join(BASE_DIR, 'logs')
-if not os.path.exists(LOGS_DIR):
-    os.makedirs(LOGS_DIR)
+# Logging is configured programmatically in TicketAppB.apps.TicketappbConfig.ready()
+# via TicketAppB.log_handlers.configure_logging(). Disable Django's auto-config here.
+LOGGING_CONFIG = None
 
 
 # Static files (CSS, JavaScript, Images)
@@ -359,6 +144,9 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
         'TicketAppB.permissions.LicensePermission',
     ],
+    'DEFAULT_RENDERER_CLASSES': [
+        'rest_framework.renderers.JSONRenderer',
+    ],
 }
 
 # Session idle timeout in seconds. Read from env.
@@ -366,9 +154,9 @@ SESSION_IDLE_TIMEOUT = int(env('SESSION_IDLE_TIMEOUT', default=1200))
 SESSION_IDLE_TIMEOUT_APK = int(env('SESSION_IDLE_TIMEOUT_APK', default=43200))
 
 
-# Cookie Settings for HTTP Testing
-SESSION_COOKIE_SECURE = not DEBUG
-CSRF_COOKIE_SECURE = not DEBUG
+COOKIE_SECURE = env.bool('COOKIE_SECURE', default=not DEBUG)
+SESSION_COOKIE_SECURE = COOKIE_SECURE
+CSRF_COOKIE_SECURE = COOKIE_SECURE
 
 SESSION_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SAMESITE = 'Lax'
@@ -390,8 +178,8 @@ PROJECT_NAME  = env('PROJECT_NAME')
 DEVICE_MODEL  = env('DeviceModel',  default='Windows')
 DEVICE_TYPE   = env.int('DeviceType', default=1)
 
-# Mosambee salt
-MOSAMBEE_SALT=env('MOSAMBEE_SALT')
+# Payment aggregator salt
+AGGREGATOR_SALT=env('AGGREGATOR_SALT')
 
 # automatically append slash to URLs (for DRF)
 APPEND_SLASH = False
@@ -436,6 +224,18 @@ CELERY_BEAT_SCHEDULE = {
     'sweep-stale-sessions': {
         'task': 'TicketAppB.tasks.sweep_stale_sessions',
         'schedule': 600,  # every 10 minutes
+    },
+    'auto-populate-aggregator-tids': {
+        'task': 'TicketAppB.tasks.auto_populate_aggregator_tids',
+        'schedule': crontab(hour=0, minute=30),  # daily at 00:30
+    },
+    'scan-pending-aggregator-reconciliations': {
+        'task': 'TicketAppB.tasks.scan_pending_aggregator_reconciliations',
+        'schedule': 300.0,  # every 5 minutes
+    },
+    'scan-unmatched-aggregator-transactions': {
+        'task': 'TicketAppB.tasks.scan_unmatched_aggregator_transactions',
+        'schedule': 300.0,  # every 5 minutes
     },
 }
 
