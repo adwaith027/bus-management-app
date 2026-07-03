@@ -1,6 +1,6 @@
 import logging
 import io
-from django.db import transaction
+from django.db import transaction, IntegrityError
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -79,7 +79,10 @@ def create_stage(request):
 
     serializer = StageSerializer(data=request.data)
     if serializer.is_valid():
-        serializer.save(company=company, created_by=user)
+        try:
+            serializer.save(company=company, created_by=user)
+        except IntegrityError:
+            return Response({'message': 'Validation failed', 'errors': {'stage_code': ['A stage with this code already exists.']}}, status=status.HTTP_400_BAD_REQUEST)
         return Response({'message': 'Stage created successfully', 'data': serializer.data}, status=status.HTTP_201_CREATED)
 
     return Response({'message': 'Validation failed', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
@@ -95,7 +98,10 @@ def update_stage(request, pk):
 
     serializer = StageSerializer(obj, data=request.data, partial=True)
     if serializer.is_valid():
-        serializer.save(updated_by=user)
+        try:
+            serializer.save(updated_by=user)
+        except IntegrityError:
+            return Response({'message': 'Validation failed', 'errors': {'stage_code': ['A stage with this code already exists.']}}, status=status.HTTP_400_BAD_REQUEST)
         return Response({'message': 'Stage updated successfully', 'data': serializer.data}, status=status.HTTP_200_OK)
 
     return Response({'message': 'Validation failed', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
@@ -209,20 +215,80 @@ def update_route(request, pk):
     return Response({'message': 'Validation failed', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 
+def _find_similar_stages(stage_name, company):
+    """
+    Existing company stages whose name is a case-insensitive substring match
+    of stage_name (either direction) but not an exact match — exact matches
+    are silently reused elsewhere and never flagged as a "conflict".
+    """
+    q = stage_name.strip().lower()
+    if not q:
+        return []
+    candidates = Stage.objects.filter(company=company, is_deleted=False).exclude(stage_name__iexact=stage_name)
+    similar = []
+    for s in candidates:
+        sname = s.stage_name.lower()
+        # Skip trivial substring hits against very short existing names (e.g. "A")
+        # — a 1-2 char match against anything isn't a meaningful "similar name".
+        if len(sname) < 3 and len(sname) < len(q):
+            continue
+        if q in sname or sname in q:
+            similar.append(s)
+    return similar
+
+
+def _check_stage_similarity_conflicts(stages_data, company):
+    """
+    Dry-run over a route_stages payload: for every entry that would create a
+    brand-new Stage (no `stage` id, no exact name match), flag it if a
+    similarly-named stage already exists and the caller hasn't explicitly
+    confirmed (`confirmed_similar: true`) that a new one is wanted anyway.
+    """
+    conflicts = []
+    for idx, stage_data in enumerate(stages_data):
+        if stage_data.get('stage'):
+            continue
+        stage_name = str(stage_data.get('stage_name', '')).strip()
+        if not stage_name or stage_data.get('confirmed_similar'):
+            continue
+        if Stage.objects.filter(company=company, stage_name__iexact=stage_name, is_deleted=False).exists():
+            continue
+        similar = _find_similar_stages(stage_name, company)
+        if similar:
+            conflicts.append({
+                'index': idx,
+                'stage_name': stage_name,
+                'similar_to': [{'id': s.id, 'stage_name': s.stage_name, 'stage_code': s.stage_code} for s in similar],
+            })
+    return conflicts
+
+
 def _save_route_stages(route, stages_data, company, user):
-    stage_ids = [s['stage'] for s in stages_data if 'stage' in s]
-    valid_stages = Stage.objects.filter(id__in=stage_ids, company=company).values_list('id', flat=True)
-    valid_stage_set = set(valid_stages)
+    """
+    Rename + distance only — a route's stops are fixed once created (via the
+    wizard); this never creates a Stage. Renaming updates the shared Stage
+    row in place, so it's reflected on every other route using that stage too.
+    """
+    stage_ids = [s['stage'] for s in stages_data if s.get('stage')]
+    valid_stages = {
+        s.id: s for s in Stage.objects.filter(id__in=stage_ids, company=company)
+    }
 
     route_stages_to_create = []
     for stage_data in stages_data:
-        stage_id = stage_data.get('stage')
-        if not stage_id or stage_id not in valid_stage_set:
+        stage_obj = valid_stages.get(stage_data.get('stage'))
+        if not stage_obj:
             continue
+
+        new_name = str(stage_data.get('stage_name', '')).strip()
+        if new_name and new_name.isalnum() and new_name != stage_obj.stage_name:
+            stage_obj.stage_name = new_name
+            stage_obj.save(update_fields=['stage_name'])
+
         route_stages_to_create.append(
             RouteStage(
                 route=route,
-                stage_id=stage_id,
+                stage=stage_obj,
                 sequence_no=stage_data.get('sequence_no', 0),
                 distance=stage_data.get('distance', 0),
                 stage_local_lang=stage_data.get('stage_local_lang', ''),
@@ -535,6 +601,17 @@ def create_route_wizard(request):
     if not stages_data or not isinstance(stages_data, list) or len(stages_data) == 0:
         return Response({'message': 'At least one stage is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
+    for idx, stage_data in enumerate(stages_data):
+        if not stage_data.get('stage') and not str(stage_data.get('stage_name', '')).strip():
+            return Response({'message': f'Stage entry #{idx + 1} is missing a name.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    conflicts = _check_stage_similarity_conflicts(stages_data, company)
+    if conflicts:
+        return Response(
+            {'message': 'Some stage names look similar to existing stages. Confirm to proceed.', 'similar_stage_conflicts': conflicts},
+            status=status.HTTP_409_CONFLICT,
+        )
+
     try:
         fare_type = int(fare_type_raw)
     except (ValueError, TypeError):
@@ -585,10 +662,8 @@ def create_route_wizard(request):
                 min_fare=min_fare,
                 fare_type=fare_type,
                 bus_type=bus_type_obj,
-                use_stop=bool(data.get('use_stop', False)),
                 half=bool(data.get('half', False)),
                 luggage=bool(data.get('luggage', False)),
-                student=bool(data.get('student', False)),
                 adjust=bool(data.get('adjust', False)),
                 conc=bool(data.get('conc', False)),
                 ph=bool(data.get('ph', False)),
@@ -598,24 +673,52 @@ def create_route_wizard(request):
                 created_by=user,
             )
 
+            used_codes = set(
+                Stage.objects.filter(company=company).values_list('stage_code', flat=True)
+            )
+            existing_numeric_codes = [int(c) for c in used_codes if c.isdigit()]
+            next_code = max(existing_numeric_codes, default=1000) + 1
+            name_cache = {}
+
             for idx, stage_data in enumerate(stages_data):
+                stage_id   = stage_data.get('stage')
                 stage_name = str(stage_data.get('stage_name', '')).strip()
                 distance   = stage_data.get('distance', 0)
                 seq        = idx + 1
 
-                base_code  = f"{route_code}_{seq}"
-                stage_code = base_code
-                counter    = 1
-                while Stage.objects.filter(company=company, stage_code=stage_code).exists():
-                    stage_code = f"{base_code}_{counter}"
-                    counter   += 1
+                stage_obj = None
+                if stage_id:
+                    stage_obj = Stage.objects.filter(id=stage_id, company=company).first()
 
-                stage_obj = Stage.objects.create(
-                    stage_code=stage_code,
-                    stage_name=stage_name,
-                    company=company,
-                    created_by=user,
-                )
+                if not stage_obj and stage_name:
+                    cache_key = stage_name.lower()
+                    stage_obj = name_cache.get(cache_key)
+                    if not stage_obj:
+                        stage_obj = Stage.objects.filter(
+                            company=company, stage_name__iexact=stage_name, is_deleted=False
+                        ).first()
+
+                if not stage_obj and stage_name:
+                    stage_code = str(stage_data.get('stage_code', '')).strip()
+                    if not stage_code.isdigit() or stage_code in used_codes:
+                        stage_code = str(next_code)
+                        while stage_code in used_codes:
+                            next_code += 1
+                            stage_code = str(next_code)
+                    used_codes.add(stage_code)
+                    next_code += 1
+
+                    stage_obj = Stage.objects.create(
+                        stage_code=stage_code,
+                        stage_name=stage_name,
+                        company=company,
+                        created_by=user,
+                    )
+
+                if not stage_obj:
+                    continue
+                name_cache[stage_obj.stage_name.lower()] = stage_obj
+
                 RouteStage.objects.create(
                     route=route,
                     stage=stage_obj,
@@ -722,8 +825,8 @@ class RouteExcelImportView(APIView):
 
     Expected columns (row 1 = headers, row 2+ = data):
       route_code, route_name, min_fare, fare_type (1=Table/2=Graph),
-      bus_type (bus type name), half, luggage, student, adjust,
-      conc, ph, pass_allow, use_stop  (all flags: 0 or 1)
+      bus_type (bus type name), half, luggage, adjust,
+      conc, ph, pass_allow  (all flags: 0 or 1)
 
     Returns JSON with created/skipped counts and per-row errors.
     """
@@ -822,12 +925,10 @@ class RouteExcelImportView(APIView):
                             'bus_type':    bus_type_obj,
                             'half':        to_bool(row_dict.get('half')),
                             'luggage':     to_bool(row_dict.get('luggage')),
-                            'student':     to_bool(row_dict.get('student')),
                             'adjust':      to_bool(row_dict.get('adjust')),
                             'conc':        to_bool(row_dict.get('conc')),
                             'ph':          to_bool(row_dict.get('ph')),
                             'pass_allow':  to_bool(row_dict.get('pass_allow')),
-                            'use_stop':    to_bool(row_dict.get('use_stop')),
                             'created_by':  user,
                         }
                     )
