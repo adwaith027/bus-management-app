@@ -13,7 +13,7 @@ from rest_framework.permissions import IsAuthenticated
 
 from ...permissions import LicensePermission
 
-logger = logging.getLogger('ticket.palmtec')
+logger = logging.getLogger('ticket.palmtec.apk_upload')
 
 # ── Struct definitions ────────────────────────────────────────────────────────
 # Little-endian, packed (no alignment padding) — matches ETM device binary layout.
