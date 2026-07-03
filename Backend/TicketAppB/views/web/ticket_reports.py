@@ -14,7 +14,7 @@ from ...models import TransactionData, TripData, ScheduleData
 from ...permissions import LicensePermission
 from ...serializers.transactions import TicketDataSerializer,TripDataSerializer,ScheduleDataSerializer
 
-logger = logging.getLogger('ticket.transactions')
+logger = logging.getLogger('ticket.ticket_report')
 
 
 def _parse_since(since_timestamp):
