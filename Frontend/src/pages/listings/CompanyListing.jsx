@@ -174,7 +174,7 @@ function ModalWrapper({ open, onClose, title, icon: Icon, width = 'max-w-2xl', c
 
 // ── EMPTY form ─────────────────────────────────────────────────────────────────
 const EMPTY = {
-  company_name: '', company_email: '', gst_number: '',
+  company_name: '', company_email: '', gst_number: '', aggregator_merchant_id: '',
   contact_person: '', contact_number: '',
   address: '', state: '', district: '',
   is_active: true,
@@ -222,11 +222,16 @@ export default function CompanyListing() {
   const [registeringLicense, setRegisteringLicense] = useState({});
   const [validatingLicense,  setValidatingLicense]  = useState({});
   const [syncingLicense,     setSyncingLicense]      = useState({});
+  const [togglingActive,     setTogglingActive]      = useState({});
   const [search, setSearch]           = useState('');
 
   // ── Sync modal state ─────────────────────────────────────────────────────
   const [syncModal,     setSyncModal]     = useState(null);   // null | { companyId, data }
   const [syncConfirming, setSyncConfirming] = useState(false);
+
+  // ── Dealer pool balance (fetched when dealer_admin opens create view) ────
+  const [dealerPool,    setDealerPool]    = useState(null);
+  const [poolLoading,   setPoolLoading]   = useState(false);
 
   // ── Page view: 'list' | 'create' ────────────────────────────────────────
   const [pageView, setPageView] = useState('list');
@@ -270,6 +275,16 @@ export default function CompanyListing() {
     return () => clearInterval(id);
   }, [companies, fetchCompanies]);
 
+  // Fetch dealer pool balance when dealer_admin enters create view
+  useEffect(() => {
+    if (!isDealerAdmin || pageView !== 'create') return;
+    setPoolLoading(true);
+    api.get(`${BASE_URL}/dealer-dashboard`)
+      .then(res => setDealerPool(res.data?.data?.pool || null))
+      .catch(() => setDealerPool(null))
+      .finally(() => setPoolLoading(false));
+  }, [isDealerAdmin, pageView]);
+
   // ── Form helpers ─────────────────────────────────────────────────────────
   const set = (k, v) => setForm(f => k === 'state' ? { ...f, state: v, district: '' } : { ...f, [k]: v });
 
@@ -286,7 +301,31 @@ export default function CompanyListing() {
   const sec1 = !!(form.company_name && form.company_email && form.contact_person && form.contact_number);
   const sec2 = !!(form.address && form.state && form.district);
   const sec3 = !!(form.user_username && form.user_email && form.user_password);
-  const sec4 = !isDealerAdmin || !!(parseInt(form.total_user_count) > 0);
+  // Pool validation errors (dealer_admin create only)
+  const poolErrors = useMemo(() => {
+    if (!isDealerAdmin || !dealerPool) return {};
+    const palmtec = parseInt(form.palmtec_count)           || 0;
+    const total   = parseInt(form.total_user_count)        || 0;
+    const premium = parseInt(form.premium_user_count)      || 0;
+    const inter   = parseInt(form.intermediate_user_count) || 0;
+    const basic   = total - premium - inter;
+    const errs = {};
+    if (palmtec > dealerPool.palmtec.remaining)
+      errs.palmtec = `Max ${dealerPool.palmtec.remaining} available`;
+    if (total > dealerPool.total_users.remaining)
+      errs.total = `Max ${dealerPool.total_users.remaining} available`;
+    if (premium > dealerPool.premium.remaining)
+      errs.premium = `Max ${dealerPool.premium.remaining} available`;
+    if (inter > dealerPool.inter.remaining)
+      errs.inter = `Max ${dealerPool.inter.remaining} available`;
+    if (basic < 0)
+      errs.basic = 'Total users must be ≥ premium + intermediate';
+    else if (basic > dealerPool.basic.remaining)
+      errs.basic = `Max ${dealerPool.basic.remaining} basic slots available`;
+    return errs;
+  }, [isDealerAdmin, dealerPool, form.palmtec_count, form.total_user_count, form.premium_user_count, form.intermediate_user_count]);
+
+  const sec4 = !isDealerAdmin || (!!(parseInt(form.total_user_count) > 0) && Object.keys(poolErrors).length === 0);
   const canSubmit = sec1 && sec2 && sec3 && sec4;
 
   // ── Import fetch ─────────────────────────────────────────────────────────
@@ -322,8 +361,9 @@ export default function CompanyListing() {
       company_email:  form.company_email,
       contact_person: form.contact_person,
       contact_number: form.contact_number,
-      gst_number:     form.gst_number,
-      address:        form.address,
+      gst_number:          form.gst_number,
+      aggregator_merchant_id: form.aggregator_merchant_id || null,
+      address:             form.address,
       state:          form.state,
       district:       form.district,
       user_username:  form.user_username,
@@ -407,13 +447,30 @@ export default function CompanyListing() {
     } finally { setSyncConfirming(false); }
   };
 
+  const handleToggleActive = async (company) => {
+    const nextActive = !company.is_active;
+    const confirmMsg = nextActive
+      ? `Activate "${company.company_name}"? Users will be able to log in again.`
+      : `Deactivate "${company.company_name}"? All logged-in users of this company will be signed out immediately and blocked from logging in.`;
+    if (!window.confirm(confirmMsg)) return;
+    setTogglingActive(p => ({ ...p, [company.id]: true }));
+    setCompanies(list => list.map(c => c.id === company.id ? { ...c, is_active: nextActive } : c));
+    try {
+      await api.put(`${BASE_URL}/update-company-details/${company.id}`, { is_active: nextActive });
+    } catch (err) {
+      setCompanies(list => list.map(c => c.id === company.id ? { ...c, is_active: company.is_active } : c));
+      window.alert(err.response?.data?.message || err.response?.data?.error || 'Failed to update status.');
+    } finally { setTogglingActive(p => ({ ...p, [company.id]: false })); }
+  };
+
   // ── Edit / View modal ────────────────────────────────────────────────────
   const openView = (company) => {
     setModalForm({
       company_name:   company.company_name   || '',
       company_email:  company.company_email  || '',
-      gst_number:     company.gst_number     || '',
-      contact_person: company.contact_person || '',
+      gst_number:          company.gst_number          || '',
+      aggregator_merchant_id: company.aggregator_merchant_id || '',
+      contact_person:      company.contact_person      || '',
       contact_number: company.contact_number || '',
       address:        company.address        || '',
       state:          company.state          || '',
@@ -443,11 +500,11 @@ export default function CompanyListing() {
         company_email:  modalForm.company_email,
         contact_person: modalForm.contact_person,
         contact_number: modalForm.contact_number,
-        gst_number:     modalForm.gst_number,
-        address:        modalForm.address,
+        gst_number:          modalForm.gst_number,
+        aggregator_merchant_id: modalForm.aggregator_merchant_id || null,
+        address:             modalForm.address,
         state:          modalForm.state,
         district:       modalForm.district,
-        is_active:      modalForm.is_active,
       });
       if (res?.status === 200 || res?.status === 201) {
         window.alert(res.data.message || 'Company updated!');
@@ -530,18 +587,19 @@ export default function CompanyListing() {
                   <th className="px-5 py-3.5 text-[11px] font-semibold text-slate-400 uppercase tracking-widest whitespace-nowrap">Company ID</th>
                   <th className="px-5 py-3.5 text-[11px] font-semibold text-slate-400 uppercase tracking-widest whitespace-nowrap">Company</th>
                   <th className="px-5 py-3.5 text-[11px] font-semibold text-slate-400 uppercase tracking-widest whitespace-nowrap">License Units</th>
-                  <th className="px-5 py-3.5 text-[11px] font-semibold text-slate-400 uppercase tracking-widest whitespace-nowrap">Status</th>
+                  <th className="px-5 py-3.5 text-[11px] font-semibold text-slate-400 uppercase tracking-widest whitespace-nowrap">License</th>
                   <th className="px-5 py-3.5 text-[11px] font-semibold text-slate-400 uppercase tracking-widest whitespace-nowrap">Validity</th>
+                  <th className="px-5 py-3.5 text-[11px] font-semibold text-slate-400 uppercase tracking-widest whitespace-nowrap">Access</th>
                   <th className="px-5 py-3.5 text-[11px] font-semibold text-slate-400 uppercase tracking-widest whitespace-nowrap">License Action</th>
                   <th className="px-5 py-3.5 text-[11px] font-semibold text-slate-400 uppercase tracking-widest whitespace-nowrap text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
-                  <TableSkeleton columns={['w-40', 'w-20', 'w-16', 'w-20', 'w-24', 'w-24', 'w-16']} />
+                  <TableSkeleton columns={['w-40', 'w-20', 'w-16', 'w-16', 'w-24', 'w-16', 'w-24', 'w-16']} />
                 ) : filteredCompanies.length === 0 ? (
                   <tr>
-                    <td colSpan="7" className="px-4 py-10 text-center">
+                    <td colSpan="8" className="px-4 py-10 text-center">
                       <div className="flex flex-col items-center gap-2">
                         <Building2 size={20} className="text-slate-300" />
                         <p className="text-sm text-slate-400">{search ? 'No companies match your search' : 'No companies found'}</p>
@@ -592,14 +650,6 @@ export default function CompanyListing() {
                       </td>
                       <td className="px-5 py-4">
                         <div className="flex flex-col gap-1">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium border w-fit ${
-                            company.is_active
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                              : 'bg-slate-50 text-slate-500 border-slate-200'
-                          }`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${company.is_active ? 'bg-emerald-500' : 'bg-slate-400'}`} />
-                            {company.is_active ? 'Active' : 'Inactive'}
-                          </span>
                           <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border w-fit ${getStatusStyle(authStatus)}`}>
                             {authStatus || 'Pending'}
                           </span>
@@ -621,6 +671,22 @@ export default function CompanyListing() {
                         ) : (
                           <span className="text-sm text-slate-400">—</span>
                         )}
+                      </td>
+                      <td className="px-5 py-4">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleActive(company)}
+                          disabled={togglingActive[company.id]}
+                          title={company.is_active ? 'Active — click to deactivate' : 'Inactive — click to activate'}
+                          className="inline-flex items-center gap-1.5 w-fit cursor-pointer disabled:opacity-50"
+                        >
+                          <span className={`relative w-8 h-[18px] rounded-full transition-colors shrink-0 ${company.is_active ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                            <span className={`absolute top-0.5 left-0.5 w-[14px] h-[14px] rounded-full bg-white shadow transition-transform ${company.is_active ? 'translate-x-[14px]' : ''}`} />
+                          </span>
+                          <span className={`text-xs font-medium ${company.is_active ? 'text-emerald-700' : 'text-slate-500'}`}>
+                            {company.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                        </button>
                       </td>
                       <td className="px-5 py-4">
                         <div className="flex flex-col gap-1">
@@ -732,7 +798,8 @@ export default function CompanyListing() {
                   {[
                     { label: 'Contact Person', value: c.contact_person },
                     { label: 'Contact Number', value: c.contact_number ? `+91 ${c.contact_number}` : '—' },
-                    { label: 'GST Number',      value: c.gst_number || '—' },
+                    { label: 'GST Number',          value: c.gst_number || '—' },
+                    { label: 'Payment Aggregator Merchant ID', value: c.aggregator_merchant_id || '—' },
                     { label: 'Company ID',       value: c.company_id ? `#${c.company_id}` : 'Not registered' },
                     { label: 'Valid From',        value: c.product_from_date ? new Date(c.product_from_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—' },
                     { label: 'Valid Till',        value: c.product_to_date ? new Date(c.product_to_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—' },
@@ -807,7 +874,8 @@ export default function CompanyListing() {
                 { label: 'Email',          name: 'company_email',  type: 'email', required: true },
                 { label: 'Contact Person', name: 'contact_person', required: true },
                 { label: 'Contact Number', name: 'contact_number', required: true },
-                { label: 'GST Number',     name: 'gst_number' },
+                { label: 'GST Number',           name: 'gst_number' },
+                { label: 'Payment Aggregator Merchant ID', name: 'aggregator_merchant_id' },
               ].map(f => (
                 <div key={f.name} className="space-y-1.5">
                   <label className="text-sm font-medium text-slate-700">
@@ -846,17 +914,6 @@ export default function CompanyListing() {
                 </select>
               </div>
             </div>
-
-            <label className="flex items-center gap-3 cursor-pointer">
-              <div onClick={() => setModalForm(f => ({ ...f, is_active: !f.is_active }))}
-                className={`relative w-10 h-[22px] rounded-full transition-colors cursor-pointer ${modalForm.is_active ? 'bg-emerald-500' : 'bg-slate-300'}`}>
-                <span className={`absolute top-0.5 left-0.5 w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${modalForm.is_active ? 'translate-x-[18px]' : ''}`} />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-slate-700">Company Status</p>
-                <p className="text-xs text-slate-500">{modalForm.is_active ? 'Active — users can log in' : 'Inactive — all company users blocked'}</p>
-              </div>
-            </label>
 
             <div className="flex items-center gap-2 pt-4 border-t border-slate-100">
               <button type="button" onClick={() => setModal(null)}
@@ -1055,8 +1112,11 @@ export default function CompanyListing() {
                         className="flex-1 px-3 py-2 border border-slate-300 rounded-r-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
                     </div>
                   </Field>
-                  <Field label="GST Number" hint="Optional" span={2}>
+                  <Field label="GST Number" hint="Optional" span={1}>
                     <input value={form.gst_number} onChange={e => set('gst_number', e.target.value)} placeholder="29ABCDE1234F1Z5" className={inputCls} />
+                  </Field>
+                  <Field label="Payment Aggregator Merchant ID" hint="Optional" span={1}>
+                    <input value={form.aggregator_merchant_id} onChange={e => set('aggregator_merchant_id', e.target.value)} placeholder="HDFC000024839241" className={inputCls} />
                   </Field>
                 </div>
               </SectionCard>
@@ -1126,22 +1186,115 @@ export default function CompanyListing() {
               {/* Step 4: Pool Allocation — dealer_admin only */}
               {isDealerAdmin && createMode === 'new' && (
                 <SectionCard step={4} active={sec3} complete={sec4} title="Pool Allocation" subtitle="Deduct from your license pool — cannot exceed your remaining balance.">
+
+                  {/* Pool balance summary */}
+                  {poolLoading ? (
+                    <div className="mb-4 rounded-xl bg-slate-50 border border-slate-100 px-4 py-3 text-xs text-slate-400 animate-pulse">
+                      Loading pool balance…
+                    </div>
+                  ) : dealerPool ? (
+                    <div className="mb-4 rounded-xl bg-slate-50 border border-slate-100 overflow-hidden">
+                      <p className="px-4 py-2 text-[10px] font-semibold uppercase tracking-widest text-slate-400 border-b border-slate-100">
+                        Your Remaining Pool Balance
+                      </p>
+                      <div className="grid grid-cols-5 divide-x divide-slate-100">
+                        {[
+                          { label: 'ETM Devices',   val: dealerPool.palmtec.remaining,     total: dealerPool.palmtec.total },
+                          { label: 'Total Users',   val: dealerPool.total_users.remaining,  total: dealerPool.total_users.total },
+                          { label: 'Premium',       val: dealerPool.premium.remaining,      total: dealerPool.premium.total },
+                          { label: 'Intermediate',  val: dealerPool.inter.remaining,        total: dealerPool.inter.total },
+                          { label: 'Basic',         val: dealerPool.basic.remaining,        total: dealerPool.basic.total },
+                        ].map(({ label, val, total }) => (
+                          <div key={label} className="px-3 py-2.5 text-center">
+                            <p className="text-[10px] text-slate-400 leading-tight">{label}</p>
+                            <p className={`text-base font-bold tabular-nums leading-tight mt-0.5 ${val === 0 ? 'text-red-500' : 'text-slate-800'}`}>{val}</p>
+                            <p className="text-[10px] text-slate-400">/ {total}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mb-4 flex items-center gap-2 rounded-lg bg-amber-50 border border-amber-100 px-3 py-2.5 text-xs text-amber-700">
+                      <AlertCircle size={13} className="shrink-0 text-amber-500" />
+                      Could not load pool balance. Backend validation will still apply.
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-2 gap-4">
-                    <Field label="ETM Devices" required hint="palmtec_count">
-                      <input type="number" min="0" value={form.palmtec_count} onChange={e => set('palmtec_count', e.target.value)} placeholder="0" className={inputCls} />
+                    {/* ETM Devices */}
+                    <Field label="ETM Devices" required hint={dealerPool ? `${dealerPool.palmtec.remaining} remaining` : 'palmtec_count'}>
+                      <input
+                        type="number" min="0"
+                        value={form.palmtec_count}
+                        onChange={e => set('palmtec_count', e.target.value)}
+                        placeholder="0"
+                        className={`${inputCls} ${poolErrors.palmtec ? 'border-red-400 focus:ring-red-300' : ''}`}
+                      />
+                      {poolErrors.palmtec && <p className="mt-1 text-xs text-red-600">{poolErrors.palmtec}</p>}
                     </Field>
-                    <Field label="Total Users" required hint="max concurrent logins">
-                      <input type="number" min="1" value={form.total_user_count} onChange={e => set('total_user_count', e.target.value)} placeholder="0" className={inputCls} />
+
+                    {/* Total Users */}
+                    <Field label="Total Users" required hint={dealerPool ? `${dealerPool.total_users.remaining} remaining` : 'max concurrent logins'}>
+                      <input
+                        type="number" min="1"
+                        value={form.total_user_count}
+                        onChange={e => set('total_user_count', e.target.value)}
+                        placeholder="0"
+                        className={`${inputCls} ${poolErrors.total ? 'border-red-400 focus:ring-red-300' : ''}`}
+                      />
+                      {poolErrors.total && <p className="mt-1 text-xs text-red-600">{poolErrors.total}</p>}
                     </Field>
-                    <Field label="Premium User Slots" hint="optional">
-                      <input type="number" min="0" value={form.premium_user_count} onChange={e => set('premium_user_count', e.target.value)} placeholder="0" className={inputCls} />
+
+                    {/* Premium */}
+                    <Field label="Premium User Slots" hint={dealerPool ? `${dealerPool.premium.remaining} remaining` : 'optional'}>
+                      <input
+                        type="number" min="0"
+                        value={form.premium_user_count}
+                        onChange={e => set('premium_user_count', e.target.value)}
+                        placeholder="0"
+                        className={`${inputCls} ${poolErrors.premium ? 'border-red-400 focus:ring-red-300' : ''}`}
+                      />
+                      {poolErrors.premium && <p className="mt-1 text-xs text-red-600">{poolErrors.premium}</p>}
                     </Field>
-                    <Field label="Intermediate User Slots" hint="optional">
-                      <input type="number" min="0" value={form.intermediate_user_count} onChange={e => set('intermediate_user_count', e.target.value)} placeholder="0" className={inputCls} />
+
+                    {/* Intermediate */}
+                    <Field label="Intermediate User Slots" hint={dealerPool ? `${dealerPool.inter.remaining} remaining` : 'optional'}>
+                      <input
+                        type="number" min="0"
+                        value={form.intermediate_user_count}
+                        onChange={e => set('intermediate_user_count', e.target.value)}
+                        placeholder="0"
+                        className={`${inputCls} ${poolErrors.inter ? 'border-red-400 focus:ring-red-300' : ''}`}
+                      />
+                      {poolErrors.inter && <p className="mt-1 text-xs text-red-600">{poolErrors.inter}</p>}
                     </Field>
                   </div>
+
+                  {/* Derived basic count display */}
+                  {(() => {
+                    const total   = parseInt(form.total_user_count)        || 0;
+                    const premium = parseInt(form.premium_user_count)      || 0;
+                    const inter   = parseInt(form.intermediate_user_count) || 0;
+                    const basic   = total - premium - inter;
+                    return total > 0 ? (
+                      <div className={`mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-xs border ${
+                        poolErrors.basic
+                          ? 'bg-red-50 border-red-200 text-red-700'
+                          : 'bg-slate-50 border-slate-100 text-slate-600'
+                      }`}>
+                        <span className="font-medium">Basic user slots (derived):</span>
+                        <span className="tabular-nums font-bold">{Math.max(0, basic)}</span>
+                        {dealerPool && <span className="ml-auto text-slate-400">pool remaining: {dealerPool.basic.remaining}</span>}
+                        {poolErrors.basic && <span className="ml-auto text-red-600">{poolErrors.basic}</span>}
+                      </div>
+                    ) : null;
+                  })()}
+
                   <p className="mt-3 text-xs text-slate-500">
-                    These counts are deducted from your pool immediately on save and restored if the company is deleted.
+                    Counts deducted from your pool on save and restored if the company is deleted.
+                    {dealerPool?.license_valid_to && (
+                      <> License valid to: <strong>{new Date(dealerPool.license_valid_to).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</strong>.</>
+                    )}
                   </p>
                 </SectionCard>
               )}
