@@ -1,3 +1,5 @@
+from functools import wraps
+from django.http import JsonResponse
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.exceptions import AuthenticationFailed, PermissionDenied, ValidationError as DRFValidationError
@@ -29,12 +31,30 @@ def _is_superadmin_or_executive(user):
 # ── Tier access ───────────────────────────────────────────────────────────────
 _TIER_ORDER = {'basic': 0, 'intermediate': 1, 'premium': 2}
 _TIER_ERROR = {"error": "This report requires Intermediate tier or above."}
+_PREMIUM_TIER_ERROR = {"error": "This feature requires Premium tier or above."}
 
 def _meets_tier(user, minimum: str) -> bool:
     """True if user's tier is >= minimum. Non-company roles are always allowed."""
     if user.role not in (UserRole.COMPANY_ADMIN, UserRole.COMPANY_USER):
         return True
     return _TIER_ORDER.get(user.tier or 'basic', 0) >= _TIER_ORDER.get(minimum, 0)
+
+
+def require_tier_for_apk(minimum: str, error: dict):
+    """
+    URL-registration-level tier gate for views shared between the web dashboard
+    and the APK (e.g. views/apk/master_send.py, dual-mounted in urls.py and
+    apk_urls.py). Apply this wrapper only on the apk_urls.py path() entries so
+    the web-mounted route for the same view function stays ungated.
+    """
+    def decorator(view_func):
+        @wraps(view_func)
+        def wrapper(request, *args, **kwargs):
+            if not _meets_tier(request.user, minimum):
+                return JsonResponse(error, status=403)
+            return view_func(request, *args, **kwargs)
+        return wrapper
+    return decorator
 
 
 def _get_company(company_id):
