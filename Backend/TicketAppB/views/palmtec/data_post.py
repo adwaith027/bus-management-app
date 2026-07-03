@@ -15,7 +15,7 @@ from ...tasks import (
 )
 from ..utils import _get_company_for_palmtec, _validate_checksum
 
-log_ticket           = logging.getLogger('ticket.palmtec.ticket')
+log_ticket           = logging.getLogger('ticket.palmtec.ticket_data')
 log_trip_open        = logging.getLogger('ticket.palmtec.trip_open')
 log_trip_close       = logging.getLogger('ticket.palmtec.trip_close')
 log_trip_close_sum   = logging.getLogger('ticket.palmtec.trip_close_summary')
@@ -71,6 +71,7 @@ def getScheduleOpenDataFromDevice(request):
     if not _validate_checksum('getScheduleOpen', raw):
         return HttpResponse("INVALID_CHECKSUM", status=400, content_type="text/plain")
 
+    company_instance = None
     try:
         company_instance = _get_company_for_palmtec(parts[3]) if parts[3] else None
         if not company_instance:
@@ -87,7 +88,7 @@ def getScheduleOpenDataFromDevice(request):
         return HttpResponse(f'OK#SUCCESS#fn={parts[1]}#', content_type="text/plain", status=200)
 
     except Exception as e:
-        log_schedule_open.exception("ScheduleOpen failed raw=%s err=%s", raw, e)
+        log_schedule_open.exception("ScheduleOpen failed raw=%s err=%s", raw, e, extra={'company_id': company_instance.company_id} if company_instance else {})
         return HttpResponse("ERROR", status=500, content_type="text/plain")
 
 
@@ -114,6 +115,7 @@ def getTripOpenDataFromDevice(request):
     if not _validate_checksum('getTripOpen', raw):
         return HttpResponse("INVALID_CHECKSUM", status=400, content_type="text/plain")
 
+    company_instance = None
     try:
         company_instance = _get_company_for_palmtec(parts[3]) if len(parts) > 3 and parts[3] else None
         if not company_instance:
@@ -130,7 +132,7 @@ def getTripOpenDataFromDevice(request):
         return HttpResponse(f'OK#SUCCESS#fn={parts[1]}#', content_type="text/plain", status=200)
 
     except Exception as e:
-        log_trip_open.exception("TripOpen failed raw=%s err=%s", raw, e)
+        log_trip_open.exception("TripOpen failed raw=%s err=%s", raw, e, extra={'company_id': company_instance.company_id} if company_instance else {})
         return HttpResponse("ERROR", status=500, content_type="text/plain")
 
 
@@ -157,6 +159,7 @@ def getTicketDataFromDevice(request):
     if not _validate_checksum('getTicket', raw):
         return HttpResponse("INVALID_CHECKSUM", status=400, content_type="text/plain")
 
+    company_instance = None
     try:
         company_instance = _get_company_for_palmtec(parts[46]) if parts[46] else None
         if not company_instance:
@@ -173,7 +176,7 @@ def getTicketDataFromDevice(request):
         return HttpResponse(f'OK#SUCCESS#fn={parts[1]}#', content_type="text/plain", status=200)
 
     except Exception as e:
-        log_ticket.exception("Ticket failed raw=%s err=%s", raw, e)
+        log_ticket.exception("Ticket failed raw=%s err=%s", raw, e, extra={'company_id': company_instance.company_id} if company_instance else {})
         return HttpResponse("ERROR", status=500, content_type="text/plain")
 
 
@@ -198,9 +201,10 @@ def getScheduleCloseDataFromDevice(request):
 
     log_schedule_close.debug("RECV fn=%s palmtec=%s", parts[1], parts[3])
 
-    if not _validate_checksum('getScheduleClose', raw):
+    if not _validate_checksum('getSdCl', raw):
         return HttpResponse("INVALID_CHECKSUM", status=400, content_type="text/plain")
 
+    company_instance = None
     try:
         company_instance = _get_company_for_palmtec(parts[3]) if parts[3] else None
         if not company_instance:
@@ -217,7 +221,7 @@ def getScheduleCloseDataFromDevice(request):
         return HttpResponse(f'OK#SUCCESS#fn={parts[1]}#', content_type="text/plain", status=200)
 
     except Exception as e:
-        log_schedule_close.exception("ScheduleClose failed raw=%s err=%s", raw, e)
+        log_schedule_close.exception("ScheduleClose failed raw=%s err=%s", raw, e, extra={'company_id': company_instance.company_id} if company_instance else {})
         return HttpResponse("ERROR", status=500, content_type="text/plain")
 
 
@@ -244,6 +248,7 @@ def getTripCloseDataFromDevice(request):
     if not _validate_checksum('getTripClose', raw):
         return HttpResponse("INVALID_CHECKSUM", status=400, content_type="text/plain")
 
+    company_instance = None
     try:
         company_instance = _get_company_for_palmtec(parts[3]) if parts[3] else None
         if not company_instance:
@@ -260,7 +265,7 @@ def getTripCloseDataFromDevice(request):
         return HttpResponse(f'OK#SUCCESS#fn={parts[1]}#', content_type="text/plain", status=200)
 
     except Exception as e:
-        log_trip_close.exception("TripClose failed raw=%s err=%s", raw, e)
+        log_trip_close.exception("TripClose failed raw=%s err=%s", raw, e, extra={'company_id': company_instance.company_id} if company_instance else {})
         return HttpResponse("ERROR", status=500, content_type="text/plain")
 
 
@@ -286,6 +291,7 @@ def getTripCloseSummaryFromDevice(request):
     if not _validate_checksum('getTripCloseSummary', raw):
         return HttpResponse("INVALID_CHECKSUM", status=400, content_type="text/plain")
 
+    company_instance = None
     try:
         company_instance = _get_company_for_palmtec(parts[3]) if len(parts) > 3 and parts[3] else None
         if not company_instance:
@@ -302,7 +308,7 @@ def getTripCloseSummaryFromDevice(request):
         return HttpResponse(f'OK#SUCCESS#fn={parts[1]}#', content_type="text/plain", status=200)
 
     except Exception as e:
-        log_trip_close_sum.exception("TripCloseSummary failed raw=%s err=%s", raw, e)
+        log_trip_close_sum.exception("TripCloseSummary failed raw=%s err=%s", raw, e, extra={'company_id': company_instance.company_id} if company_instance else {})
         return HttpResponse("ERROR", status=500, content_type="text/plain")
 
 
@@ -325,9 +331,10 @@ def getScheduleCloseSummaryFromDevice(request):
 
     log_schedule_close_sum.debug("RECV fn=%s palmtec=%s", parts[1], parts[3])
 
-    if not _validate_checksum('getScheduleCloseSummary', raw):
+    if not _validate_checksum('getSdClSm', raw):
         return HttpResponse("INVALID_CHECKSUM", status=400, content_type="text/plain")
 
+    company_instance = None
     try:
         company_instance = _get_company_for_palmtec(parts[3]) if parts[3] else None
         if not company_instance:
@@ -344,7 +351,7 @@ def getScheduleCloseSummaryFromDevice(request):
         return HttpResponse(f'OK#SUCCESS#fn={parts[1]}#', content_type="text/plain", status=200)
 
     except Exception as e:
-        log_schedule_close_sum.exception("ScheduleCloseSummary failed raw=%s err=%s", raw, e)
+        log_schedule_close_sum.exception("ScheduleCloseSummary failed raw=%s err=%s", raw, e, extra={'company_id': company_instance.company_id} if company_instance else {})
         return HttpResponse("ERROR", status=500, content_type="text/plain")
 
 
@@ -374,6 +381,7 @@ def getOdometerDataFromDevice(request):
     if not _validate_checksum('getOdometerDetails', raw):
         return HttpResponse("INVALID_CHECKSUM", status=400, content_type="text/plain")
 
+    company_instance = None
     try:
         company_instance = _get_company_for_palmtec(parts[3]) if parts[3] else None
         if not company_instance:
@@ -440,7 +448,7 @@ def getOdometerDataFromDevice(request):
     except IntegrityError:
         return HttpResponse(f'OK#DUPLICATE#fn={parts[1]}#', content_type="text/plain", status=200)
     except Exception as e:
-        log_odometer.exception("OdometerData failed raw=%s err=%s", raw, e)
+        log_odometer.exception("OdometerData failed raw=%s err=%s", raw, e, extra={'company_id': company_instance.company_id} if company_instance else {})
         return HttpResponse("ERROR", status=500, content_type="text/plain")
 
 
@@ -470,6 +478,7 @@ def getExpenseDataFromDevice(request):
     if not _validate_checksum('getExpenseDetails', raw):
         return HttpResponse("INVALID_CHECKSUM", status=400, content_type="text/plain")
 
+    company_instance = None
     try:
         company_instance = _get_company_for_palmtec(parts[3]) if parts[3] else None
         if not company_instance:
@@ -533,5 +542,5 @@ def getExpenseDataFromDevice(request):
     except IntegrityError:
         return HttpResponse(f'OK#DUPLICATE#fn={parts[1]}#', content_type="text/plain", status=200)
     except Exception as e:
-        log_expense.exception("ExpenseData failed raw=%s err=%s", raw, e)
+        log_expense.exception("ExpenseData failed raw=%s err=%s", raw, e, extra={'company_id': company_instance.company_id} if company_instance else {})
         return HttpResponse("ERROR", status=500, content_type="text/plain")
