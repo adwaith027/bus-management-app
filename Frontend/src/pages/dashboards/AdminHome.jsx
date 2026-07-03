@@ -1,7 +1,16 @@
 import { useEffect, useState } from "react";
 import api, { BASE_URL } from "../../assets/js/axiosConfig";
 import { KpiCard } from "@/components/ui/kpi-card";
-import { Building2, CheckCircle2, XCircle, Clock, Users, LayoutDashboard, UserRound } from "lucide-react";
+import { StateBreakdownCard } from "@/components/ui/state-breakdown-card";
+import { Building2, Smartphone, Truck, Activity, Users, LayoutDashboard, UserRound } from "lucide-react";
+
+const STATUS_COLORS = {
+  validated: "#059669",
+  unvalidated: "#dc2626",
+  validating: "#2563eb",
+  expired: "#d97706",
+  blocked: "#64748b",
+};
 
 export default function AdminHome() {
   const storedUser = localStorage.getItem("user")
@@ -13,6 +22,9 @@ export default function AdminHome() {
   const [summary, setSummary] = useState({
     company_summary: null,
     user_summary: null,
+    device_summary: null,
+    dealer_summary: null,
+    session_summary: null,
   });
 
   useEffect(() => {
@@ -35,6 +47,9 @@ export default function AdminHome() {
 
   const company = summary.company_summary;
   const users = summary.user_summary;
+  const devices = summary.device_summary;
+  const dealers = summary.dealer_summary;
+  const sessions = summary.session_summary;
 
   return (
     <div className="p-6 md:p-10 min-h-screen bg-slate-50 animate-fade-in">
@@ -50,39 +65,52 @@ export default function AdminHome() {
         </div>
       </div>
 
-      {/* ── Company Overview ─────────────────────────────────────────────── */}
+      {/* ── Overview ──────────────────────────────────────────────────────── */}
       <section className="mb-6">
         <div className="mb-3">
-          <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wider">Company Overview</h2>
-          <p className="text-xs text-slate-400 mt-0.5">Registrations &amp; validation status</p>
+          <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wider">Overview</h2>
+          <p className="text-xs text-slate-400 mt-0.5">Companies, devices, dealers &amp; active sessions</p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <KpiCard
-            title="Total Companies"
-            value={company?.total_companies ?? 0}
+          <StateBreakdownCard
+            title="Companies"
             icon={Building2}
+            total={company?.total_companies}
+            loading={loading}
+            states={[
+              { label: "Validated", value: company?.validated_companies, color: STATUS_COLORS.validated },
+              { label: "Unvalidated", value: company?.unvalidated_companies, color: STATUS_COLORS.unvalidated },
+              { label: "Expired", value: company?.expired_companies, color: STATUS_COLORS.expired },
+            ]}
+          />
+          <StateBreakdownCard
+            title="Dealers"
+            icon={Truck}
+            total={dealers?.total_dealers}
+            loading={loading}
+            states={[
+              { label: "Validated", value: dealers?.validated_dealers, color: STATUS_COLORS.validated },
+              { label: "Unvalidated", value: dealers?.unvalidated_dealers, color: STATUS_COLORS.unvalidated },
+              { label: "Expired", value: dealers?.expired_dealers, color: STATUS_COLORS.expired },
+            ]}
+          />
+          <StateBreakdownCard
+            title="Devices"
+            icon={Smartphone}
+            total={devices?.total_devices}
+            loading={loading}
+            states={[
+              { label: "In Stock", value: devices?.in_stock, color: STATUS_COLORS.blocked },
+              { label: "Dealer Pool", value: devices?.dealer_pool, color: STATUS_COLORS.validating },
+              { label: "Mapped", value: devices?.mapped, color: STATUS_COLORS.validated },
+            ]}
+          />
+          <KpiCard
+            title="Active Admin Sessions"
+            value={sessions?.active_admin_sessions ?? 0}
+            subtitle="Currently logged in"
+            icon={Activity}
             color="#0f172a"
-            loading={loading}
-          />
-          <KpiCard
-            title="Validated"
-            value={company?.validated_companies ?? 0}
-            icon={CheckCircle2}
-            color="#059669"
-            loading={loading}
-          />
-          <KpiCard
-            title="Unvalidated"
-            value={company?.unvalidated_companies ?? 0}
-            icon={XCircle}
-            color="#dc2626"
-            loading={loading}
-          />
-          <KpiCard
-            title="Expired"
-            value={company?.expired_companies ?? 0}
-            icon={Clock}
-            color="#d97706"
             loading={loading}
           />
         </div>
