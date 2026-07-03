@@ -143,7 +143,7 @@ function TicketRow({ ticket: t, onView, isNew }) {
       {/* Device + trip */}
       <td className="px-4 py-3.5">
         <div className="text-sm font-medium text-slate-700 font-mono">{t.palmtec_id}</div>
-        <div className="text-[11px] text-slate-500">Trip #{t.trip_no ?? t.trip_id}</div>
+        <div className="text-[11px] text-slate-500">Trip #{t.trip_no ?? t.trip_id}{t.schedule_no != null ? ` · Sch #${t.schedule_no}` : ''}</div>
       </td>
 
       {/* Route segment */}
