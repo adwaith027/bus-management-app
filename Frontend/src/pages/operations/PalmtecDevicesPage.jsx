@@ -1,17 +1,23 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import api, { BASE_URL } from '../../assets/js/axiosConfig';
 import TableSkeleton from '../../components/TableSkeleton';
 import Modal from '../../components/Modal';
 
 export default function PalmtecDevicesPage() {
-  const [devices, setDevices]         = useState([]);
-  const [loading, setLoading]         = useState(true);
-  const [search,  setSearch]          = useState('');
+  const [devices, setDevices]       = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [search,  setSearch]        = useState('');
 
-  const [palmtecModal, setPalmtecModal] = useState(null); // { device }
+  const [palmtecModal, setPalmtecModal] = useState(null);
   const [palmtecValue, setPalmtecValue] = useState('');
   const [palmtecError, setPalmtecError] = useState('');
   const [palmtecBusy,  setPalmtecBusy]  = useState(false);
+
+  const [syncBusy,     setSyncBusy]     = useState(false);
+  const [syncCooldown, setSyncCooldown] = useState(false);
+  const [syncResult,   setSyncResult]   = useState(null);
+  const [syncError,    setSyncError]    = useState(null);
+  const mountedRef = useRef(true);
 
   const fetchDevices = useCallback(async () => {
     setLoading(true);
@@ -25,7 +31,11 @@ export default function PalmtecDevicesPage() {
     }
   }, []);
 
-  useEffect(() => { fetchDevices(); }, [fetchDevices]);
+  useEffect(() => {
+    mountedRef.current = true;
+    fetchDevices();
+    return () => { mountedRef.current = false; };
+  }, [fetchDevices]);
 
   const openModal = (device) => {
     setPalmtecModal({ device });
@@ -46,6 +56,26 @@ export default function PalmtecDevicesPage() {
       setPalmtecError(err?.response?.data?.error || 'Failed to set Palmtec ID.');
     } finally {
       setPalmtecBusy(false);
+    }
+  };
+
+  const handleSync = async () => {
+    setSyncBusy(true);
+    setSyncResult(null);
+    setSyncError(null);
+    try {
+      const res = await api.post(`${BASE_URL}/etm-devices/sync-aggregator-tids`);
+      if (!mountedRef.current) return;
+      setSyncResult(res.data);
+      fetchDevices();
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setSyncError(err?.response?.data?.error || 'Sync failed.');
+    } finally {
+      if (!mountedRef.current) return;
+      setSyncBusy(false);
+      setSyncCooldown(true);
+      setTimeout(() => { if (mountedRef.current) setSyncCooldown(false); }, 60000);
     }
   };
 
@@ -74,11 +104,23 @@ export default function PalmtecDevicesPage() {
         <SummaryChip label="Unassigned" value={unassigned}     color="amber" />
       </div>
 
+      {/* Sync feedback */}
+      {syncResult && (
+        <div className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+          {syncResult.message} {syncResult.not_found_in_map > 0 && `(${syncResult.not_found_in_map} not found in license map)`}
+        </div>
+      )}
+      {syncError && (
+        <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          {syncError}
+        </div>
+      )}
+
       {/* Table card */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
 
-        {/* Search */}
-        <div className="px-4 py-3 border-b border-slate-100">
+        {/* Search + Sync button */}
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-3">
           <input
             type="text"
             placeholder="Search by serial number…"
@@ -86,19 +128,31 @@ export default function PalmtecDevicesPage() {
             onChange={e => setSearch(e.target.value)}
             className="w-full max-w-xs border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300"
           />
+          <button
+            onClick={handleSync}
+            disabled={syncBusy || syncCooldown || loading}
+            title={syncCooldown ? 'Sync recently run, please wait' : 'Fetch TIDs from license server'}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors
+              disabled:opacity-40 disabled:cursor-not-allowed
+              enabled:bg-slate-900 enabled:text-white enabled:border-slate-900 enabled:hover:bg-slate-700
+              disabled:bg-white disabled:text-slate-400 disabled:border-slate-200"
+          >
+            <SyncIcon spinning={syncBusy} />
+            {syncBusy ? 'Syncing…' : 'Sync TID'}
+          </button>
         </div>
 
         <table className="w-full text-sm">
           <thead className="bg-slate-50">
             <tr>
               <th className="px-4 py-3 text-left font-semibold text-slate-700">Serial Number</th>
-              <th className="px-4 py-3 text-left font-semibold text-slate-700">Device Type</th>
               <th className="px-4 py-3 text-left font-semibold text-slate-700">Palmtec ID</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-700">Payment Aggregator TID</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <TableSkeleton columns={['w-40', 'w-24', 'w-28']} />
+              <TableSkeleton columns={['w-40', 'w-28', 'w-28']} />
             ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={3} className="px-4 py-10 text-center text-slate-400">
@@ -109,9 +163,6 @@ export default function PalmtecDevicesPage() {
               <tr key={device.id} className="border-t border-slate-100 hover:bg-slate-50">
                 <td className="px-4 py-3 font-mono text-xs font-medium text-slate-800">
                   {device.serial_number}
-                </td>
-                <td className="px-4 py-3 text-xs text-slate-500 capitalize">
-                  {device.device_type ?? '—'}
                 </td>
                 <td className="px-4 py-3">
                   {device.palmtec_id ? (
@@ -129,6 +180,17 @@ export default function PalmtecDevicesPage() {
                     >
                       Set ID
                     </button>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  {device.aggregator_tid ? (
+                    <span className="inline-flex px-2 py-0.5 rounded-md text-xs font-mono font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                      {device.aggregator_tid}
+                    </span>
+                  ) : (
+                    <span className="inline-flex px-2 py-0.5 rounded-md text-xs font-medium bg-slate-50 text-slate-400 border border-slate-100">
+                      Not set
+                    </span>
                   )}
                 </td>
               </tr>
@@ -200,6 +262,20 @@ function SummaryChip({ label, value, color }) {
       <span className="text-slate-400 font-normal">{label}</span>
       <span>{value}</span>
     </div>
+  );
+}
+
+function SyncIcon({ spinning }) {
+  return (
+    <svg
+      width="13" height="13" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+      className={spinning ? 'animate-spin' : ''}
+    >
+      <polyline points="23 4 23 10 17 10" />
+      <polyline points="1 20 1 14 7 14" />
+      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+    </svg>
   );
 }
 
