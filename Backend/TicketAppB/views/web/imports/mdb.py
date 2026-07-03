@@ -11,6 +11,7 @@ progress via axios onDownloadProgress:
 """
 
 import os
+import sys
 import json
 import subprocess
 import csv
@@ -648,9 +649,9 @@ class MdbImportService:
     def _process_routes(rows, company, user, lookups):
         """
         MDB ROUTE: rutcode, rutname, minfare, faretype, bustype(int),
-                   usestop, Half, luggage, student, adjust, conc, ph, PASSALLOW
+                   Half, luggage, adjust, conc, ph, PASSALLOW
         Django Route: route_code, route_name, min_fare, fare_type,
-                      bus_type(FK), use_stop, half, luggage, student,
+                      bus_type(FK), half, luggage,
                       adjust, conc, ph, company
 
         Bus type is resolved through:
@@ -688,13 +689,13 @@ class MdbImportService:
                         'min_fare':   MdbImportService._to_float(row.get('minfare')),
                         'fare_type':  MdbImportService._to_int(row.get('faretype')),
                         'bus_type':   bus_type_obj,
-                        'use_stop':   MdbImportService._to_bool(row.get('usestop')),
                         'half':       MdbImportService._to_bool(row.get('Half')),
                         'luggage':    MdbImportService._to_bool(row.get('luggage')),
-                        'student':    MdbImportService._to_bool(row.get('student')),
                         'adjust':     MdbImportService._to_bool(row.get('adjust')),
                         'conc':       MdbImportService._to_bool(row.get('conc')),
                         'ph':         MdbImportService._to_bool(row.get('ph')),
+                        'pass_allow': MdbImportService._to_bool(row.get('PASSALLOW')),
+                        'start_from': MdbImportService._to_int(row.get('startfrom')),
                         'created_by': user,
                     }
                 )
@@ -851,7 +852,7 @@ class MdbImportService:
         if not rows:
             return 0, 0, 0, []
 
-        imported, existing, skipped, errors = 0, 0, 0, []
+        imported, existing, skipped, errors, replaced = 0, 0, 0, [], 0
         to_create = []
         routes_in_batch = set()   # route PKs whose fares we will fully replace
 
@@ -998,7 +999,7 @@ class MdbImportService:
                 'next_fare_flag':       MdbImportService._to_bool(row.get('NextFareFlag')),
                 'odometer_entry':       MdbImportService._to_bool(row.get('OdometerEntry')),
                 'ticket_no_big_font':   MdbImportService._to_bool(row.get('TicketNoBigFont')),
-                'crew_check':           MdbImportService._to_bool(row.get('CrewCheck')),
+
                 'gprs_enable':          MdbImportService._to_bool(row.get('GprsEnable')),
                 'tripsend_enable':      MdbImportService._to_bool(row.get('TripsendEnable')),
                 'schedulesend_enable':  MdbImportService._to_bool(row.get('SchedulesendEnable')),
@@ -1039,6 +1040,13 @@ class MdbImportService:
                 'sendbill_enable':      str(row.get('sendbillEnable',    '0') or '0'),
 
                 'currency':   str(row.get('Currency', '') or '').strip() or None,
+
+                # ETM concession ratios & flags (previously unimported)
+                'ladies_ratio':  MdbImportService._to_int(row.get('ladies_ratio')),
+                'senior_ratio':  MdbImportService._to_int(row.get('senior_ratio')),
+                'big_font':      MdbImportService._to_bool(row.get('big_fond')),
+                'refund_enable': MdbImportService._to_bool(row.get('REFUND')),
+
                 'created_by': user,
             }
 
@@ -1337,6 +1345,13 @@ class MdbReader:
 
     @staticmethod
     def read_all_tables(mdb_path, password=None):
+        if sys.platform == 'win32':
+            raise MdbReadError(
+                'Windows server detected. mdb-export (mdbtools) is not available on Windows. '
+                'MDB import requires a Linux server with mdbtools installed. '
+                'Contact support to enable Windows-compatible import (pyodbc).'
+            )
+
         tables_to_read = [
             'bustype',
             'EMPLOYEETYPE',
