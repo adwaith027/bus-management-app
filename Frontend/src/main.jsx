@@ -18,6 +18,7 @@ import VehicleCombined from './pages/listings/VehicleCombined'
 import CurrencyListing from './pages/listings/CurrencyListing'
 import RouteListing from './pages/listings/RouteListing'
 import EmployeeCombined from './pages/listings/EmployeeCombined'
+import InspectorListing from './pages/listings/InspectorListing'
 
 import CrewAssignmentListing from './pages/operations/CrewAssignmentListing'
 import DeviceRegistry from './pages/operations/DeviceRegistry'
@@ -26,6 +27,7 @@ import StageEditor from './pages/operations/StageEditor'
 import ExpenseMasterPage from './pages/operations/ExpenseMasterPage'
 
 import TicketDataPage from './pages/reports/TicketDataPage'
+import ExpenseDataPage from './pages/reports/ExpenseDataPage'
 import TripDataPage from './pages/reports/TripDataPage'
 import ScheduleDataPage from './pages/reports/ScheduleDataPage'
 import SettlementsLayout from './pages/reports/settlements/SettlementsLayout'
@@ -37,6 +39,7 @@ import MdbImport from './pages/tools/MdbImport'
 import SettingsPage from './pages/tools/SettingsPage'
 import DeviceDownload from './pages/tools/DeviceDownload'
 import FailedPayloadsPage from './pages/tools/FailedPayloadsPage'
+import GhostRecordsPage from './pages/tools/GhostRecordsPage'
 import AuditLogPage from './pages/tools/AuditLogPage'
 import AboutPage from './pages/tools/AboutPage'
 import GlobalSettingsPage from './pages/tools/GlobalSettingsPage'
@@ -175,6 +178,14 @@ const router = createBrowserRouter([
             element: <CrewAssignmentListing />
           },
           {
+            path: 'master-data/inspector-records',
+            element: <InspectorListing />
+          },
+          {
+            path: 'expense-records',
+            element: <ExpenseDataPage />
+          },
+          {
             path: 'master-data/settings',
             element: <SettingsPage />
           },
@@ -189,6 +200,10 @@ const router = createBrowserRouter([
           {
             path: 'failed-payloads',
             element: <FailedPayloadsPage />
+          },
+          {
+            path: 'ghost-records',
+            element: <GhostRecordsPage />
           },
           {
             path: 'audit-logs',
