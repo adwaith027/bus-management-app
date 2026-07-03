@@ -118,7 +118,7 @@ def _set_session_cookie(response, session_uid: str, device_type: str = 'web_desk
         value=str(session_uid),
         max_age=timeout + 300,
         httponly=True,
-        secure=not settings.DEBUG,
+        secure=settings.COOKIE_SECURE,
         samesite='Lax',
         path='/',
     )
@@ -501,7 +501,7 @@ def forgot_password(request):
     uid   = urlsafe_base64_encode(force_bytes(user.pk))
     token = _token_generator.make_token(user)
 
-    frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:5173')
+    frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:5173').rstrip('/')
     reset_link   = f'{frontend_url}/reset-password?uid={uid}&token={token}'
 
     subject = 'Password Reset Request'
