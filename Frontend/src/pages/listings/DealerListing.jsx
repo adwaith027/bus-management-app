@@ -5,7 +5,7 @@ import statesDistricts from '../../assets/json/indiaStatesDistricts.json';
 import {
   Handshake, CheckCircle2, CircleDot, Search,
   Phone, MapPin, IdCard, ArrowLeft, AlertCircle,
-  Plus, Mail, KeyRound, User, Hash, Eye, Edit, X, RefreshCw,
+  Plus, Mail, KeyRound, User, Hash, Eye, Edit, X, RefreshCw, Info,
 } from 'lucide-react';
 
 // ── ModalWrapper ───────────────────────────────────────────────────────────────
@@ -201,7 +201,7 @@ function DiffRow({ label, current, incoming, inUse }) {
 // ── EMPTY form ─────────────────────────────────────────────────────────────────
 const EMPTY = {
   dealer_code: '', dealer_name: '', contact_person: '', contact_number: '',
-  email: '', gst_number: '', is_active: true,
+  email: '', gst_number: '', is_active: false,
   address: '', state: '', district: '',
   user_username: '', user_email: '', user_password: '',
 };
@@ -212,6 +212,7 @@ export default function DealerListing() {
   const [dealers, setDealers]   = useState([]);
   const [loading, setLoading]   = useState(true);
   const [search, setSearch]     = useState('');
+  const [togglingActive, setTogglingActive] = useState({});
 
   // ── Page view: 'list' | 'create' ────────────────────────────────────────
   const [pageView, setPageView] = useState('list');
@@ -275,7 +276,6 @@ export default function DealerListing() {
         contact_person: form.contact_person, contact_number: form.contact_number,
         gst_number: form.gst_number, address: form.address,
         state: form.state, district: form.district,
-        is_active: form.is_active,
         user_username: form.user_username, user_email: form.user_email, user_password: form.user_password,
       });
       if (res?.status === 200 || res?.status === 201) {
@@ -292,6 +292,22 @@ export default function DealerListing() {
         window.alert(data?.message || 'Something went wrong.');
       }
     } finally { setSubmitting(false); }
+  };
+
+  const handleToggleActive = async (dealer) => {
+    const nextActive = !dealer.is_active;
+    const confirmMsg = nextActive
+      ? `Activate "${dealer.dealer_name}"? The dealer will be able to log in again.`
+      : `Deactivate "${dealer.dealer_name}"? The dealer's own users will be signed out immediately and blocked from logging in. Companies under this dealer are not affected.`;
+    if (!window.confirm(confirmMsg)) return;
+    setTogglingActive(p => ({ ...p, [dealer.id]: true }));
+    setDealers(list => list.map(d => d.id === dealer.id ? { ...d, is_active: nextActive } : d));
+    try {
+      await api.put(`${BASE_URL}/update-dealer-details/${dealer.id}`, { is_active: nextActive });
+    } catch (err) {
+      setDealers(list => list.map(d => d.id === dealer.id ? { ...d, is_active: dealer.is_active } : d));
+      window.alert(err.response?.data?.message || err.response?.data?.error || 'Failed to update status.');
+    } finally { setTogglingActive(p => ({ ...p, [dealer.id]: false })); }
   };
 
   // ── Edit / View modal ────────────────────────────────────────────────────
@@ -325,7 +341,6 @@ export default function DealerListing() {
         dealer_code: modalForm.dealer_code, contact_person: modalForm.contact_person,
         contact_number: modalForm.contact_number, gst_number: modalForm.gst_number,
         address: modalForm.address, state: modalForm.state, district: modalForm.district,
-        is_active: modalForm.is_active,
       });
       if (res?.status === 200 || res?.status === 201) {
         window.alert(res.data.message || 'Dealer updated!');
@@ -471,16 +486,17 @@ export default function DealerListing() {
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Dealer</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Contact</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Location</th>
-                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">License</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Access</th>
                   <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
-                  <TableSkeleton columns={['w-40', 'w-28', 'w-32', 'w-16', 'w-16']} />
+                  <TableSkeleton columns={['w-40', 'w-28', 'w-32', 'w-16', 'w-16', 'w-16']} />
                 ) : filteredDealers.length === 0 ? (
                   <tr>
-                    <td colSpan="5" className="px-4 py-10 text-center">
+                    <td colSpan="6" className="px-4 py-10 text-center">
                       <div className="flex flex-col items-center gap-2">
                         <Handshake size={20} className="text-slate-300" />
                         <p className="text-sm text-slate-400">{search ? 'No dealers match your search' : 'No dealers found'}</p>
@@ -515,21 +531,29 @@ export default function DealerListing() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex flex-col gap-1">
-                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium border ${
-                          dealer.is_active
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : 'bg-slate-50 text-slate-600 border-slate-200'
-                        }`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${dealer.is_active ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                      {dealer.authentication_status ? (
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium border w-fit ${licenseStatusStyle(dealer.authentication_status)}`}>
+                          {dealer.authentication_status === 'Approve' ? 'Licensed' : dealer.authentication_status}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-400">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleActive(dealer)}
+                        disabled={togglingActive[dealer.id]}
+                        title={dealer.is_active ? 'Active — click to deactivate' : 'Inactive — click to activate'}
+                        className="inline-flex items-center gap-1.5 w-fit cursor-pointer disabled:opacity-50"
+                      >
+                        <span className={`relative w-8 h-[18px] rounded-full transition-colors shrink-0 ${dealer.is_active ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                          <span className={`absolute top-0.5 left-0.5 w-[14px] h-[14px] rounded-full bg-white shadow transition-transform ${dealer.is_active ? 'translate-x-[14px]' : ''}`} />
+                        </span>
+                        <span className={`text-[11px] font-medium ${dealer.is_active ? 'text-emerald-700' : 'text-slate-500'}`}>
                           {dealer.is_active ? 'Active' : 'Inactive'}
                         </span>
-                        {dealer.authentication_status && (
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium border ${licenseStatusStyle(dealer.authentication_status)}`}>
-                            {dealer.authentication_status === 'Approve' ? 'Licensed' : dealer.authentication_status}
-                          </span>
-                        )}
-                      </div>
+                      </button>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -822,17 +846,6 @@ export default function DealerListing() {
               </div>
             </div>
 
-            <label className="flex items-center gap-3 cursor-pointer">
-              <div onClick={() => setModalForm(f => ({ ...f, is_active: !f.is_active }))}
-                className={`relative w-10 h-[22px] rounded-full transition-colors cursor-pointer ${modalForm.is_active ? 'bg-emerald-500' : 'bg-slate-300'}`}>
-                <span className={`absolute top-0.5 left-0.5 w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${modalForm.is_active ? 'translate-x-[18px]' : ''}`} />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-slate-700">Dealer Status</p>
-                <p className="text-xs text-slate-500">{modalForm.is_active ? 'Active' : 'Inactive — sign-in disabled'}</p>
-              </div>
-            </label>
-
             <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
               <button type="button" onClick={() => setModal(null)}
                 className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">
@@ -920,17 +933,9 @@ export default function DealerListing() {
                   <input value={form.gst_number} onChange={e => set('gst_number', e.target.value)} placeholder="29ABCDE1234F1Z5" className={inputCls} />
                 </Field>
 
-                <div className="md:col-span-2 mt-1">
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <div onClick={() => set('is_active', !form.is_active)}
-                      className={`relative w-10 h-[22px] rounded-full transition-colors cursor-pointer ${form.is_active ? 'bg-emerald-500' : 'bg-slate-300'}`}>
-                      <span className={`absolute top-0.5 left-0.5 w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${form.is_active ? 'translate-x-[18px]' : ''}`} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-slate-700">Dealer Status</p>
-                      <p className="text-xs text-slate-500">{form.is_active ? 'Active — dealer can sign in and onboard companies' : 'Inactive — sign-in disabled'}</p>
-                    </div>
-                  </label>
+                <div className="md:col-span-2 mt-1 flex items-start gap-2 rounded-lg bg-slate-50 border border-slate-100 px-3 py-2.5 text-xs text-slate-500">
+                  <Info size={13} className="mt-0.5 shrink-0 text-slate-400" />
+                  <span>New dealers start <strong>inactive</strong> and can't sign in until their license is authenticated.</span>
                 </div>
               </div>
             </SectionCard>
