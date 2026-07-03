@@ -25,6 +25,11 @@ function StatusBadge({ value }) {
   );
 }
 
+// allocation_status has no "Inactive" value — deactivation is tracked via is_active.
+function displayStatus(device) {
+  return device.is_active === false ? "Inactive" : device.allocation_status;
+}
+
 function SummaryCard({ label, value }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-4 flex flex-col gap-1">
@@ -76,18 +81,19 @@ export default function DeviceRegistry() {
   const [palmtecBusy,  setPalmtecBusy]  = useState(false);
   const [palmtecError, setPalmtecError] = useState('');
 
-  // Mosambee TID modal state
-  const [mosambeeModal, setMosambeeModal] = useState(null); // { device } | null
-  const [mosambeeValue, setMosambeeValue] = useState('');
-  const [mosabeeBusy,   setMosabeeBusy]   = useState(false);
-  const [mosambeeError, setMosambeeError] = useState('');
+  // Aggregator TID modal state
+  const [aggregatorModal, setAggregatorModal] = useState(null); // { device } | null
+  const [aggregatorValue, setAggregatorValue] = useState('');
+  const [aggregatorBusy,   setAggregatorBusy]   = useState(false);
+  const [aggregatorError, setAggregatorError] = useState('');
 
   // ── Fetch ─────────────────────────────────────────────────────────────────
   const fetchAll = async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (activeTab !== "All") params.set("status", activeTab);
+      // "Inactive" isn't an allocation_status value — filter client-side on is_active instead.
+      if (activeTab !== "All" && activeTab !== "Inactive") params.set("status", activeTab);
       if (filterCompany) params.set("company", filterCompany);
       if (filterDealer)  params.set("dealer",  filterDealer);
 
@@ -104,7 +110,9 @@ export default function DeviceRegistry() {
       }
 
       const [devRes, sumRes, ...rest] = await Promise.all(reqs);
-      setDevices(devRes.data?.data ?? []);
+      let devs = devRes.data?.data ?? [];
+      if (activeTab === "Inactive") devs = devs.filter(d => d.is_active === false);
+      setDevices(devs);
       setSummary(sumRes.data?.data ?? null);
       if (isSuperadmin) {
         setCompanies(rest[0]?.data?.data ?? []);
@@ -221,22 +229,22 @@ export default function DeviceRegistry() {
     } finally { setPalmtecBusy(false); }
   };
 
-  const handleSetMosabeeTid = async () => {
-    const val = mosambeeValue.trim();
-    if (!val) { setMosambeeError('Enter a Mosambee TID.'); return; }
-    setMosabeeBusy(true);
-    setMosambeeError('');
+  const handleSetAggregatorTid = async () => {
+    const val = aggregatorValue.trim();
+    if (!val) { setAggregatorError('Enter a Payment Aggregator TID.'); return; }
+    setAggregatorBusy(true);
+    setAggregatorError('');
     try {
-      await api.post(`${BASE_URL}/etm-devices/${mosambeeModal.device.id}/set-mosambee-tid`, { mosambee_tid: val });
-      setMosambeeModal(null);
+      await api.post(`${BASE_URL}/etm-devices/${aggregatorModal.device.id}/set-aggregator-tid`, { aggregator_tid: val });
+      setAggregatorModal(null);
       fetchAll();
     } catch (err) {
-      setMosambeeError(err?.response?.data?.error || 'Failed to set Mosambee TID.');
-    } finally { setMosabeeBusy(false); }
+      setAggregatorError(err?.response?.data?.error || 'Failed to set Payment Aggregator TID.');
+    } finally { setAggregatorBusy(false); }
   };
 
   const handleDeactivate = async (device) => {
-    if (!window.confirm(`Deactivate device ${device.serial_number}? It will be removed from stock.`)) return;
+    if (!window.confirm(`Deactivate device ${device.serial_number}? It stays mapped. Ticket/trip/schedule data will still be received, but setup (config) fetch will fail until reactivated.`)) return;
     try {
       await api.post(`${BASE_URL}/etm-devices/${device.id}/deactivate`);
       fetchAll();
@@ -246,12 +254,32 @@ export default function DeviceRegistry() {
   };
 
   const handleReactivate = async (device) => {
-    if (!window.confirm(`Reactivate device ${device.serial_number}? It will be returned to Stock.`)) return;
+    if (!window.confirm(`Reactivate device ${device.serial_number}? It stays at its current allocation.`)) return;
     try {
       await api.post(`${BASE_URL}/etm-devices/${device.id}/reactivate`);
       fetchAll();
     } catch (err) {
       alert(err?.response?.data?.error || "Reactivate failed");
+    }
+  };
+
+  const handleUnmap = async (device) => {
+    if (!window.confirm(`Unmap device ${device.serial_number} from ${device.company_name || "its company"}? It will return to the dealer pool or Stock.`)) return;
+    try {
+      await api.post(`${BASE_URL}/etm-devices/${device.id}/unmap`);
+      fetchAll();
+    } catch (err) {
+      alert(err?.response?.data?.error || "Unmap failed");
+    }
+  };
+
+  const handleReturnToStock = async (device) => {
+    if (!window.confirm(`Return device ${device.serial_number} to Stock?`)) return;
+    try {
+      await api.post(`${BASE_URL}/etm-devices/${device.id}/return-to-stock`);
+      fetchAll();
+    } catch (err) {
+      alert(err?.response?.data?.error || "Return to stock failed");
     }
   };
 
@@ -392,7 +420,7 @@ export default function DeviceRegistry() {
                 <th className="px-4 py-3 text-left font-semibold text-slate-700">Palmtec ID</th>
               )}
               {isCompanyAdmin && (
-                <th className="px-4 py-3 text-left font-semibold text-slate-700">Mosambee TID</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700">Payment Aggregator TID</th>
               )}
               {(isSuperadmin || isDealerAdmin) && (
                 <th className="px-4 py-3 text-left font-semibold text-slate-700">Actions</th>
@@ -421,7 +449,7 @@ export default function DeviceRegistry() {
                   </td>
                 )}
                 <td className="px-4 py-3 font-mono text-xs text-slate-800 font-medium">{device.serial_number}</td>
-                <td className="px-4 py-3"><StatusBadge value={device.allocation_status} /></td>
+                <td className="px-4 py-3"><StatusBadge value={displayStatus(device)} /></td>
                 <td className="px-4 py-3 text-slate-500 text-xs">{device.dealer_name ?? "—"}</td>
                 <td className="px-4 py-3 text-slate-700 text-xs">{device.company_name ?? <span className="text-slate-300 italic">Unassigned</span>}</td>
                 {isCompanyAdmin && (
@@ -451,17 +479,17 @@ export default function DeviceRegistry() {
                 {isCompanyAdmin && (
                   <td className="px-4 py-3">
                     {device.allocation_status === "Allocated" ? (
-                      device.mosambee_tid ? (
+                      device.aggregator_tid ? (
                         <button
-                          onClick={() => { setMosambeeModal({ device }); setMosambeeValue(device.mosambee_tid); setMosambeeError(''); }}
+                          onClick={() => { setAggregatorModal({ device }); setAggregatorValue(device.aggregator_tid); setAggregatorError(''); }}
                           className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 transition-colors"
                         >
-                          <span className="font-mono">{device.mosambee_tid}</span>
+                          <span className="font-mono">{device.aggregator_tid}</span>
                           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                         </button>
                       ) : (
                         <button
-                          onClick={() => { setMosambeeModal({ device }); setMosambeeValue(''); setMosambeeError(''); }}
+                          onClick={() => { setAggregatorModal({ device }); setAggregatorValue(''); setAggregatorError(''); }}
                           className="px-2 py-0.5 rounded-md text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors"
                         >
                           Set TID
@@ -474,9 +502,9 @@ export default function DeviceRegistry() {
                 )}
                 {(isSuperadmin || isDealerAdmin) && (
                   <td className="px-4 py-3">
-                    <div className="flex gap-1.5">
-                      {/* Dealer can allocate DealerPool devices */}
-                      {isDealerAdmin && device.allocation_status === "DealerPool" && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {/* Dealer can allocate active DealerPool devices */}
+                      {isDealerAdmin && device.allocation_status === "DealerPool" && device.is_active && (
                         <button
                           onClick={() => openAllocate(device)}
                           className="px-2.5 py-1 rounded-lg text-xs font-medium bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 transition-colors"
@@ -484,8 +512,11 @@ export default function DeviceRegistry() {
                           Allocate
                         </button>
                       )}
-                      {/* Superadmin can deactivate only unassigned (Stock) devices */}
-                      {isSuperadmin && device.allocation_status === "Stock" && (
+                      {/* Deactivate — Stock (superadmin only) or mapped devices (superadmin/dealer_admin, dealer_admin scoped to their own devices server-side) */}
+                      {device.is_active && (
+                        (isSuperadmin && device.allocation_status === "Stock") ||
+                        ["DealerPool", "Allocated"].includes(device.allocation_status)
+                      ) && (
                         <button
                           onClick={() => handleDeactivate(device)}
                           className="px-2.5 py-1 rounded-lg text-xs font-medium bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 transition-colors"
@@ -493,13 +524,31 @@ export default function DeviceRegistry() {
                           Deactivate
                         </button>
                       )}
-                      {/* Superadmin can reactivate Inactive devices back to Stock */}
-                      {isSuperadmin && device.allocation_status === "Inactive" && (
+                      {/* Reactivate — superadmin only, any inactive device, stays at current allocation */}
+                      {isSuperadmin && device.is_active === false && (
                         <button
                           onClick={() => handleReactivate(device)}
                           className="px-2.5 py-1 rounded-lg text-xs font-medium bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 transition-colors"
                         >
                           Reactivate
+                        </button>
+                      )}
+                      {/* Unmap — inactive Allocated devices only */}
+                      {device.allocation_status === "Allocated" && device.is_active === false && (
+                        <button
+                          onClick={() => handleUnmap(device)}
+                          className="px-2.5 py-1 rounded-lg text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors"
+                        >
+                          Unmap
+                        </button>
+                      )}
+                      {/* Return to Stock — inactive DealerPool devices only */}
+                      {device.allocation_status === "DealerPool" && device.is_active === false && (
+                        <button
+                          onClick={() => handleReturnToStock(device)}
+                          className="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-100 text-slate-600 border border-slate-300 hover:bg-slate-200 transition-colors"
+                        >
+                          Return to Stock
                         </button>
                       )}
                     </div>
@@ -553,24 +602,24 @@ export default function DeviceRegistry() {
         </div>
       </Modal>
 
-      {/* Mosambee TID Modal */}
-      <Modal isOpen={!!mosambeeModal} onClose={() => setMosambeeModal(null)}>
+      {/* Aggregator TID Modal */}
+      <Modal isOpen={!!aggregatorModal} onClose={() => setAggregatorModal(null)}>
         <div className="space-y-4 w-full max-w-sm">
           <div>
-            <h2 className="text-base font-bold text-slate-800">Set Mosambee TID</h2>
-            <p className="text-xs text-slate-400 mt-0.5 font-mono">{mosambeeModal?.device?.serial_number}</p>
+            <h2 className="text-base font-bold text-slate-800">Set Payment Aggregator TID</h2>
+            <p className="text-xs text-slate-400 mt-0.5 font-mono">{aggregatorModal?.device?.serial_number}</p>
           </div>
 
-          {mosambeeError && (
-            <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{mosambeeError}</p>
+          {aggregatorError && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{aggregatorError}</p>
           )}
 
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Mosambee Terminal ID *</label>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Payment Aggregator Terminal ID *</label>
             <input
               type="text"
-              value={mosambeeValue}
-              onChange={e => setMosambeeValue(e.target.value)}
+              value={aggregatorValue}
+              onChange={e => setAggregatorValue(e.target.value)}
               placeholder="e.g. 99895611"
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 font-mono focus:outline-none focus:ring-2 focus:ring-slate-300"
             />
@@ -578,17 +627,17 @@ export default function DeviceRegistry() {
 
           <div className="flex justify-end gap-2 pt-1">
             <button
-              onClick={() => setMosambeeModal(null)}
+              onClick={() => setAggregatorModal(null)}
               className="px-4 py-2 rounded-lg text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
             >
               Cancel
             </button>
             <button
-              onClick={handleSetMosabeeTid}
-              disabled={mosabeeBusy}
+              onClick={handleSetAggregatorTid}
+              disabled={aggregatorBusy}
               className="px-4 py-2 rounded-lg text-sm font-medium bg-slate-900 text-white hover:bg-slate-700 transition-colors disabled:opacity-50"
             >
-              {mosabeeBusy ? "Saving…" : "Save"}
+              {aggregatorBusy ? "Saving…" : "Save"}
             </button>
           </div>
         </div>
