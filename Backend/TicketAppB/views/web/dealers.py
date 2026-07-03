@@ -189,6 +189,8 @@ def _populate_dealer_counts(dealer, auth_data):
     dealer.premium_user_count      = new_premium
     dealer.intermediate_user_count = new_inter
     dealer.error_message           = None
+    if dealer.authentication_status == Dealer.AuthStatus.APPROVED:
+        dealer.is_active = True
 
     from .company import check_datetime as _check_datetime
     raw_from = auth_data.get('ProductFromDate')
@@ -237,7 +239,7 @@ def create_dealer(request):
     if User.objects.filter(email=email).exists():
         return Response({'message': 'Email already exists'}, status=status.HTTP_400_BAD_REQUEST)
 
-    dealer = serializer.save(created_by=user)
+    dealer = serializer.save(created_by=user, is_active=False)
 
     User.objects.create_user(
         username=username,
@@ -513,6 +515,11 @@ def dealer_dashboard(request):
     else:
         return Response({'error': 'Unauthorized'}, status=status.HTTP_403_FORBIDDEN)
 
+    try:
+        dealer_obj = Dealer.objects.get(pk=dealer_id)
+    except Dealer.DoesNotExist:
+        return Response({'error': 'Dealer not found.'}, status=status.HTTP_404_NOT_FOUND)
+
     companies = (
         Company.objects
         .filter(dealer_id=dealer_id, is_active=True)
@@ -544,10 +551,46 @@ def dealer_dashboard(request):
         }
         companies_data.append(company_dict)
 
+    # ── Pool balance (live-computed from child companies) ─────────────────────
+    user_slots   = dealer_obj.users_slots_remaining
+    given        = dealer_obj.users_given_to_companies
+    dealer_basic = max(0, dealer_obj.total_user_count - dealer_obj.premium_user_count - dealer_obj.intermediate_user_count)
+    given_basic  = max(0, given['total'] - given['premium'] - given['inter'])
+
+    pool = {
+        'palmtec': {
+            'total':     dealer_obj.palmtec_count,
+            'given':     dealer_obj.slots_given_to_companies,
+            'remaining': dealer_obj.slots_remaining,
+        },
+        'total_users': {
+            'total':     dealer_obj.total_user_count,
+            'given':     given['total'],
+            'remaining': user_slots['total'],
+        },
+        'premium': {
+            'total':     dealer_obj.premium_user_count,
+            'given':     given['premium'],
+            'remaining': user_slots['premium'],
+        },
+        'inter': {
+            'total':     dealer_obj.intermediate_user_count,
+            'given':     given['inter'],
+            'remaining': user_slots['inter'],
+        },
+        'basic': {
+            'total':     dealer_basic,
+            'given':     given_basic,
+            'remaining': user_slots['basic'],
+        },
+        'license_valid_to': str(dealer_obj.product_to_date) if dealer_obj.product_to_date else None,
+    }
+
     return Response({
         'message': 'Success',
         'data': {
             'companies': companies_data,
+            'pool': pool,
             'summary': {
                 'total_companies':    len(companies_data),
                 'total_devices':      sum(d['devices']['total']     for d in companies_data),
