@@ -17,10 +17,10 @@ FARE_TYPE_MAP = {'TABLE': 1, 'GRAPH': 2}
 
 REQUIRED_COLS = {
     'routename', 'routecode', 'bustype', 'noofstages', 'minfare',
-    'faretype', 'distance', 'half', 'student', 'adjust', 'luggage',
+    'faretype', 'distance', 'half', 'adjust', 'luggage',
     'ph', 'concession', 'pass', 'stageorder', 'stagenames', 'fare',
 }
-FLAG_COLS = ['half', 'student', 'adjust', 'luggage', 'ph', 'concession', 'pass']
+FLAG_COLS = ['half', 'adjust', 'luggage', 'ph', 'concession', 'pass']
 IGNORED_COLS = {'ladies', 'senior'}
 
 
@@ -395,12 +395,10 @@ def _execute_import(route_groups, company, user, skip_duplicates):
                 bus_type=bus_type_obj,
                 half=flags.get('half', False),
                 luggage=flags.get('luggage', False),
-                student=flags.get('student', False),
                 adjust=flags.get('adjust', False),
                 conc=flags.get('concession', False),
                 ph=flags.get('ph', False),
                 pass_allow=flags.get('pass', False),
-                use_stop=False,
                 start_from=0,
                 is_deleted=False,
                 company=company,
