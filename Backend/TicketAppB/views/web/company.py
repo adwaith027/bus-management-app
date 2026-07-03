@@ -20,7 +20,7 @@ from rest_framework.permissions import IsAuthenticated
 from ...permissions import LicensePermission
 from django.db.utils import OperationalError, ProgrammingError
 from django.db.models import Sum, Q, Count, Case, When, IntegerField
-from ...models import Company, TransactionData, TripData, Route, VehicleType, MosambeeTransaction, Dealer, ETMDevice, UserSession, UserRole, UserTier
+from ...models import Company, TransactionData, TripData, ScheduleData, Route, VehicleType, AggregatorTransaction, Dealer, ETMDevice, UserSession, UserRole, UserTier
 from ..utils import _is_superadmin, _is_executive, _is_dealer_admin, _is_company_admin
 from .audit_logs import log_action
 from ...models import AuditLog
@@ -630,6 +630,7 @@ def import_company(request):
     company = Company.objects.create(
         **form_data,
         authentication_status   = mapped_status,
+        is_active                = (mapped_status == Company.AuthStatus.APPROVED),
         product_registration_id = safe_int(auth_data.get('ProductRegistrationId')),
         unique_identifier       = auth_data.get('UniqueIDentifier', ''),
         product_from_date       = product_from_date,
@@ -799,6 +800,12 @@ def create_company(request):
         if alloc_total <= 0:
             return Response({'error': 'total_user_count must be greater than 0.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        if alloc_premium + alloc_inter > alloc_total:
+            return Response(
+                {'error': 'premium_user_count + intermediate_user_count cannot exceed total_user_count.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # Row-level lock on dealer to serialise concurrent company creations
         try:
             dealer = Dealer.objects.select_for_update().get(pk=user.dealer_id)
@@ -811,15 +818,18 @@ def create_company(request):
         # Pool validation (live-computed from child companies)
         slots_rem  = dealer.slots_remaining
         user_slots = dealer.users_slots_remaining
+        alloc_basic = alloc_total - alloc_premium - alloc_inter
         errors = []
         if alloc_palmtec > slots_rem:
-            errors.append(f"Palmtec: requested {alloc_palmtec}, available {slots_rem}")
+            errors.append(f"ETM devices: requested {alloc_palmtec}, available {slots_rem}")
         if alloc_total > user_slots['total']:
             errors.append(f"Total users: requested {alloc_total}, available {user_slots['total']}")
         if alloc_premium > user_slots['premium']:
             errors.append(f"Premium users: requested {alloc_premium}, available {user_slots['premium']}")
         if alloc_inter > user_slots['inter']:
             errors.append(f"Intermediate users: requested {alloc_inter}, available {user_slots['inter']}")
+        if alloc_basic > user_slots['basic']:
+            errors.append(f"Basic users: requested {alloc_basic}, available {user_slots['basic']}")
         if errors:
             return Response({
                 'error': 'Insufficient dealer pool capacity.',
@@ -1135,6 +1145,8 @@ def get_company_dashboard_metrics(request):
                 },
                 "operations": {
                     "buses_active": 0,
+                    "buses_idle": 0,
+                    "buses_running": 0,
                     "buses_total": 0,
                     "trips_completed": 0,
                     "trips_scheduled": 0,
@@ -1160,6 +1172,8 @@ def get_company_dashboard_metrics(request):
     }
     operations = {
         "buses_active": 0,
+        "buses_idle": 0,
+        "buses_running": 0,
         "buses_total": 0,
         "trips_completed": 0,
         "trips_scheduled": 0,
@@ -1235,12 +1249,31 @@ def get_company_dashboard_metrics(request):
         operations["trips_completed"] = trips_completed
         operations["trips_scheduled"] = trips_completed
 
-        buses_active = TripData.objects.filter(
-            company_code=company,
-            start_date=selected_date,
-        ).values('palmtec_id').distinct().count()
-        operations["buses_active"] = buses_active
-        
+        # Buses with an open schedule today, split into:
+        #   running = schedule open AND a trip currently open under it
+        #   idle    = schedule open, no trip currently open
+        open_schedule_bus_ids = set(
+            ScheduleData.objects.filter(
+                company_code=company,
+                start_date=selected_date,
+                is_closed=False,
+                bus_id__isnull=False,
+            ).values_list('bus_id', flat=True)
+        )
+        running_bus_ids = set(
+            TripData.objects.filter(
+                company_code=company,
+                start_date=selected_date,
+                is_closed=False,
+                bus_id__isnull=False,
+            ).values_list('bus_id', flat=True)
+        ) & open_schedule_bus_ids
+        idle_bus_ids = open_schedule_bus_ids - running_bus_ids
+
+        operations["buses_running"] = len(running_bus_ids)
+        operations["buses_idle"] = len(idle_bus_ids)
+        operations["buses_active"] = len(open_schedule_bus_ids)
+
     except (OperationalError, ProgrammingError) as e:
         logger.warning(f"Trip metrics unavailable: {str(e)}")
     except Exception as e:
@@ -1269,10 +1302,10 @@ def get_company_dashboard_metrics(request):
     except Exception as e:
         logger.exception(f"Route/vehicle metrics error: {str(e)}")
     
-    #  Section 3: Settlements (from MosambeeTransaction) 
-    # IMPORTANT FIX: MosambeeTransaction doesn't have a direct company FK.
+    #  Section 3: Settlements (from AggregatorTransaction) 
+    # IMPORTANT FIX: AggregatorTransaction doesn't have a direct company FK.
     # It links to TransactionData via related_ticket → company_code.
-    # However, not all Mosambee transactions may be reconciled yet (related_ticket could be null).
+    # However, not all aggregator transactions may be reconciled yet (related_ticket could be null).
     # 
     # Solution: We filter by transactions that are EITHER:
     #   1. Already linked to a ticket from this company, OR
@@ -1284,7 +1317,7 @@ def get_company_dashboard_metrics(request):
     
     try:
         # Base queryset: all transactions on this date
-        settlement_qs = MosambeeTransaction.objects.filter(
+        settlement_qs = AggregatorTransaction.objects.filter(
             transaction_date=selected_date
         )
         
@@ -1299,22 +1332,22 @@ def get_company_dashboard_metrics(request):
         
         # Verified transactions
         settlements["verified"] = settlement_qs.filter(
-            verification_status=MosambeeTransaction.VerificationStatus.VERIFIED
+            verification_status=AggregatorTransaction.VerificationStatus.VERIFIED
         ).count()
         
         # Pending verification (unverified + flagged)
         settlements["pending_verification"] = settlement_qs.filter(
             verification_status__in=[
-                MosambeeTransaction.VerificationStatus.UNVERIFIED,
-                MosambeeTransaction.VerificationStatus.FLAGGED,
+                AggregatorTransaction.VerificationStatus.UNVERIFIED,
+                AggregatorTransaction.VerificationStatus.FLAGGED,
             ]
         ).count()
         
         # Failed (rejected + disputed)
         settlements["failed"] = settlement_qs.filter(
             verification_status__in=[
-                MosambeeTransaction.VerificationStatus.REJECTED,
-                MosambeeTransaction.VerificationStatus.DISPUTED,
+                AggregatorTransaction.VerificationStatus.REJECTED,
+                AggregatorTransaction.VerificationStatus.DISPUTED,
             ]
         ).count()
         
@@ -1345,10 +1378,10 @@ def get_company_dashboard_metrics(request):
             })
 
         # Recent verified settlements for this date
-        recent_settlements = MosambeeTransaction.objects.filter(
+        recent_settlements = AggregatorTransaction.objects.filter(
             transaction_date=selected_date,
             related_ticket__company_code=company,
-            verification_status=MosambeeTransaction.VerificationStatus.VERIFIED,
+            verification_status=AggregatorTransaction.VerificationStatus.VERIFIED,
         ).order_by('-created_at')[:2]
 
         for s in recent_settlements:
@@ -1394,15 +1427,25 @@ def get_admin_dashboard_data(request):
             total=Count('id'),
             validated=Count(Case(When(authentication_status=Company.AuthStatus.APPROVED, then=1), output_field=IntegerField())),
             unvalidated=Count(Case(When(authentication_status=Company.AuthStatus.PENDING, then=1), output_field=IntegerField())),
+            validating=Count(Case(When(authentication_status=Company.AuthStatus.VALIDATING, then=1), output_field=IntegerField())),
             expired=Count(Case(When(authentication_status=Company.AuthStatus.EXPIRED, then=1), output_field=IntegerField())),
+            blocked=Count(Case(When(authentication_status=Company.AuthStatus.BLOCKED, then=1), output_field=IntegerField())),
         )
-        dashboard_data = {"company_summary": {}, "user_summary": {}}
+        dashboard_data = {
+            "company_summary": {},
+            "user_summary": {},
+            "device_summary": {},
+            "dealer_summary": {},
+            "session_summary": {},
+        }
 
         dashboard_data['company_summary'].update({
             "total_companies": company_counts['total'],
             "validated_companies": company_counts['validated'],
             "unvalidated_companies": company_counts['unvalidated'],
+            "validating_companies": company_counts['validating'],
             "expired_companies": company_counts['expired'],
+            "blocked_companies": company_counts['blocked'],
         })
 
         all_non_admin_users = User.objects.filter(is_superuser=False).count()
@@ -1418,6 +1461,47 @@ def get_admin_dashboard_data(request):
         dashboard_data['user_summary'].update({
             "total_users": all_non_admin_users,
             "users_by_company": users_by_company,
+        })
+
+        device_counts = ETMDevice.objects.aggregate(
+            total=Count('id'),
+            stock=Count(Case(When(allocation_status=ETMDevice.AllocationStatus.STOCK, then=1), output_field=IntegerField())),
+            dealer_pool=Count(Case(When(allocation_status=ETMDevice.AllocationStatus.DEALER_POOL, then=1), output_field=IntegerField())),
+            allocated=Count(Case(When(allocation_status=ETMDevice.AllocationStatus.ALLOCATED, then=1), output_field=IntegerField())),
+        )
+        dashboard_data['device_summary'].update({
+            "total_devices": device_counts['total'],
+            "in_stock": device_counts['stock'],
+            "dealer_pool": device_counts['dealer_pool'],
+            "mapped": device_counts['allocated'],
+        })
+
+        dealer_counts = Dealer.objects.aggregate(
+            total=Count('id'),
+            validated=Count(Case(When(authentication_status=Dealer.AuthStatus.APPROVED, then=1), output_field=IntegerField())),
+            unvalidated=Count(Case(When(authentication_status=Dealer.AuthStatus.PENDING, then=1), output_field=IntegerField())),
+            validating=Count(Case(When(authentication_status=Dealer.AuthStatus.VALIDATING, then=1), output_field=IntegerField())),
+            expired=Count(Case(When(authentication_status=Dealer.AuthStatus.EXPIRED, then=1), output_field=IntegerField())),
+            blocked=Count(Case(When(authentication_status=Dealer.AuthStatus.BLOCKED, then=1), output_field=IntegerField())),
+        )
+        dashboard_data['dealer_summary'].update({
+            "total_dealers": dealer_counts['total'],
+            "validated_dealers": dealer_counts['validated'],
+            "unvalidated_dealers": dealer_counts['unvalidated'],
+            "validating_dealers": dealer_counts['validating'],
+            "expired_dealers": dealer_counts['expired'],
+            "blocked_dealers": dealer_counts['blocked'],
+        })
+
+        active_admin_sessions = UserSession.objects.filter(
+            is_active=True,
+            user__role__in=[
+                UserRole.SUPERADMIN, UserRole.COMPANY_ADMIN, UserRole.DEALER_ADMIN,
+                UserRole.EXECUTIVE, UserRole.PRODUCTION,
+            ],
+        ).count()
+        dashboard_data['session_summary'].update({
+            "active_admin_sessions": active_admin_sessions,
         })
 
         return Response({"message": "Success", "data": dashboard_data}, status=status.HTTP_200_OK)
@@ -1631,6 +1715,8 @@ def sync_company_license_confirm(request, pk):
     company.product_from_date = _parse_license_date(raw_from) or company.product_from_date
     company.product_to_date   = _parse_license_date(raw_to)   or company.product_to_date
     company.authentication_status   = new_auth_status
+    if new_auth_status == Company.AuthStatus.APPROVED:
+        company.is_active = True
     company.product_registration_id = _si(auth_data.get('ProductRegistrationId'))
     company.unique_identifier       = auth_data.get('UniqueIDentifier', '') or company.unique_identifier
     company.error_message           = None
