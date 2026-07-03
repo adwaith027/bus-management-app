@@ -4,6 +4,13 @@ from .views.apk import reports as apk_views
 from .views.apk import apk_upload as apk_upload_views
 from .views.apk import master_send as apk_download_views
 from .views import setup_data as setup_data_views
+from .views.utils import require_tier_for_apk, _PREMIUM_TIER_ERROR
+
+# Data-transfer endpoints (device master-data download + .DAT upload) require
+# Premium tier when reached via the APK. Wrapped only here, not in urls.py, so
+# the web dashboard's DeviceDownload.jsx page (same view functions, mounted in
+# urls.py) stays ungated for company_admin's own manual downloads.
+_premium = require_tier_for_apk('premium', _PREMIUM_TIER_ERROR)
 
 
 urlpatterns = [
@@ -28,28 +35,28 @@ urlpatterns = [
     path('reports/payment-type',  apk_views.payment_type_report,  name='apk_payment_type'),
     path('reports/farewise',      apk_views.farewise_report,      name='apk_farewise'),
     path('reports/expense',                apk_views.expense_report,                name='apk_expense'),
-    path('reports/mosambee-transactions',  apk_views.mosambee_transaction_report,   name='apk_mosambee_transactions'),
+    path('reports/aggregator-transactions', apk_views.aggregator_transaction_report, name='apk_aggregator_transactions'),
 
-    # etm version for apk
+    # etm version for apk (open to everyone, no tier gate)
     path('device/getEtmVersion', setup_data_views.get_etm_device_version_for_apk),
 
-    # masterdata
-    path('device/routes',      apk_download_views.get_routes_list),
-    path('device/settings',    apk_download_views.get_settings_file),
-    path('device/crew',        apk_download_views.get_crew_file),
-    path('device/vehicles',    apk_download_views.get_vehicles_file),
-    path('device/expenses',    apk_download_views.get_expenses_file),
+    # masterdata download (data transfer — Premium tier required on the APK)
+    path('device/routes',      _premium(apk_download_views.get_routes_list)),
+    path('device/settings',    _premium(apk_download_views.get_settings_file)),
+    path('device/crew',        _premium(apk_download_views.get_crew_file)),
+    path('device/vehicles',    _premium(apk_download_views.get_vehicles_file)),
+    path('device/expenses',    _premium(apk_download_views.get_expenses_file)),
     # Route group — individual files or single bundled ZIP
-    path('device/masterdata',  apk_download_views.get_masterdata_bundle),
-    path('device/routelst',    apk_download_views.get_routelst_file),
-    path('device/stagelst',    apk_download_views.get_stagelst_file),
-    path('device/languagedat', apk_download_views.get_languagedat_file),
-    path('device/rtedat',      apk_download_views.get_rtedat_file),
+    path('device/masterdata',  _premium(apk_download_views.get_masterdata_bundle)),
+    path('device/routelst',    _premium(apk_download_views.get_routelst_file)),
+    path('device/stagelst',    _premium(apk_download_views.get_stagelst_file)),
+    path('device/languagedat', _premium(apk_download_views.get_languagedat_file)),
+    path('device/rtedat',      _premium(apk_download_views.get_rtedat_file)),
     # Settings group
-    path('device/currency',    apk_download_views.get_currency_file),
+    path('device/currency',    _premium(apk_download_views.get_currency_file)),
 
-    # masterdata file upload
-    path('upload/odometer-dat', apk_upload_views.uploadOdometerDat, name='upload_odometer_dat'),
-    path('upload/expense-dat', apk_upload_views.uploadExpenseDat, name='upload_expense_dat'),
+    # masterdata file upload (data transfer — Premium tier required on the APK)
+    path('upload/odometer-dat', _premium(apk_upload_views.uploadOdometerDat), name='upload_odometer_dat'),
+    path('upload/expense-dat', _premium(apk_upload_views.uploadExpenseDat), name='upload_expense_dat'),
 
 ]
