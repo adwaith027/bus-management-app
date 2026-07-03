@@ -1,28 +1,28 @@
 from django.urls import path
+from .views.web import ticket_reports
 from .views.web import auth as auth_views
 from .views.web import users as user_views
-from .views.web import company as company_views
-from .views.web import dealers as dealer_views
 from .views.web import depots as depot_views
+from .views.web import dealers as dealer_views
+from .views.web.imports import mdb as mdb_views
+from .views.web import company as company_views
+from .views.web import sessions as session_views
+from .views import setup_data as setup_data_views
+from .views.apk import master_send as palmtec_views
+from .views.web.masterdata import crew as crew_views
+from .views.web import audit_logs as audit_log_views
 from .views.web import executives as executive_views
-from .views.web import device_registry as device_registry_views
-from .views.web import ticket_reports
 from .views.web import raw_data_logs as raw_log_views
 from .views.web import settlements as settlement_views
-from .views.web import audit_logs as audit_log_views
-from .views.web import global_settings as global_settings_views
-from .views.web import sessions as session_views
-from .views.web.masterdata import transport as transport_views
-from .views.web.masterdata import crew as crew_views
-from .views.web.masterdata import settings as settings_views
-from .views.web.imports import mdb as mdb_views
-from .views.web.imports import routes as route_import_views
-from .views.apk import master_send as palmtec_views
 from .views.palmtec import data_post as palmtec_ingest
-from .views.webhooks import mosambee as mosambee_webhooks
-from .views.apk import reports as apk_views
-from .views.apk import apk_upload as apk_upload_views
-from .views import setup_data as setup_data_views
+from .views.webhooks import aggregator as aggregator_webhooks
+from .views.web import ghost_records as ghost_record_views
+from .views.web.imports import routes as route_import_views
+from .views.web.masterdata import settings as settings_views
+from .views.web.masterdata import transport as transport_views
+from .views.web import device_registry as device_registry_views
+from .views.web import global_settings as global_settings_views
+from .views.web.masterdata import operations as operations_views
 
 urlpatterns = [
     # authentication
@@ -75,8 +75,10 @@ urlpatterns = [
     path('get_company_devices', setup_data_views.get_company_devices_for_download),
 
     # ticket data — device push (ETM → server)
+    # WARNING: path strings below are used verbatim in _validate_checksum() calls in
+    # views/palmtec/data_post.py — update both places when renaming any of these paths.
     path('getScheduleOpen', palmtec_ingest.getScheduleOpenDataFromDevice, name='get_schedule_open_data'),
-    path('getScheduleClose', palmtec_ingest.getScheduleCloseDataFromDevice, name='get_schedule_close_data'),
+    path('getSdCl', palmtec_ingest.getScheduleCloseDataFromDevice, name='get_schedule_close_data'),
 
     path('getTripOpen', palmtec_ingest.getTripOpenDataFromDevice, name='get_trip_open_data'),
     path('getTripClose', palmtec_ingest.getTripCloseDataFromDevice, name='get_trip_close_data'),
@@ -84,7 +86,7 @@ urlpatterns = [
     path('getTicket', palmtec_ingest.getTicketDataFromDevice, name='get_ticket_data'),
 
     path('getTripCloseSummary', palmtec_ingest.getTripCloseSummaryFromDevice, name='get_trip_close_summary'),
-    path('getScheduleCloseSummary', palmtec_ingest.getScheduleCloseSummaryFromDevice, name='get_schedule_close_summary'),
+    path('getSdClSm', palmtec_ingest.getScheduleCloseSummaryFromDevice, name='get_schedule_close_summary'),
 
     path('getOdometerDetails', palmtec_ingest.getOdometerDataFromDevice, name='get_odometer_data'),
     path('getExpenseDetails', palmtec_ingest.getExpenseDataFromDevice, name='get_expense_data'),
@@ -98,10 +100,10 @@ urlpatterns = [
     path('get_all_trip_data',        ticket_reports.get_all_trip_data,        name='get_all_trip_data'),
     path('get_all_schedule_data',    ticket_reports.get_all_schedule_data,    name='get_all_schedule_data'),
 
-    # mosambee webhooks (Mosambee server → us)
-    path('postTransactionDetails', mosambee_webhooks.mosambee_settlement_data, name='postTransactionDetails'),
-    path('postPayoutDetails', mosambee_webhooks.mosambee_payout_callback, name='postPayoutDetails'),
-    # mosambee web fetch
+    # payment aggregator webhooks (aggregator server → us)
+    path('postTransactionDetails', aggregator_webhooks.aggregator_settlement_data, name='postTransactionDetails'),
+    path('postPayoutDetails', aggregator_webhooks.aggregator_payout_callback, name='postPayoutDetails'),
+    # payment aggregator web fetch
     path('get_settlement_data', settlement_views.get_settlement_data, name='get_settlement_data'),
     path('get_payout_data', settlement_views.get_payout_data, name='get_payout_data'),
     path('verify_settlement', settlement_views.verify_settlement, name='verify_settlement'),
@@ -137,6 +139,11 @@ urlpatterns = [
     # Audit logs (superadmin)
     path('audit-logs',              audit_log_views.list_audit_logs,        name='audit_logs'),
     path('audit-logs/action-types', audit_log_views.audit_log_action_types, name='audit_log_action_types'),
+
+    # Ghost records — unresolved company (superadmin)
+    path('ghost-transactions',    ghost_record_views.get_ghost_transactions, name='ghost_transactions'),
+    path('ghost-payouts',         ghost_record_views.get_ghost_payouts,      name='ghost_payouts'),
+    path('ghost-assign-company',  ghost_record_views.assign_ghost_company,   name='ghost_assign_company'),
 
     # Master Data — transport
     path('masterdata/bus-types', transport_views.get_bus_types),
@@ -176,6 +183,12 @@ urlpatterns = [
     path('masterdata/crew-assignments/create', crew_views.create_crew_assignment),
     path('masterdata/crew-assignments/update/<int:pk>', crew_views.update_crew_assignment),
     path('masterdata/crew-assignments/delete/<int:pk>', crew_views.delete_crew_assignment),
+    path('masterdata/expense-masters', operations_views.get_expense_masters),
+    path('masterdata/expense-masters/create', operations_views.create_expense_master),
+    path('masterdata/expense-masters/update/<int:pk>', operations_views.update_expense_master),
+    path('masterdata/expense-masters/delete/<int:pk>', operations_views.delete_expense_master),
+    path('masterdata/inspector-details', operations_views.get_inspector_details),
+    path('masterdata/expenses', operations_views.get_expenses),
     path('masterdata/dropdowns/employee-types', crew_views.get_employee_types_dropdown),
     path('masterdata/dropdowns/employees', crew_views.get_employees_by_type_dropdown),
 
@@ -201,7 +214,8 @@ urlpatterns = [
     path('etm-devices/<int:device_id>/unmap',          device_registry_views.unmap_device,         name='etm_unmap'),
     path('etm-devices/<int:device_id>/return-to-stock', device_registry_views.return_device_to_stock, name='etm_return_stock'),
     path('etm-devices/<int:device_id>/set-palmtec-id',   device_registry_views.set_palmtec_id,   name='etm_set_palmtec_id'),
-    path('etm-devices/<int:device_id>/set-mosambee-tid', device_registry_views.set_mosambee_tid, name='etm_set_mosambee_tid'),
+    path('etm-devices/<int:device_id>/set-aggregator-tid', device_registry_views.set_aggregator_tid,  name='etm_set_aggregator_tid'),
+    path('etm-devices/sync-aggregator-tids',               device_registry_views.sync_aggregator_tids, name='etm_sync_aggregator_tids'),
 
     # Palmtec device data APIs (server → APK → USB → device)
     path('device/routes',      palmtec_views.get_routes_list),
