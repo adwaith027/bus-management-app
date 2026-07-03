@@ -78,9 +78,9 @@ TRANSACTION_MODELS = [
 ]
 
 # Payment models
-from .payments import MosambeeTransaction, MosambeePayoutCallback
+from .payments import AggregatorTransaction, AggregatorPayoutCallback
 
-PAYMENT_MODELS = ['MosambeeTransaction', 'MosambeePayoutCallback']
+PAYMENT_MODELS = ['AggregatorTransaction', 'AggregatorPayoutCallback']
 
 
 # Public export surface
