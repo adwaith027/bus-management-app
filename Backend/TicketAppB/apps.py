@@ -9,6 +9,10 @@ class TicketappbConfig(AppConfig):
 
     # Import signals when Django starts
     def ready(self):
+        from django.conf import settings
+        from TicketAppB.log_handlers import configure_logging
+        configure_logging(base_dir=settings.BASE_DIR, debug=settings.DEBUG)
+
         import TicketAppB.signals
 
         # Reset any companies stuck in VALIDATING from a previous crashed/killed process.
