@@ -208,12 +208,10 @@ class Route(models.Model):
 
     fare_type = models.IntegerField(help_text="Fare calculation type")
     bus_type = models.ForeignKey(BusType,on_delete=models.PROTECT,related_name='routes',help_text="Bus type for route")
-    use_stop = models.BooleanField(default=False,help_text="Use stop-based fare calculation")
     half = models.BooleanField(default=False,help_text="Allow half fare tickets")
     luggage = models.BooleanField(default=False,help_text="Allow luggage charges")
-    student = models.BooleanField(default=False,help_text="Allow student concession")
     adjust = models.BooleanField(default=False,help_text="Allow fare adjustment")
-    conc = models.BooleanField(default=False,help_text="Allow general concession")
+    conc = models.BooleanField(default=False,help_text="Allow concession")
     ph = models.BooleanField(default=False,help_text="Allow physically handicapped concession")
     start_from = models.IntegerField(default=0,help_text="Starting stage number")
     pass_allow = models.BooleanField(default=False,help_text="Allow pass holders")
@@ -571,7 +569,6 @@ class Settings(models.Model):
     next_fare_flag = models.BooleanField(default=False)
     odometer_entry = models.BooleanField(default=False)
     ticket_no_big_font = models.BooleanField(default=False)
-    crew_check = models.BooleanField(default=False)
     gprs_enable = models.BooleanField(default=False)
     tripsend_enable = models.BooleanField(default=False)
     schedulesend_enable = models.BooleanField(default=False)
@@ -612,6 +609,19 @@ class Settings(models.Model):
     sendbill_enable = models.CharField(max_length=10, default='0')
 
     currency = models.CharField(max_length=10, null=True, blank=True)
+
+    # ETM concession ratios & flags (sourced from MDB import)
+    ladies_ratio  = models.IntegerField(default=0, help_text="Ladies concession % (LadiPer)")
+    senior_ratio  = models.IntegerField(default=0, help_text="Senior citizen concession % (SeniorPer)")
+    big_font      = models.BooleanField(default=False, help_text="Enable big font on ETM (bigfontenable)")
+    refund_enable = models.BooleanField(default=False, help_text="Enable refund on ETM (ucRefundEnable)")
+
+    # Hardware debounce — not shown in UI, packed into HW.keyhitdelay
+    keyhitdelay = models.IntegerField(default=12)
+
+    # Password defaults — per-profile values fall back to these on new profile creation
+    supervisor_pwd = models.CharField(max_length=255, null=True, blank=True)
+    remove_pwd     = models.CharField(max_length=255, null=True, blank=True)
 
     company = models.OneToOneField('Company',on_delete=models.CASCADE,related_name='settings')
 
@@ -659,8 +669,10 @@ class SettingsProfile(models.Model):
     palmtec_id = models.PositiveIntegerField(help_text="Client-assigned device identifier (max 6 digits)")
 
     # ── Passwords ────────────────────────────────────────────────────────────
-    user_pwd   = models.CharField(max_length=255, null=True, blank=True)
-    master_pwd = models.CharField(max_length=255, null=True, blank=True)
+    user_pwd       = models.CharField(max_length=255, null=True, blank=True)
+    master_pwd     = models.CharField(max_length=255, null=True, blank=True)
+    supervisor_pwd = models.CharField(max_length=255, null=True, blank=True)
+    remove_pwd     = models.CharField(max_length=255, null=True, blank=True)
 
     # ── Fare percentages & amounts ───────────────────────────────────────────
     half_per          = models.DecimalField(max_digits=5,  decimal_places=2, default=Decimal('50.00'))
@@ -700,7 +712,6 @@ class SettingsProfile(models.Model):
     next_fare_flag      = models.BooleanField(default=False)
     odometer_entry      = models.BooleanField(default=False)
     ticket_no_big_font  = models.BooleanField(default=False)
-    crew_check          = models.BooleanField(default=False)
     tripsend_enable     = models.BooleanField(default=False)
     schedulesend_enable = models.BooleanField(default=False)
     inspect_rpt         = models.BooleanField(default=False)
