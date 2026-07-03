@@ -29,7 +29,7 @@ function RoleBadge({ role }) {
   };
   return (
     <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border capitalize ${map[role] || 'bg-slate-100 text-slate-600 border-slate-200'}`}>
-      {role?.replace(/_/g, ' ') || 'unknown'}
+      {(role === 'company_admin' ? 'customer admin' : role?.replace(/_/g, ' ')) || 'unknown'}
     </span>
   );
 }
