@@ -420,7 +420,7 @@ export default function TransactionPosting() {
                 {/* Payment side */}
                 <div className="border border-blue-200 rounded-xl p-5 bg-blue-50/30">
                   <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2 pb-2 border-b border-blue-100">
-                    <CreditCard size={15} className="text-blue-600" /> Payment (Mosambee)
+                    <CreditCard size={15} className="text-blue-600" /> Payment (Payment Aggregator)
                   </h3>
                   <div className="space-y-3">
                     <div className="grid grid-cols-2 gap-3">
@@ -440,7 +440,7 @@ export default function TransactionPosting() {
                       </div>
                       <div>
                         <p className="text-xs text-slate-400 uppercase tracking-wider">BQR Merchant ID</p>
-                        <p className="text-sm mt-0.5">{selectedTxn.narration || 'N/A'}</p>
+                        <p className="text-xs font-mono mt-0.5 break-all">{selectedTxn.narration || 'N/A'}</p>
                       </div>
                     </div>
                     <div className="bg-white p-3 rounded-lg border border-blue-100">
@@ -487,7 +487,7 @@ export default function TransactionPosting() {
                         </div>
                       ) : (
                         <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-500 flex items-center gap-1">
-                          <Clock size={12} /> Awaiting payout from Mosambee
+                          <Clock size={12} /> Awaiting payout from aggregator
                         </div>
                       )}
                     </div>
