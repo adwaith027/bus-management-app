@@ -45,6 +45,13 @@ def _i(val):
     except (ValueError, TypeError):
         return struct.pack('<h', 0)
 
+def _u(val):
+    """2-byte little-endian unsigned short."""
+    try:
+        return struct.pack('<H', int(val or 0))
+    except (ValueError, TypeError):
+        return struct.pack('<H', 0)
+
 
 # ─── File packers ──────────────────────────────────────────────────────────────
 
@@ -66,47 +73,47 @@ def _pack_busdat(p, cs):
     data += _s(p.header3, 32)
     data += _s(p.footer1, 32)
     data += _s(p.footer2, 32)
-    data += b'\x00'                          # PaperFeed
+    data += b'\x02'                          # PaperFeed (VB default 2)
     data += _s(str(p.palmtec_id), 6)        # PalmtecID — from SettingsProfile
-    data += b'\x00'                          # DefaultFull
+    data += b'\x01'                          # DefaultFull (VB default 1)
     data += _b(p.half_per)
     data += _b(p.con_per)
     data += _f(p.st_max_amt)
     data += _f(cs.st_min_con if cs else 0)  # company Settings
     data += _b(p.phy_per)
-    data += b'\x00'                          # LuggageUnitRateEdit
+    data += b'\x01'                          # LuggageUnitRateEdit (VB default 1)
     data += _f(p.luggage_unit_rate)
-    data += _b(p.stage_updation_msg)
-    data += b'\x00'                          # StageDisplayFont
+    data += b'\x01'                          # StageUpdation — always enable bidirectional from-stage nav
+    data += b'\x01'                          # StageDisplayFont (VB default 1)
     data += b'\x00'                          # UseDuplicate
     data += b'\x00'                          # UseDup1
     data += _bool(p.roundoff)
     data += _bool(p.round_up)
     data += _s(cs.currency if cs else '', 8) # company Settings
-    data += _i(p.round_amt)
-    data += b'\x00'                          # ucbAdjust
+    data += _u(p.round_amt)
+    data += b'\x01'                          # ucbAdjust (VB default 1)
     data += b'\x00'                          # ucbReviewPasswd
     data += b'\x00'                          # ucbReportPasswd
     data += b'\x00'                          # ucbSTFromStage
     data += _bool(p.st_fare_edit)
     data += _s(p.master_pwd, 11)             # cMasterClearPassword
-    data += _b(cs.report_flag if cs else 0) # company Settings
+    data += _b((cs.report_flag if cs else 0) | 0x11)  # force bReportFarePrint (bit0) + crewEnable (bit4)
     data += _bool(p.next_fare_flag)
     data += _b(p.stage_updation_msg)         # UpdateStageMsg
     data += _bool(p.remove_ticket_flag)
     data += _bool(p.stage_font_flag)
-    data += b'\x00'                          # EnableStageDefault
+    data += b'\x01'                          # EnableStageDefault (VB default 1)
     data += b'\x00'                          # PrinterSel
     data += _bool(p.odometer_entry)
     data += _bool(p.ticket_no_big_font)
-    data += _bool(p.crew_check)
+    data += b'\x01'                          # CrewCheck — always enabled
     data += b'\x00' * 13                     # PhNo (zeroed — device uses its own)
-    data += b'\x00'                          # TripSMS
+    data += b'\x01'                          # TripSMS — always enabled
     data += _bool(p.schedulesend_enable)     # ScheduleSMS
-    data += b'\x00'                          # TicketRpt
-    data += b'\x00'                          # Busno
-    data += b'\x00'                          # Driver
-    data += b'\x00'                          # Conductor
+    data += b'\x01'                          # TicketRpt — always enabled
+    data += b'\x01'                          # Busno — always enabled
+    data += b'\x01'                          # Driver — always enabled
+    data += b'\x01'                          # Conductor — always enabled
     data += _bool(p.inspect_rpt)
     data += b'\x00'                          # RepeatST
     data += b'\x01' if (cs and cs.sendbill_enable == '1') else b'\x00'  # company Settings
@@ -125,10 +132,10 @@ def _pack_busdat(p, cs):
     data += b'\x00'                          # MsgPrompt
     data += b'\x01' if p.exp_enable else b'\x00'
     data += b'\x01' if (cs and cs.smart_card == '1') else b'\x00'  # company Settings
-    data += b'\x00'                          # Modomon
+    data += b'\x01'                          # ModemON (VB default 1)
     data += b'\x01' if (cs and cs.ftp_enable == '1') else b'\x00'  # company Settings
-    data += _s('', 11)                       # RemovePswd
-    data += b'\x00'                          # StageReport_E_D
+    data += _s(p.remove_pwd, 11)             # RemovePassword — profile field
+    data += b'\x01'                          # StageReport_E_D (VB default 1)
     data += _bool(p.st_roundoff_enable)
     data += _i(p.st_roundoff_amt)
     data += _bool(p.simple_report)
@@ -141,13 +148,22 @@ def _pack_busdat(p, cs):
     data += _bool(p.userpswd_enable)
     data += b'\x00'                          # DieselEntryEnable
     data += b'\x00'                          # TripTimeEnable
-    data += b'\x00'                          # TripCloseReport
-    data += b'\x00'                          # ucPaperFeed
-    data += b'\x00'                          # refund
-    data += b'\x00'                          # shedule_close_rpt
-    data += b'\x00'                          # ladis_per
-    data += b'\x00'                          # seniar_per
-    data += b'\x00' * 70                     # ucTemp padding
+    data += b'\x01'                          # ucTripCloseReport (VB default 1)
+    data += b'\x01'                          # ucPaperFeed (VB default 1)
+    data += _bool(cs.refund_enable if cs else False)  # ucRefundEnable — company Settings
+    data += b'\x01'                          # ucsheduleCloseRpt (VB default 1)
+    data += _b(cs.ladies_ratio if cs else 0) # LadiPer — company Settings
+    data += _b(cs.senior_ratio if cs else 0) # SeniorPer — company Settings
+    data += b'\x01'                          # bigfontenable — always on (VB default)
+    data += b'\x00'                          # ucSeniorEnable
+    data += b'\x00'                          # ucLaadiesEnable
+    # shd_opn_d/shd_opn_t/trp_opn_d/trp_opn_t — firmware uses these bytes at runtime
+    # for schedule/trip open date+time state. Must be zeroed by web app; device manages.
+    data += b'\x00' * 4                      # shd_opn_d
+    data += b'\x00' * 4                      # shd_opn_t
+    data += b'\x00' * 4                      # trp_opn_d
+    data += b'\x00' * 4                      # trp_opn_t
+    data += b'\x00' * 51                     # ucTemp
 
     # ── HARDWARE_SETUP section (64 bytes) ──────────────────────────────────────
     # Ptime (4 bytes): Hour, Min, Sec, Hundredths — zeroed (device sets its own clock)
@@ -155,27 +171,27 @@ def _pack_busdat(p, cs):
     # Pdate (4 bytes): Day, Month, Year(2 bytes) — zeroed
     data += b'\x00' * 4
     data += _s(p.master_pwd, 11)             # MSR_PSWD
-    data += _s(p.user_pwd, 11)              # USR_PSWD
-    data += _s('', 11)                       # SPR_PSWD (supervisor)
-    data += b'\x80'                          # val_contrast  (default mid)
-    data += b'\x80'                          # val_brightness
+    data += _s(p.user_pwd, 11)             # USR_PSWD
+    data += _s(p.supervisor_pwd, 11)       # SPR_PSWD — profile field
+    data += bytes([4])                       # val_contrast (VB default 4)
+    data += bytes([10])                      # val_brightness (VB default 10)
     data += b'\x00'                          # screensaver_onoff
-    data += b'\x1E'                          # backlit_timer (30s default)
-    data += b'\x00'                          # keyhitdelay
+    data += bytes([3])                       # backlit_timer (VB default 3)
+    data += _b(cs.keyhitdelay if cs else 12) # keyhitdelay — company Settings (default 12)
     data += b'\x00'                          # boarder_en
-    data += b'\x00'                          # dooropen_alert
-    data += b'\x00'                          # paperout_alert
+    data += b'\x01'                          # dooropen_alert (VB default 1)
+    data += b'\x01'                          # paperout_alert (VB default 1)
     data += b'\x00'                          # ucHalfPagePrinter
     data += b'\x01'                          # buzz_onoff (on)
-    data += b'\x00'                          # rs232_baud
-    data += b'\x00'                          # ir_baud
-    data += b'\x00'                          # rf_baud
-    data += b'\x00'                          # connecting_medium
-    data += b'\x00'                          # footer_stat
+    data += b'\x01'                          # rs232_baud (VB default 1)
+    data += b'\x01'                          # ir_baud (VB default 1)
+    data += b'\x01'                          # rf_baud (VB default 1)
+    data += b'\x01'                          # connecting_medium (VB default 1)
+    data += bytes([16])                      # footer_stat (VB default 16)
     data += _b(p.language_option)           # select_language
     data += b'\x00'                          # login_mode
-    data += b'\x00'                          # ucKPLight_opt
-    data += _i(0)                            # usShuntdownTime
+    data += b'\x00'                          # ucKPLite_Opt
+    data += _u(180)                          # usShuntdownTime (VB default 180)
     data += _b(p.language_option)           # LangNo
     data += b'\x00' * 2                     # ucTemp
 
@@ -301,7 +317,7 @@ def _pack_rtedat(routes, stage_index):
     Build RTE.DAT binary.
     Per route: Route header (8 bytes) + fare Singles + stage Int16 IDs.
     Matches VB6 Type Route and fare/stage writing in mdFunctions.bas CreateRTE().
-    stage_index: {RouteStage.pk: 1-based position in global STAGE.LST}
+    stage_index: {RouteStage.pk: 0-based position in global STAGE.LST}
     """
     data = b''
     for route in routes:
@@ -316,22 +332,21 @@ def _pack_rtedat(routes, stage_index):
         data += bytes([nos % 256])
         data += b'\x00'  # NoOfDupFare
 
-        fares_qs = Fare.objects.filter(route=route)
-        if route.fare_type == 2:
-            # Graph/matrix fare: N*(N-1)/2 Singles ordered by number ASC
-            fares = list(fares_qs.order_by('number').values_list('fare_amount', flat=True))
-        else:
-            # Table fare: Singles ordered by fare_amount ASC
-            fares = list(fares_qs.order_by('fare_amount').values_list('fare_amount', flat=True))
+        fares = list(
+            Fare.objects.filter(route=route)
+            .order_by('row', 'col')
+            .values_list('fare_amount', flat=True)
+        )
 
         for f in fares:
             data += struct.pack('<f', float(f))
 
-        # Stage IDs as Int16 — 1-based position in global STAGE.LST (RouteStage.pk order)
+        # Stage IDs as Int16 — 0-based position in global STAGE.LST (RouteStage.pk order)
         for rs in rs_qs:
-            idx = stage_index.get(rs.pk, 0)
-            if idx == 0:
+            idx = stage_index.get(rs.pk, -1)
+            if idx < 0:
                 logger.warning('RTE.DAT: RouteStage pk=%s not in stage_index for route %s', rs.pk, route.route_code)
+                idx = 0
             data += struct.pack('<h', idx)
 
     return data
@@ -588,7 +603,7 @@ def get_rtedat_file(request):
 
     # Must use same filtered set as get_stagelst_file for positional index consistency
     route_stages = _get_ordered_route_stages(company, route_codes)
-    stage_index = {rs.pk: i for i, rs in enumerate(route_stages, start=1)}
+    stage_index = {rs.pk: i for i, rs in enumerate(route_stages, start=0)}
 
     binary = _pack_rtedat(routes, stage_index)
     response = HttpResponse(binary, content_type='application/octet-stream')
@@ -653,7 +668,7 @@ def get_masterdata_bundle(request):
     )
 
     route_stages = _get_ordered_route_stages(company, route_codes)
-    stage_index  = {rs.pk: i for i, rs in enumerate(route_stages, start=1)}
+    stage_index  = {rs.pk: i for i, rs in enumerate(route_stages, start=0)}
 
     # ── Build binaries ─────────────────────────────────────────────────────────
     routelst_bin = _pack_routelst_all(routes)
