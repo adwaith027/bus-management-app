@@ -1,12 +1,13 @@
 from celery import shared_task
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
-from decimal import Decimal
-from datetime import datetime, timedelta
+from decimal import Decimal, ROUND_HALF_UP
+from datetime import datetime, timedelta, date, time
 from .models import (
     RawDataLog, TransactionData, Direction, RouteStage,
     ScheduleData, TripData, Employee, VehicleType,
-    ETMDevice, DeviceRejectionLog, Company,
+    ETMDevice, DeviceRejectionLog, Company, AggregatorTransaction,
 )
 from .views.utils import _get_route_for_palmtec
 
@@ -33,6 +34,38 @@ def _parse_time(s, fmt="%H:%M:%S"):
         return datetime.strptime(s, fmt).time()
     except ValueError:
         return datetime.strptime(s, "%H:%M").time()
+
+
+def _decode_etm_date(s):
+    """Decode Palmtec YrMo-Day format: A=2026, a=Jan, DD=day."""
+    if not s or len(s) < 5:
+        return None
+    try:
+        year  = ord(s[0]) - ord('A') + 2026
+        month = ord(s[1]) - ord('a') + 1
+        day   = int(s[3:5])
+        return date(year, month, day)
+    except (ValueError, IndexError):
+        return None
+
+
+def _decode_etm_time(s):
+    """Decode Palmtec HrMin-Sec format: A=0h; A-Z=0-25min, a-z=26-51min, 1-8=52-59min."""
+    if not s or len(s) < 5:
+        return None
+    try:
+        hour = ord(s[0]) - ord('A')
+        m = s[1]
+        if m.isupper():
+            minute = ord(m) - ord('A')
+        elif m.islower():
+            minute = ord(m) - ord('a') + 26
+        else:
+            minute = int(m) + 51
+        second = int(s[3:5])
+        return time(hour, minute, second)
+    except (ValueError, IndexError):
+        return None
 
 
 def _resolve_schedule(palmtec_id, company_id, schedule_no, schedule_start_date):
@@ -320,10 +353,14 @@ def process_transaction_data(self, log_id):
                 _fail(log, "Invalid trip start date: device sent 0000-00-00")
                 return
 
-            trip_no         = int(_p(4))
-            trip_start_date = _parse_date(_p(32))
-            schedule_no     = int(_p(28))
-            schedule_start_date = _parse_date(_p(6))
+            trip_no             = int(_p(4))
+            schedule_no         = int(_p(28))
+            schedule_start_date = _decode_etm_date(_p(6))
+            schedule_start_time = _decode_etm_time(_p(7))
+            ticket_date         = _decode_etm_date(_p(8))
+            ticket_time         = _decode_etm_time(_p(9))
+            trip_start_date     = _decode_etm_date(_p(32))
+            trip_start_time     = _decode_etm_time(_p(33))
 
             # ── Resolve or ghost-create schedule ─────────────────────────────
             # Ticket carries schedule_no + schedule_start_date/time — enough to
@@ -335,7 +372,7 @@ def process_transaction_data(self, log_id):
                     company             = company,
                     schedule_no         = schedule_no,
                     schedule_start_date = schedule_start_date,
-                    schedule_start_time = _parse_time(_p(7)),
+                    schedule_start_time = schedule_start_time,
                     ghost_note          = "Ticket received; ShdOpn missing",
                 )
 
@@ -351,10 +388,10 @@ def process_transaction_data(self, log_id):
                     schedule_obj        = schedule_obj,
                     schedule_no         = schedule_no,
                     schedule_start_date = schedule_start_date,
-                    schedule_start_time = _parse_time(_p(7)),
+                    schedule_start_time = schedule_start_time,
                     trip_no             = trip_no,
                     start_date          = trip_start_date,
-                    start_time          = _parse_time(_p(33)),
+                    start_time          = trip_start_time,
                     bus_no              = _p(27),
                     bus_obj             = _resolve_vehicle(_p(27), company.id),
                     driver              = _p(29),
@@ -377,8 +414,8 @@ def process_transaction_data(self, log_id):
                         trip_id              = trip_obj,
                         schedule_id          = schedule_obj,
                         ticket_number        = _p(5),
-                        ticket_date          = _parse_date(_p(8)),
-                        ticket_time          = _parse_time(_p(9)),
+                        ticket_date          = ticket_date,
+                        ticket_time          = ticket_time,
                         from_stage           = from_raw,
                         from_stage_id        = from_stage_obj,
                         to_stage             = to_raw,
@@ -407,7 +444,7 @@ def process_transaction_data(self, log_id):
                         conductor_id         = _resolve_employee(_p(30), company.id),
                         up_down_trip         = up_down_trip,
                         trip_start_date      = trip_start_date,
-                        trip_start_time      = _parse_time(_p(33)),
+                        trip_start_time      = trip_start_time,
                         battery_percentage   = int(_p(34)) if _p(34) else None,
                         passenger_count      = int(_p(35)) if _p(35) else None,
                         full_total_amount    = Decimal(_p(36, '0')),
@@ -1544,6 +1581,7 @@ def poll_company_license(self, company_id: int) -> None:
 
         if auth_status == 'Approve':
             company.authentication_status = Company.AuthStatus.APPROVED
+            company.is_active = True
         elif auth_status == 'Expired':
             company.authentication_status = Company.AuthStatus.EXPIRED
         elif auth_status == 'Block':
@@ -1608,3 +1646,230 @@ def poll_company_license(self, company_id: int) -> None:
                 company.save(update_fields=['authentication_status'])
         except Exception as e:
             log.error(f'[poll_company_license] Could not reset VALIDATING for {company_id}: {e}')
+
+
+import logging as _recon_logger
+_recon_log = _recon_logger.getLogger(__name__)
+
+@shared_task(bind=True, max_retries=3)
+def reconcile_aggregator_transaction(self, transaction_id):
+    """
+    Async reconciliation for a single AggregatorTransaction.
+    Fired by the webhook after create. Replaces the removed post_save signal.
+    """
+    try:
+        txn = AggregatorTransaction.objects.select_related('company').get(id=transaction_id)
+    except AggregatorTransaction.DoesNotExist:
+        _recon_log.error('[reconcile_aggregator] Transaction %s not found', transaction_id)
+        return
+
+    if not txn.is_payment_successful:
+        AggregatorTransaction.objects.filter(id=transaction_id).update(
+            processing_status=AggregatorTransaction.ProcessingStatus.PENDING_VERIFICATION
+        )
+        return
+
+    AggregatorTransaction.objects.filter(id=transaction_id).update(
+        processing_status=AggregatorTransaction.ProcessingStatus.RECONCILING
+    )
+
+    def _fail(status, error, ticket=None):
+        update = dict(
+            reconciliation_status=status,
+            reconciliation_error=error,
+            processing_status=AggregatorTransaction.ProcessingStatus.PENDING_VERIFICATION,
+        )
+        if ticket:
+            update['related_ticket'] = ticket
+        AggregatorTransaction.objects.filter(id=transaction_id).update(**update)
+
+    try:
+        company = txn.company
+        if not company:
+            _fail(
+                AggregatorTransaction.ReconciliationStatus.NOT_FOUND,
+                f'Company not resolved for terminal: {txn.transactionTerminalId}',
+            )
+            return
+
+        # Tier 1: device wrote the aggregator transactionID back onto the ticket
+        # after its own UPI status check succeeded — authoritative match.
+        ticket = TransactionData.objects.filter(
+            transaction_id=txn.transactionID,
+            company_code=company,
+        ).first()
+
+        # Tier 2: device-side write-back failed/dropped, but aggregator's posting
+        # still arrived. narration == bqrMerchantId; first 6 chars = ticket_number.
+        if not ticket and txn.narration and len(txn.narration) >= 6:
+            try:
+                ticket_number = str(int(txn.narration[:6]))
+            except ValueError:
+                ticket_number = None
+            if ticket_number:
+                ticket = TransactionData.objects.filter(
+                    ticket_number=ticket_number,
+                    company_code=company,
+                ).first()
+
+        if not ticket:
+            _fail(
+                AggregatorTransaction.ReconciliationStatus.NOT_FOUND,
+                f'No ticket found for transactionID: {txn.transactionID}',
+            )
+            return
+
+        ticket_amount  = ticket.ticket_amount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        payment_amount = Decimal(str(txn.transactionAmount)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        if ticket_amount != payment_amount:
+            _fail(
+                AggregatorTransaction.ReconciliationStatus.AMOUNT_MISMATCH,
+                f'Amount mismatch - Ticket: ₹{ticket_amount}, Payment: ₹{payment_amount}',
+                ticket=ticket,
+            )
+            return
+
+        with transaction.atomic():
+            existing = AggregatorTransaction.objects.select_for_update().filter(
+                related_ticket=ticket
+            ).exclude(id=transaction_id).first()
+            if existing:
+                _fail(
+                    AggregatorTransaction.ReconciliationStatus.DUPLICATE,
+                    f'Ticket already paid by transaction: {existing.transactionID}',
+                )
+                return
+            AggregatorTransaction.objects.filter(id=transaction_id).update(
+                related_ticket=ticket,
+                reconciliation_status=AggregatorTransaction.ReconciliationStatus.AUTO_MATCHED,
+                reconciled_at=timezone.now(),
+                processing_status=AggregatorTransaction.ProcessingStatus.PENDING_VERIFICATION,
+            )
+        _recon_log.info('[reconcile_aggregator] Auto-matched TXN-%s ↔ Ticket-%s', txn.transactionID, ticket.ticket_number)
+
+    except Exception as exc:
+        _recon_log.exception('[reconcile_aggregator] Error for transaction %s: %s', transaction_id, exc)
+        AggregatorTransaction.objects.filter(id=transaction_id).update(
+            reconciliation_error=f'Reconciliation error: {exc}',
+            processing_status=AggregatorTransaction.ProcessingStatus.PENDING_VERIFICATION,
+        )
+        raise self.retry(exc=exc, countdown=60)
+
+
+@shared_task
+def scan_pending_aggregator_reconciliations():
+    """
+    Beat task. Finds AggregatorTransaction records stuck in PENDING reconciliation
+    for more than 5 minutes (e.g. worker killed mid-task) and requeues them.
+    """
+    cutoff = timezone.now() - timedelta(minutes=5)
+    stuck = AggregatorTransaction.objects.filter(
+        reconciliation_status=AggregatorTransaction.ReconciliationStatus.PENDING,
+        created_at__lt=cutoff,
+        responseCode__in=['0', '00', '000'],
+    ).values_list('id', flat=True)[:200]
+
+    count = 0
+    for txn_id in stuck:
+        reconcile_aggregator_transaction.delay(txn_id)
+        count += 1
+
+    if count:
+        _recon_log.info('[scan_pending_aggregator] Requeued %d stuck transactions', count)
+    return count
+
+
+@shared_task
+def scan_unmatched_aggregator_transactions():
+    """
+    Beat task. Retries AggregatorTransaction rows stuck NOT_FOUND (ticket not yet
+    synced from device — device may have been offline). Retried for up to
+    MAX_AGE_DAYS; older rows are left NOT_FOUND for manual review.
+    """
+    cutoff = timezone.now() - timedelta(minutes=5)
+    max_age = timezone.now() - timedelta(days=3)
+
+    unmatched = AggregatorTransaction.objects.filter(
+        reconciliation_status=AggregatorTransaction.ReconciliationStatus.NOT_FOUND,
+        created_at__lt=cutoff,
+        created_at__gte=max_age,
+    ).values_list('id', flat=True)[:200]
+
+    count = 0
+    for txn_id in unmatched:
+        reconcile_aggregator_transaction.delay(txn_id)
+        count += 1
+
+    if count:
+        _recon_log.info('[scan_unmatched_aggregator] Requeued %d NOT_FOUND transactions', count)
+    return count
+
+
+import json as _json
+import logging as _tid_logger
+_tid_log = _tid_logger.getLogger(__name__)
+
+@shared_task
+def auto_populate_aggregator_tids():
+    """
+    Daily beat task. For each company that has any device with aggregator_tid unset,
+    fetches TerminalMap from the license server and populates aggregator_tid
+    by matching TerminalMap SER to ETMDevice.serial_number.
+    Skips companies where all devices already have TID set.
+    Never overwrites an already-set TID.
+    """
+    from .views.web.company import fetch_company_from_license_server
+
+    companies_with_gaps = Company.objects.filter(
+        etmdevice__aggregator_tid__isnull=True,
+        etmdevice__allocation_status=ETMDevice.AllocationStatus.ALLOCATED,
+    ).distinct() | Company.objects.filter(
+        etmdevice__aggregator_tid='',
+        etmdevice__allocation_status=ETMDevice.AllocationStatus.ALLOCATED,
+    ).distinct()
+
+    total_updated = 0
+
+    for company in companies_with_gaps:
+        try:
+            result = fetch_company_from_license_server(company.company_id)
+            if not result.get('success'):
+                _tid_log.warning('[auto_populate_aggregator_tids] License server failed for company %s: %s', company.company_id, result.get('error'))
+                continue
+
+            terminal_map_raw = result['data'].get('TerminalMap')
+            if not terminal_map_raw:
+                continue
+
+            try:
+                terminal_map = _json.loads(terminal_map_raw) if isinstance(terminal_map_raw, str) else terminal_map_raw
+            except (_json.JSONDecodeError, TypeError):
+                _tid_log.warning('[auto_populate_aggregator_tids] Invalid TerminalMap for company %s', company.company_id)
+                continue
+
+            ser_to_tid = {e['SER']: e['TER'] for e in terminal_map if e.get('SER') and e.get('TER')}
+
+            devices = ETMDevice.objects.filter(
+                company=company,
+                allocation_status=ETMDevice.AllocationStatus.ALLOCATED,
+            ).filter(
+                Q(aggregator_tid__isnull=True) | Q(aggregator_tid='')
+            )
+
+            for device in devices:
+                tid = ser_to_tid.get(device.serial_number)
+                if not tid:
+                    continue
+                if ETMDevice.objects.filter(aggregator_tid=tid).exclude(pk=device.pk).exists():
+                    _tid_log.warning('[auto_populate_aggregator_tids] TID %s already taken, skipping %s', tid, device.serial_number)
+                    continue
+                device.aggregator_tid = tid
+                device.save(update_fields=['aggregator_tid', 'updated_at'])
+                total_updated += 1
+
+        except Exception as exc:
+            _tid_log.exception('[auto_populate_aggregator_tids] Error processing company %s: %s', company.company_id, exc)
+
+    _tid_log.info('[auto_populate_aggregator_tids] Done. %d device(s) updated.', total_updated)
+    return total_updated
