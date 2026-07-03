@@ -5,12 +5,12 @@ from django.core.validators import MinValueValidator
 from django.conf import settings
 from .company import Company, Depot
 
-# Payment processing (MosambeeTransaction)
+# Payment processing (AggregatorTransaction)
 
 
 # For reconciliation with TransactionData (bus tickets).
 # Requires MANUAL VERIFICATION by managers before settlement.
-class MosambeeTransaction(models.Model):
+class AggregatorTransaction(models.Model):
     class ProcessingStatus(models.TextChoices):
         RECEIVED = 'RECEIVED', 'Received'
         VALIDATED = 'VALIDATED', 'Validated'
@@ -52,7 +52,7 @@ class MosambeeTransaction(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='verified_mosambee_transactions'
+        related_name='verified_aggregator_transactions'
     )
     
     verified_at = models.DateTimeField(null=True, blank=True)
@@ -102,7 +102,7 @@ class MosambeeTransaction(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='mosambee_transactions',
+        related_name='aggregator_transactions',
         db_index=True,
     )
 
@@ -166,17 +166,17 @@ class MosambeeTransaction(models.Model):
     MsrAndPinVerification = models.BooleanField(default=False)
     
     raw_request_data = models.JSONField()
-    response_sent_to_mosambee = models.JSONField(null=True, blank=True)
+    response_sent_to_aggregator = models.JSONField(null=True, blank=True)
     manager_notes = models.TextField(null=True, blank=True)
-    
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     processed_at = models.DateTimeField(null=True, blank=True)
-    
+
     class Meta:
-        db_table = 'mosambee_transaction'
-        verbose_name = 'Mosambee Payment Transaction'
-        verbose_name_plural = 'Mosambee Payment Transactions'
+        db_table = 'aggregator_transaction'
+        verbose_name = 'Payment Aggregator Transaction'
+        verbose_name_plural = 'Payment Aggregator Transactions'
         indexes = [
             models.Index(fields=['transaction_date']),
             models.Index(fields=['-transaction_datetime']),
@@ -251,13 +251,13 @@ class MosambeeTransaction(models.Model):
         )
 
 
-class MosambeePayoutCallback(models.Model):
+class AggregatorPayoutCallback(models.Model):
     company = models.ForeignKey(
         'Company',
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='mosambee_payout_callbacks',
+        related_name='aggregator_payout_callbacks',
         db_index=True,
     )
 
@@ -277,9 +277,9 @@ class MosambeePayoutCallback(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = 'mosambee_payout_callback'
-        verbose_name = 'Mosambee Payout Callback'
-        verbose_name_plural = 'Mosambee Payout Callbacks'
+        db_table = 'aggregator_payout_callback'
+        verbose_name = 'Payment Aggregator Payout Callback'
+        verbose_name_plural = 'Payment Aggregator Payout Callbacks'
         ordering = ['-created_at']
 
     def __str__(self):
