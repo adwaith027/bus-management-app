@@ -18,7 +18,6 @@ import os
 def get_etm_intial_data(request):
     uniqueIdentifier = secrets.randbelow(exclusive_upper_bound=8999)
     serialNumber = request.GET.get('serialnumber')
-    mosambee_tid = request.GET.get('mosambee_tid')
 
     if not serialNumber:
         return Response({"message": "Serial number is required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -69,10 +68,6 @@ def get_etm_intial_data(request):
         etm_object.setup_fetched_at  = timezone.now()
         # extend takes iterable, it should be passed inside extend() 
         updated_fields.extend(['has_fetched_setup', 'setup_fetched_at'])
-
-    if mosambee_tid and not etm_object.mosambee_tid:
-        etm_object.mosambee_tid = mosambee_tid
-        updated_fields.extend(['mosambee_tid'])
 
     if updated_fields:
         etm_object.save(update_fields=updated_fields)
