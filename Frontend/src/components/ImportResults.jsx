@@ -28,7 +28,9 @@ export default function ImportResults({ result, onReset }) {
   const total = (result.imported ?? 0) + (result.existing ?? 0) + (result.skipped ?? 0);
   const hasReplaced = replaced > 0 || (result.table_results ?? []).some(t => (t.replaced ?? 0) > 0);
   const hasErrors = result.errors && result.errors.length > 0;
-  const isFullSuccess = result.skipped === 0;
+  const readErrorEntries = Object.entries(result.read_errors ?? {});
+  const hasReadErrors = readErrorEntries.length > 0;
+  const isFullSuccess = result.skipped === 0 && !hasReadErrors;
 
   return (
     <div className="space-y-5">
@@ -148,6 +150,28 @@ export default function ImportResults({ result, onReset }) {
           </div>
           <p className="text-xs text-slate-400 mt-1.5">
             Fix these mismatches in the source file and re-import if needed.
+          </p>
+        </div>
+      )}
+
+      {/* ---- Table Read Errors ---- */}
+      {/* Tables mdbtools could not read at all (not row-level failures) */}
+      {hasReadErrors && (
+        <div>
+          <p className="text-sm font-semibold text-slate-700 mb-2">
+            Tables not readable
+            <span className="ml-2 text-xs font-normal text-slate-400">({readErrorEntries.length} table{readErrorEntries.length > 1 ? 's' : ''})</span>
+          </p>
+          <div className="rounded-lg border border-orange-200 bg-orange-50 overflow-hidden">
+            {readErrorEntries.map(([table, errMsg]) => (
+              <div key={table} className="px-3 py-2 border-b border-orange-100 last:border-b-0">
+                <p className="text-xs font-semibold text-orange-800">{table}</p>
+                <p className="text-xs text-orange-700 font-mono mt-0.5 break-all">{errMsg}</p>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-slate-400 mt-1.5">
+            These tables were skipped entirely. All rows from them are missing from this import.
           </p>
         </div>
       )}
