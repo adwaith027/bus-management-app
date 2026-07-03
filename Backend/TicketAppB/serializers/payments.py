@@ -1,8 +1,8 @@
 from rest_framework import serializers
-from ..models import MosambeeTransaction
+from ..models import AggregatorTransaction
 
 
-class MosambeeTransactionSerializer(serializers.ModelSerializer):
+class AggregatorTransactionSerializer(serializers.ModelSerializer):
     related_ticket_number = serializers.SerializerMethodField()
     related_ticket_amount = serializers.SerializerMethodField()
     related_ticket_date = serializers.SerializerMethodField()
@@ -12,7 +12,7 @@ class MosambeeTransactionSerializer(serializers.ModelSerializer):
     verified_by_username = serializers.SerializerMethodField()
 
     class Meta:
-        model = MosambeeTransaction
+        model = AggregatorTransaction
         fields = [
             'id',
             'transactionID',
@@ -109,7 +109,7 @@ class SettlementVerificationSerializer(serializers.Serializer):
 
     def validate_transaction_id(self, value):
         try:
-            MosambeeTransaction.objects.get(id=value)
-        except MosambeeTransaction.DoesNotExist:
+            AggregatorTransaction.objects.get(id=value)
+        except AggregatorTransaction.DoesNotExist:
             raise serializers.ValidationError("Transaction not found")
         return value
