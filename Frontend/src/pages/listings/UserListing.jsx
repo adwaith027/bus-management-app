@@ -44,8 +44,9 @@ function timeAgo(iso) {
 const ROLE_CONFIG = {
   superadmin:    { label: 'Super Admin',   bg: 'bg-rose-50',    text: 'text-rose-700',    border: 'border-rose-200',    dot: 'bg-rose-500' },
   dealer_admin:  { label: 'Dealer Admin',  bg: 'bg-amber-50',   text: 'text-amber-700',   border: 'border-amber-200',   dot: 'bg-amber-500' },
-  company_admin: { label: 'Company Admin', bg: 'bg-violet-50',  text: 'text-violet-700',  border: 'border-violet-200',  dot: 'bg-violet-500' },
+  company_admin: { label: 'Customer Admin', bg: 'bg-violet-50',  text: 'text-violet-700',  border: 'border-violet-200',  dot: 'bg-violet-500' },
   executive:     { label: 'Executive',     bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', dot: 'bg-emerald-500' },
+  production:    { label: 'Production',    bg: 'bg-orange-50',  text: 'text-orange-700',  border: 'border-orange-200',  dot: 'bg-orange-500' },
   company_user:  { label: 'User',          bg: 'bg-blue-50',    text: 'text-blue-700',    border: 'border-blue-200',    dot: 'bg-blue-500' },
   user:          { label: 'User',          bg: 'bg-blue-50',    text: 'text-blue-700',    border: 'border-blue-200',    dot: 'bg-blue-500' },
 };
@@ -149,9 +150,14 @@ export default function UserListing() {
   const isCompanyAdmin = currentRole === 'company_admin';
 
   const allowedRoles = isSuperadmin
-    ? [{ value: 'company_admin', label: 'Company Admin' }, { value: 'executive', label: 'Executive' }]
+    ? [
+        { value: 'company_admin', label: 'Customer Admin' },
+        { value: 'dealer_admin',  label: 'Dealer Admin' },
+        { value: 'executive',     label: 'Executive' },
+        { value: 'production',    label: 'Production' },
+      ]
     : isDealerAdmin
-    ? [{ value: 'company_admin', label: 'Company Admin' }]
+    ? [{ value: 'company_admin', label: 'Customer Admin' }]
     : isCompanyAdmin
     ? [{ value: 'company_user', label: 'User' }]
     : [];
@@ -161,6 +167,7 @@ export default function UserListing() {
   // ── Data state ───────────────────────────────────────────────────────────────
   const [users, setUsers] = useState([]);
   const [companies, setCompanies] = useState([]);
+  const [dealers, setDealers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -185,7 +192,7 @@ export default function UserListing() {
   const [togglingId, setTogglingId] = useState(null);
 
   // ── Form state ───────────────────────────────────────────────────────────────
-  const [formData, setFormData] = useState({ username: '', email: '', role: defaultRole, company_id: '', password: '', state: '', tier: 'basic' });
+  const [formData, setFormData] = useState({ username: '', email: '', role: defaultRole, company_id: '', dealer_id: '', password: '', state: '', tier: 'basic' });
   const [pw, setPw] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -196,6 +203,7 @@ export default function UserListing() {
   useEffect(() => {
     fetchUsers();
     if (!isCompanyAdmin) fetchCompanies();
+    if (isSuperadmin) fetchDealers();
     if (isCompanyAdmin) fetchCapacity();
   }, []);
 
@@ -217,6 +225,15 @@ export default function UserListing() {
       setCompanies(res.data?.data || []);
     } catch (err) {
       console.error('Error fetching companies:', err);
+    }
+  };
+
+  const fetchDealers = async () => {
+    try {
+      const res = await api.get(`${BASE_URL}/dealers`);
+      setDealers(res.data?.data || []);
+    } catch (err) {
+      console.error('Error fetching dealers:', err);
     }
   };
 
@@ -308,7 +325,7 @@ export default function UserListing() {
     setModalMode('create');
     setSelectedUser(null);
     const defaultTier = availableTiers[0]?.value || 'basic';
-    setFormData({ username: '', email: '', role: defaultRole, company_id: '', password: '', state: '', tier: defaultTier });
+    setFormData({ username: '', email: '', role: defaultRole, company_id: '', dealer_id: '', password: '', state: '', tier: defaultTier });
     setModalOpen(true);
   };
 
@@ -317,7 +334,7 @@ export default function UserListing() {
   const openEdit = (u) => {
     setModalMode('edit');
     setSelectedUser(u);
-    setFormData({ username: u.username, email: u.email, role: u.role, company_id: u.company || '', password: '', state: u.state || '', tier: u.tier || 'basic' });
+    setFormData({ username: u.username, email: u.email, role: u.role, company_id: u.company || '', dealer_id: u.dealer || '', password: '', state: u.state || '', tier: u.tier || 'basic' });
     setModalOpen(true);
   };
 
@@ -335,8 +352,9 @@ export default function UserListing() {
     setFormData(prev => {
       const next = { ...prev, [name]: value };
       if (name === 'role') {
-        if (value === 'executive') next.company_id = '';
-        else next.state = '';
+        if (value === 'executive' || value === 'dealer_admin' || value === 'production') next.company_id = '';
+        if (value !== 'executive') next.state = '';
+        if (value !== 'dealer_admin') next.dealer_id = '';
         if (value !== 'company_user') next.tier = 'none';
         else next.tier = availableTiers[0]?.value || 'basic';
       }
@@ -364,9 +382,10 @@ export default function UserListing() {
           email: formData.email,
           role: formData.role,
           password: formData.password,
-          company_id: formData.company_id,
-          ...(formData.role === 'executive' ? { state: formData.state } : {}),
-          ...(formData.role === 'company_user' ? { tier: formData.tier } : {}),
+          ...(formData.role === 'company_admin' ? { company_id: formData.company_id } : {}),
+          ...(formData.role === 'dealer_admin'  ? { dealer_id: formData.dealer_id }   : {}),
+          ...(formData.role === 'executive'     ? { state: formData.state }            : {}),
+          ...(formData.role === 'company_user'  ? { tier: formData.tier }              : {}),
         };
         response = await api.post(`${BASE_URL}/create_user`, payload);
       }
@@ -522,7 +541,7 @@ export default function UserListing() {
           </div>
         ) : (
           <div className="flex items-center gap-1 flex-wrap">
-            {['ALL', 'superadmin', 'company_admin', 'dealer_admin', 'executive', 'company_user'].map(r => (
+            {['ALL', 'superadmin', 'company_admin', 'dealer_admin', 'executive', 'production', 'company_user'].map(r => (
               <button
                 key={r}
                 onClick={() => setRoleFilter(r)}
@@ -861,8 +880,27 @@ export default function UserListing() {
               </div>
             )}
 
-            {/* Company — not for executive, not for company_admin (scoped) */}
-            {formData.role !== 'executive' && !isCompanyAdmin && (
+            {/* Dealer — dealer_admin role only, superadmin only */}
+            {formData.role === 'dealer_admin' && isSuperadmin && (
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-slate-700 flex items-center gap-1">
+                  Dealer <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  name="dealer_id"
+                  value={formData.dealer_id}
+                  onChange={handleInputChange}
+                  required
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400"
+                >
+                  <option value="">Select dealer…</option>
+                  {dealers.map(d => <option key={d.id} value={d.id}>{d.dealer_name}</option>)}
+                </select>
+              </div>
+            )}
+
+            {/* Company — company_admin role only */}
+            {formData.role === 'company_admin' && !isCompanyAdmin && (
               <div className="space-y-1">
                 <label className="text-sm font-medium text-slate-700 flex items-center gap-1">
                   Company <span className="text-rose-500">*</span>
