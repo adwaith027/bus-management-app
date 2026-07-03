@@ -4,11 +4,11 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from django.utils import timezone as tz
 from rest_framework import status
-from ...models import TransactionData, Company, MosambeeTransaction, MosambeePayoutCallback, UserRole
+from ...models import TransactionData, Company, AggregatorTransaction, AggregatorPayoutCallback, UserRole
 from django.http import HttpResponse, JsonResponse
 from rest_framework.response import Response
 from django.contrib.auth import get_user_model
-from ...serializers.payments import MosambeeTransactionSerializer, SettlementVerificationSerializer
+from ...serializers.payments import AggregatorTransactionSerializer, SettlementVerificationSerializer
 import json
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -37,7 +37,8 @@ def get_payout_data(request):
         from_dt = datetime.strptime(from_date, '%Y-%m-%d').replace(tzinfo=IST)
         to_dt = datetime.strptime(to_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=IST)
 
-        payouts = list(MosambeePayoutCallback.objects.filter(
+        payouts = list(AggregatorPayoutCallback.objects.filter(
+            company=user.company,
             payoutDate__gte=from_dt,
             payoutDate__lte=to_dt,
         ).order_by('-payoutDate')[:200])
@@ -57,7 +58,7 @@ def get_payout_data(request):
             all_txn_ids.update(ids)
 
         verified_ids = set(
-            MosambeeTransaction.objects.filter(
+            AggregatorTransaction.objects.filter(
                 transactionID__in=all_txn_ids,
                 verification_status='VERIFIED',
             ).values_list('transactionID', flat=True)
@@ -94,7 +95,7 @@ def get_payout_data(request):
 @permission_classes([IsAuthenticated, LicensePermission])
 def get_settlement_data(request):
     """
-    Fetch Mosambee payment transactions for settlement verification.
+    Fetch payment aggregator transactions for settlement verification.
 
     Query Parameters:
     - from_date: Start date (YYYY-MM-DD) - required
@@ -117,11 +118,12 @@ def get_settlement_data(request):
             return Response({'error': 'from_date and to_date are required'}, status=status.HTTP_400_BAD_REQUEST)
         
         # Base queryset
-        queryset = MosambeeTransaction.objects.filter(
+        queryset = AggregatorTransaction.objects.filter(
+            company=user.company,
             transaction_date__gte=from_date,
-            transaction_date__lte=to_date
+            transaction_date__lte=to_date,
         )
-        
+
         # Filter by verification status
         verification_status = request.GET.get('verification_status')
         if verification_status and verification_status != 'ALL':
@@ -152,7 +154,7 @@ def get_settlement_data(request):
         queryset = queryset[:500]
         
         # Serialize
-        serializer = MosambeeTransactionSerializer(queryset, many=True)
+        serializer = AggregatorTransactionSerializer(queryset, many=True)
         
         return Response({'message': 'success','data': serializer.data,'count': len(serializer.data)}, status=status.HTTP_200_OK)
         
@@ -187,10 +189,10 @@ def verify_settlement(request):
         
         # Get transaction
         transaction_id = serializer.validated_data['transaction_id']
-        transaction = MosambeeTransaction.objects.get(id=transaction_id)
+        transaction = AggregatorTransaction.objects.get(id=transaction_id)
         
         # Check if already verified by someone else
-        if transaction.verification_status == MosambeeTransaction.VerificationStatus.VERIFIED:
+        if transaction.verification_status == AggregatorTransaction.VerificationStatus.VERIFIED:
             return Response({
                 'error': 'Transaction already verified',
                 'verified_by': transaction.verified_by.username if transaction.verified_by else None
@@ -208,16 +210,16 @@ def verify_settlement(request):
         
         # If verified, update processing status
         if new_status == 'VERIFIED':
-            transaction.processing_status = MosambeeTransaction.ProcessingStatus.PENDING_VERIFICATION
+            transaction.processing_status = AggregatorTransaction.ProcessingStatus.PENDING_VERIFICATION
 
         transaction.save()
 
         # Return updated transaction
-        response_serializer = MosambeeTransactionSerializer(transaction)
+        response_serializer = AggregatorTransactionSerializer(transaction)
         
         return Response({'message': 'Transaction verified successfully','data': response_serializer.data}, status=status.HTTP_200_OK)
         
-    except MosambeeTransaction.DoesNotExist:
+    except AggregatorTransaction.DoesNotExist:
         return Response({'error': 'Transaction not found'}, status=status.HTTP_404_NOT_FOUND)
         
     except Exception as e:
@@ -248,14 +250,15 @@ def get_settlement_summary(request):
             return Response({'error': 'from_date and to_date are required'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Base queryset
-        queryset = MosambeeTransaction.objects.filter(
+        queryset = AggregatorTransaction.objects.filter(
+            company=user.company,
             transaction_date__gte=from_date,
-            transaction_date__lte=to_date
+            transaction_date__lte=to_date,
         )
-        
+
         APPROVED_CODES = ['0', '00', '000']
-        VS = MosambeeTransaction.VerificationStatus
-        RS = MosambeeTransaction.ReconciliationStatus
+        VS = AggregatorTransaction.VerificationStatus
+        RS = AggregatorTransaction.ReconciliationStatus
 
         stats = queryset.aggregate(
             total=Count('id'),
