@@ -43,7 +43,8 @@ class Company(models.Model):
     company_id   = models.CharField(max_length=100, unique=True, null=True, blank=True)
     company_name = models.CharField(max_length=100)
     company_email = models.EmailField(unique=True)
-    gst_number   = models.CharField(max_length=20, null=True, blank=True)
+    gst_number          = models.CharField(max_length=20, null=True, blank=True)
+    aggregator_merchant_id = models.CharField(max_length=50, null=True, blank=True, help_text="Payment aggregator merchant ID assigned to this company")
 
     # ── Contact ───────────────────────────────────────────────────────────────
     contact_person = models.CharField(max_length=100)
@@ -328,11 +329,14 @@ class Dealer(models.Model):
 
     @property
     def users_slots_remaining(self):
-        given = self.users_given_to_companies
+        given        = self.users_given_to_companies
+        dealer_basic = max(0, self.total_user_count - self.premium_user_count - self.intermediate_user_count)
+        given_basic  = max(0, given['total'] - given['premium'] - given['inter'])
         return {
             'total':   max(0, self.total_user_count        - given['total']),
             'premium': max(0, self.premium_user_count      - given['premium']),
             'inter':   max(0, self.intermediate_user_count - given['inter']),
+            'basic':   max(0, dealer_basic - given_basic),
         }
 
 
@@ -391,13 +395,13 @@ class ETMDevice(models.Model):
         ),
     )
 
-    # for accomodating the terminal ID assigned by mosambee to each device.
-    mosambee_tid =  models.CharField(
-        max_length=20, 
-        unique=True, 
+    # for accomodating the terminal ID assigned by the payment aggregator to each device.
+    aggregator_tid =  models.CharField(
+        max_length=20,
+        unique=True,
         null=True,
         blank=True,
-        help_text="Holds the terminal ID assigned by mosambee to each ETM device")
+        help_text="Holds the terminal ID assigned by the payment aggregator to each ETM device")
 
     company = models.ForeignKey(
         Company,
