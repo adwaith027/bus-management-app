@@ -9,7 +9,7 @@ import {
   Coins, Users2,
   Route, Truck, CalendarCog, Settings,
   Ticket, CalendarRange, IndianRupee, Cpu, MonitorDown, BusFront,
-  FileText, Settings2, Info, Shield,
+  FileText, Settings2, Info, Shield, Ghost,
 } from "lucide-react";
 import api, { BASE_URL, cancelAllPendingRequests } from "../assets/js/axiosConfig";
 import cacheManager from "../assets/js/reportCache";
@@ -306,6 +306,7 @@ export default function Sidebar() {
                 <NavItem to="/dashboard/data-import"      icon={FileInput}     label="MDB Data Import"  isCollapsed={isCollapsed} onClose={close} />
                 <SectionLabel label="Diagnostics" isCollapsed={isCollapsed} />
                 <NavItem to="/dashboard/failed-payloads"   icon={AlertTriangle} label="Failed Payloads"  isCollapsed={isCollapsed} onClose={close} />
+                <NavItem to="/dashboard/ghost-records"     icon={Ghost}         label="Ghost Records"    isCollapsed={isCollapsed} onClose={close} />
                 <SectionLabel label="Settings" isCollapsed={isCollapsed} />
                 <NavItem to="/dashboard/audit-logs"       icon={FileText}     label="Audit Logs"      isCollapsed={isCollapsed} onClose={close} />
                 <NavItem to="/dashboard/admin-sessions"   icon={Shield}       label="Admin Sessions"  isCollapsed={isCollapsed} onClose={close} />
@@ -354,9 +355,10 @@ export default function Sidebar() {
                   <SubLink to="/dashboard/master-data/employees"        icon={Users2}      label="Employee"         onClose={close} />
                   <SubLink to="/dashboard/master-data/vehicles"         icon={Truck}       label="Vehicles"         onClose={close} />
                   <SubLink to="/dashboard/master-data/routes"           icon={Route}       label="Routes"           onClose={close} />
-                  <SubLink to="/dashboard/master-data/crew-assignments" icon={CalendarCog} label="Crew Assignments" onClose={close} />
-                  <SubLink to="/dashboard/master-data/expense-master"   icon={IndianRupee} label="Expense Master"   onClose={close} />
-                  <SubLink to="/dashboard/master-data/settings"         icon={Settings}    label="Settings"         onClose={close} />
+                  <SubLink to="/dashboard/master-data/crew-assignments"   icon={CalendarCog} label="Crew Assignments"   onClose={close} />
+                  <SubLink to="/dashboard/master-data/expense-master"    icon={IndianRupee} label="Expense Master"    onClose={close} />
+                  <SubLink to="/dashboard/master-data/inspector-records" icon={Shield}      label="Inspector Records" onClose={close} />
+                  <SubLink to="/dashboard/master-data/settings"          icon={Settings}    label="Settings"          onClose={close} />
                 </DropdownSection>
                 <NavItem to="/dashboard/device-download" icon={MonitorDown} label="Device Download" isCollapsed={isCollapsed} onClose={close} />
 
@@ -366,9 +368,10 @@ export default function Sidebar() {
                   isCollapsed={isCollapsed} isOpen={reportsOpen}
                   onToggle={() => setReportsOpen(p => !p)}
                 >
-                  <SubLink to="/dashboard/schedule-data" icon={CalendarRange} label="Schedule Data" onClose={close} />
-                  <SubLink to="/dashboard/trip-data"     icon={BusFront}      label="Trip Data"     onClose={close} />
-                  <SubLink to="/dashboard/ticket-data"   icon={Ticket}        label="Ticket Data"   onClose={close} />
+                  <SubLink to="/dashboard/schedule-data"   icon={CalendarRange} label="Schedule Data"   onClose={close} />
+                  <SubLink to="/dashboard/trip-data"       icon={BusFront}      label="Trip Data"       onClose={close} />
+                  <SubLink to="/dashboard/ticket-data"     icon={Ticket}        label="Ticket Data"     onClose={close} />
+                  <SubLink to="/dashboard/expense-records" icon={Receipt}       label="Expense Records" onClose={close} />
                 </DropdownSection>
                 <NavItem to="/dashboard/settlements" icon={Receipt} label="Settlements" isCollapsed={isCollapsed} onClose={close} />
 
@@ -435,7 +438,7 @@ export default function Sidebar() {
             >
               <p className="text-[13px] font-semibold text-slate-800 truncate whitespace-nowrap leading-tight text-left">{username}</p>
               <p className="text-[10px] text-slate-400 uppercase tracking-wide whitespace-nowrap text-left">
-                {role?.replace(/_/g, " ")}
+                {role === "company_admin" ? "customer admin" : role?.replace(/_/g, " ")}
               </p>
             </div>
             <ChevronDown
