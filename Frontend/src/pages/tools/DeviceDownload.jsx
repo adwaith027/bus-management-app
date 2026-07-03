@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../../assets/js/axiosConfig';
-import { Download, MonitorDown, X, Check, ChevronDown } from 'lucide-react';
+import { Download, MonitorDown, X, Check, ChevronDown, AlertTriangle } from 'lucide-react';
 
 const FILE_OPTIONS = [
   { key: 'settings',  label: 'Settings',        desc: 'BUS.DAT'                                            },
@@ -128,16 +128,65 @@ function RouteSelectModal({ routes, selected, onToggle, onConfirm, onClose }) {
   );
 }
 
+// ── Skip Files Warning Modal ────────────────────────────────────────────────
+function SkipWarningModal({ skipped, onConfirm, onClose }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 flex flex-col">
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-100">
+          <div className="w-9 h-9 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center shrink-0">
+            <AlertTriangle size={18} />
+          </div>
+          <h2 className="text-base font-bold text-slate-800">Some files won't be sent</h2>
+        </div>
+
+        <div className="px-5 py-4">
+          <p className="text-sm text-slate-600 mb-3">
+            The following files are unchecked and will <strong>not</strong> be downloaded to the device:
+          </p>
+          <ul className="space-y-1 mb-3">
+            {skipped.map(opt => (
+              <li key={opt.key} className="text-sm font-medium text-slate-700">• {opt.label} <span className="text-xs text-slate-400 font-normal">({opt.desc})</span></li>
+            ))}
+          </ul>
+          <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            Make sure these are already present on the device. If they aren't, device functionality may break.
+          </p>
+        </div>
+
+        <div className="px-5 py-4 border-t border-slate-100 flex justify-end gap-3">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className="px-4 py-2 text-sm font-semibold bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors"
+          >
+            OK, Download Anyway
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function DeviceDownload() {
   const [selected,       setSelected]       = useState({ settings: true, schedule: true, crew: true, vehicles: true, expenses: true });
   const [showRouteModal, setShowRouteModal] = useState(false);
+  const [showSkipModal,  setShowSkipModal]  = useState(false);
   const [routes,         setRoutes]         = useState([]);
   const [routesLoading,  setRoutesLoading]  = useState(false);
   const [selectedRoutes, setSelectedRoutes] = useState([]);
   const [devices,        setDevices]        = useState([]);
   const [devicesLoading, setDevicesLoading] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState('');
+  const [palmtecInput,   setPalmtecInput]   = useState('');
+  const [palmtecSaving,  setPalmtecSaving]  = useState(false);
+  const [palmtecError,   setPalmtecError]   = useState('');
   const [downloading,    setDownloading]    = useState(false);
   const [progress,       setProgress]       = useState([]);
   const [done,           setDone]           = useState(false);
@@ -185,13 +234,49 @@ export default function DeviceDownload() {
     setError('');
   };
 
+  const selectedDeviceObj = devices.find(d => d.serial_number === selectedDevice) || null;
+  const needsPalmtecId    = selectedDeviceObj && !selectedDeviceObj.palmtec_id;
+
+  const handleSetPalmtecId = async () => {
+    if (!selectedDeviceObj) return;
+    setPalmtecSaving(true);
+    setPalmtecError('');
+    try {
+      await api.post(`/etm-devices/${selectedDeviceObj.id}/set-palmtec-id`, {
+        palmtec_id: parseInt(palmtecInput, 10),
+      });
+      setDevices(prev =>
+        prev.map(d =>
+          d.id === selectedDeviceObj.id
+            ? { ...d, palmtec_id: parseInt(palmtecInput, 10) }
+            : d
+        )
+      );
+      setPalmtecInput('');
+    } catch (err) {
+      setPalmtecError(err.response?.data?.error || 'Failed to set Palmtec ID.');
+    } finally {
+      setPalmtecSaving(false);
+    }
+  };
+
   const toggleRoute = code => {
     setSelectedRoutes(prev =>
       prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]
     );
   };
 
+  const skippedOptions = FILE_OPTIONS.filter(opt => !selected[opt.key]);
+
   const handleDownloadClick = () => {
+    if (skippedOptions.length > 0) {
+      setShowSkipModal(true);
+      return;
+    }
+    proceedToDownload();
+  };
+
+  const proceedToDownload = () => {
     if (scheduleSelected && selectedRoutes.length === 0) {
       setShowRouteModal(true);
       return;
@@ -200,6 +285,14 @@ export default function DeviceDownload() {
   };
 
   const startDownload = async () => {
+    if (selected.settings && !selectedDevice) {
+      setError('Select a device before downloading Settings (BUS.DAT).');
+      return;
+    }
+    if (selected.settings && needsPalmtecId) {
+      setError('Set a Palmtec ID for the selected device before downloading.');
+      return;
+    }
     setDownloading(true);
     setDone(false);
     setError('');
@@ -228,9 +321,20 @@ export default function DeviceDownload() {
         const blob = await fetchBinary(task.endpoint);
         triggerDownload(blob, task.filename);
         setProgress(prev => prev.map((p, idx) => idx === i ? { ...p, status: 'done' } : p));
-      } catch {
+      } catch (err) {
         setProgress(prev => prev.map((p, idx) => idx === i ? { ...p, status: 'error' } : p));
-        setError(`Failed to download ${task.filename}.`);
+        let msg = `Failed to download ${task.filename}.`;
+        try {
+          if (err.response?.data instanceof Blob) {
+            const text = await err.response.data.text();
+            if (text) {
+              const match = text.match(/<pre class="exception_value">([\s\S]*?)<\/pre>/);
+              const clean = match ? match[1].replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&amp;/g, '&').trim() : null;
+              msg = `${task.filename}: ${clean || err.response?.status || 'Server error'}`;
+            }
+          }
+        } catch {}
+        setError(msg);
         setDownloading(false);
         return;
       }
@@ -296,19 +400,51 @@ export default function DeviceDownload() {
                   ) : devices.length === 0 ? (
                     <p className="text-xs text-red-500">No allocated devices found for this company.</p>
                   ) : (
-                    <select
-                      value={selectedDevice}
-                      onChange={e => setSelectedDevice(e.target.value)}
-                      className="text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-600
-                        hover:border-slate-400 focus:outline-none focus:border-slate-500 bg-white"
-                    >
-                      <option value="">Choose device…</option>
-                      {devices.map(d => (
-                        <option key={d.id} value={d.serial_number}>
-                          {d.serial_number}{d.palmtec_id ? ` (${d.palmtec_id})` : ''}
-                        </option>
-                      ))}
-                    </select>
+                    <>
+                      <select
+                        value={selectedDevice}
+                        onChange={e => { setSelectedDevice(e.target.value); setPalmtecInput(''); setPalmtecError(''); }}
+                        className="text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-600
+                          hover:border-slate-400 focus:outline-none focus:border-slate-500 bg-white"
+                      >
+                        <option value="">Choose device…</option>
+                        {devices.map(d => (
+                          <option key={d.id} value={d.serial_number}>
+                            {d.serial_number}{d.palmtec_id ? ` (${d.palmtec_id})` : ' — No Palmtec ID'}
+                          </option>
+                        ))}
+                      </select>
+
+                      {needsPalmtecId && (
+                        <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                          <p className="text-xs text-amber-700 font-medium mb-2">
+                            This device has no Palmtec ID. Set it now or choose another device.
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min="1"
+                              placeholder="Palmtec ID"
+                              value={palmtecInput}
+                              onChange={e => { setPalmtecInput(e.target.value); setPalmtecError(''); }}
+                              className="w-28 text-xs border border-amber-300 rounded-lg px-2 py-1.5
+                                focus:outline-none focus:border-amber-500 bg-white"
+                            />
+                            <button
+                              onClick={handleSetPalmtecId}
+                              disabled={palmtecSaving || !palmtecInput}
+                              className="px-3 py-1.5 text-xs font-semibold bg-amber-600 text-white rounded-lg
+                                hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                            >
+                              {palmtecSaving ? 'Saving…' : 'Set'}
+                            </button>
+                          </div>
+                          {palmtecError && (
+                            <p className="text-xs text-red-600 mt-1">{palmtecError}</p>
+                          )}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}
@@ -406,7 +542,8 @@ export default function DeviceDownload() {
           !anySelected ||
           downloading ||
           (scheduleSelected && selectedRoutes.length === 0) ||
-          (settingsSelected && !selectedDevice)
+          (settingsSelected && !selectedDevice) ||
+          (settingsSelected && !!needsPalmtecId)
         }
         className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-slate-800 text-white
           text-sm font-semibold rounded-xl hover:bg-slate-700 transition-colors
@@ -431,8 +568,17 @@ export default function DeviceDownload() {
           routes={routes}
           selected={selectedRoutes}
           onToggle={toggleRoute}
-          onConfirm={() => { setShowRouteModal(false); startDownload(); }}
+          onConfirm={() => setShowRouteModal(false)}
           onClose={() => setShowRouteModal(false)}
+        />
+      )}
+
+      {/* Skip files warning modal */}
+      {showSkipModal && (
+        <SkipWarningModal
+          skipped={skippedOptions}
+          onConfirm={() => { setShowSkipModal(false); proceedToDownload(); }}
+          onClose={() => setShowSkipModal(false)}
         />
       )}
     </div>
