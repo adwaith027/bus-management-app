@@ -61,7 +61,7 @@ const ConstrainedField = ({ label, name, value, onChange, maxLen, allowDecimal =
   );
 };
 
-function DevicePalmtecSelect({ label, value, onChange }) {
+function DevicePalmtecSelect({ label, value, onChange, excludePalmtecIds = [] }) {
   const [devices, setDevices]   = useState([]);
   const [loading, setLoading]   = useState(true);
   const [open, setOpen]         = useState(false);
@@ -85,7 +85,7 @@ function DevicePalmtecSelect({ label, value, onChange }) {
     setOpen(false);
   };
 
-  const assignedDevices = devices.filter(d => d.palmtec_id);
+  const assignedDevices = devices.filter(d => d.palmtec_id && !excludePalmtecIds.includes(String(d.palmtec_id)));
   const displayValue   = value ? String(value) : null;
 
   return (
@@ -190,7 +190,7 @@ const FONT_OPTIONS     = [{ value: 0, label: 'Normal' },    { value: 1, label: '
 
 const EMPTY_DEVICE_FORM = {
   palmtec_id: '',
-  user_pwd: '', master_pwd: '',
+  user_pwd: '', master_pwd: '', supervisor_pwd: '', remove_pwd: '',
   half_per: '', con_per: '', phy_per: '', round_amt: '', luggage_unit_rate: '',
   main_display: '', main_display2: '',
   header1: '', header2: '', header3: '', footer1: '', footer2: '',
@@ -199,7 +199,7 @@ const EMPTY_DEVICE_FORM = {
   st_roundoff_enable: false, st_roundoff_amt: '',
   roundoff: false, round_up: false, remove_ticket_flag: false,
   stage_font_flag: false, next_fare_flag: false, odometer_entry: false,
-  ticket_no_big_font: false, crew_check: false, tripsend_enable: false,
+  ticket_no_big_font: false, tripsend_enable: false,
   schedulesend_enable: false, inspect_rpt: false, multiple_pass: false,
   simple_report: false, inspector_sms: false, auto_shut_down: false,
   userpswd_enable: false, exp_enable: false,
@@ -209,6 +209,8 @@ const EMPTY_DEVICE_FORM = {
 const EMPTY_COMPANY_FORM = {
   ...EMPTY_DEVICE_FORM,
   st_max_amt: '', st_min_con: '',
+  ladies_ratio: 0, senior_ratio: 0,
+  big_font: false, refund_enable: false,
   // remove device-only ST fields
   st_ratio: undefined, st_min_amt: undefined, exp_enable: undefined,
 };
@@ -226,8 +228,10 @@ function SettingsFormFields({ formData, onChange, loading = false, isDevice = tr
 
       <SectionCard title="Passwords" icon={Smartphone}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <TextField label="User Password"   name="user_pwd"   value={formData.user_pwd}   onChange={onChange} loading={loading} />
-          <TextField label="Master Password" name="master_pwd" value={formData.master_pwd} onChange={onChange} loading={loading} />
+          <TextField label="User Password"       name="user_pwd"       value={formData.user_pwd}       onChange={onChange} loading={loading} />
+          <TextField label="Master Password"     name="master_pwd"     value={formData.master_pwd}     onChange={onChange} loading={loading} />
+          {isDevice && <TextField label="Supervisor Password" name="supervisor_pwd" value={formData.supervisor_pwd} onChange={onChange} loading={loading} />}
+          {isDevice && <TextField label="Remove Password"     name="remove_pwd"     value={formData.remove_pwd}     onChange={onChange} loading={loading} />}
         </div>
       </SectionCard>
 
@@ -294,7 +298,7 @@ function SettingsFormFields({ formData, onChange, loading = false, isDevice = tr
           <SettToggle label="Next Fare Flag"       checked={!!formData.next_fare_flag}      onChange={tog('next_fare_flag')} />
           <SettToggle label="Odometer Entry"       checked={!!formData.odometer_entry}      onChange={tog('odometer_entry')} />
           <SettToggle label="Ticket No Big Font"   checked={!!formData.ticket_no_big_font}  onChange={tog('ticket_no_big_font')} />
-          <SettToggle label="Crew Check"           checked={!!formData.crew_check}          onChange={tog('crew_check')} />
+
           <SettToggle label="Trip Send"            checked={!!formData.tripsend_enable}     onChange={tog('tripsend_enable')} />
           <SettToggle label="Schedule Send"        checked={!!formData.schedulesend_enable} onChange={tog('schedulesend_enable')} />
           <SettToggle label="Inspector Report"     checked={!!formData.inspect_rpt}         onChange={tog('inspect_rpt')} />
@@ -306,6 +310,19 @@ function SettingsFormFields({ formData, onChange, loading = false, isDevice = tr
           {isDevice && <SettToggle label="Expense Enable" checked={!!formData.exp_enable} onChange={tog('exp_enable')} />}
         </div>
       </SectionCard>
+
+      {!isDevice && (
+        <SectionCard title="ETM Concession & Display" icon={BadgeDollarSign}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <ConstrainedField label="Ladies Ratio (%)"       name="ladies_ratio" value={formData.ladies_ratio} onChange={onChange} maxLen={3} loading={loading} />
+            <ConstrainedField label="Senior Citizen Ratio (%)" name="senior_ratio" value={formData.senior_ratio} onChange={onChange} maxLen={3} loading={loading} />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+            <SettToggle label="Big Font on ETM" checked={!!formData.big_font}      onChange={tog('big_font')} />
+            <SettToggle label="Refund Enable"   checked={!!formData.refund_enable} onChange={tog('refund_enable')} />
+          </div>
+        </SectionCard>
+      )}
 
       <SectionCard title="Other Settings" icon={Settings}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -494,6 +511,9 @@ function ProfilesTab({ setHeaderAction }) {
             label="Palmtec ID"
             value={formData.palmtec_id}
             onChange={handleChange}
+            excludePalmtecIds={profiles
+              .filter(p => editingId === 'new' || p.id !== editingId)
+              .map(p => String(p.palmtec_id))}
           />
         </div>
 
