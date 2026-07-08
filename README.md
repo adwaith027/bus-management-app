@@ -6,7 +6,7 @@
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![Django](https://img.shields.io/badge/django-5.2-green.svg)
 ![React](https://img.shields.io/badge/react-18.0-blue.svg)
-![Version](https://img.shields.io/badge/version-1.3-orange.svg)
+![Version](https://img.shields.io/badge/version-1.4-orange.svg)
 
 Private multi-tenant platform for bus fleet operations with real-time ticketing, payment reconciliation, and comprehensive reporting.
 
@@ -45,11 +45,12 @@ The **Bus Ticketing Management System** (Palmtec Amphibia QR) streamlines bus op
 - Odometer data capture per trip (API and DAT file upload)
 
 ### 💰 Payment Reconciliation
-- **Mosambee Payment Gateway Integration**
-- **Automatic matching** of UPI payments to tickets
+- **Payment Aggregator Integration** (Mosambee gateway, generalized aggregator-agnostic naming)
+- **Automatic matching** of UPI payments to tickets via Celery tasks (webhook-triggered + scheduled sweeps)
 - **Intelligent detection**: Amount mismatches, duplicates, missing tickets
 - **Manager verification workflow**: Verify/Reject/Flag transactions
 - **Payout callback tracking**
+- **Ghost record resolution**: superadmin can manually assign a company to orphaned transactions/payouts that couldn't be auto-matched
 - **Checksum validation** (SHA512) for data integrity
 - **Real-time polling** with 15-second updates
 
@@ -99,21 +100,26 @@ The **Bus Ticketing Management System** (Palmtec Amphibia QR) streamlines bus op
 - **User Access Control** - Granular permission system for dealer and executive roles
 
 ### 🏢 Operational Management
-- **Depot Management** - Transit hub/depot configuration
+- **Depot Management** - Transit hub/depot configuration, with Route↔Depot mapping
 - **Settings Management** - System and company-level configurations with device settings profiles
 - **License Allocation & Management** - License lifecycle management (register, validate, sync)
+- **Dealer License Pool** - Live-computed pool of devices/licenses under a dealer, decremented on company creation and restored on company deletion
 - **Company Registration Flow** - Enhanced validation and approval process
-- **Global Settings** - System-wide configuration and About page
+- **Global Settings** - System-wide configuration and About page (support contact info, superadmin-managed)
+- **Ghost Records** - Superadmin tool to manually assign a company to payment transactions/payouts that arrived without a resolvable company match
+- **Login Notifications** - In-app alerts shown on login for license expiry (company/dealer), ETM devices missing a Palmtec ID, and depots with no route mapped
 
 ### 🔐 Security
 - Server-side session authentication with Redis cache (single `pqr_session` HttpOnly cookie)
-- Session idle timeout with frontend idle timer and keepalive
+- Session idle timeout with frontend idle timer and keepalive, with a separate (longer) idle timeout for APK/mobile sessions vs web sessions
 - Force-logout for active sessions (company admin and superadmin)
 - Checksum validation (SHA512) for payment and device data
 - Role-based UI rendering with tier enforcement
 - Device UUID approval workflow for APK logins
+- Device rejection logging (records why a device request was refused: not registered, not allocated, inactive, limit exceeded, no company)
 - Company/dealer cascade deactivation via signals
 - Audit logging for all management actions
+- Login-time notification checks (license expiry, unmapped devices/depots) surfaced to the user in-app
 
 ---
 
@@ -123,8 +129,8 @@ The **Bus Ticketing Management System** (Palmtec Amphibia QR) streamlines bus op
 - Django 5.2 + Django REST Framework
 - MariaDB with timezone support (Asia/Kolkata)
 - Server-side session authentication (opaque cookie, Redis-backed)
-- Django Signals for auto-reconciliation and cascading logic
-- **Celery + Redis** for async task processing and session cache
+- Django Signals for cascading logic (company/dealer deactivation, route/fare name sync)
+- **Celery + Redis** for async task processing, payment reconciliation, session cache, and scheduled sweeps (`django-celery-beat`)
 - **MDB Parser** for bulk data import from Access files
 - **Flower** for Celery task monitoring
 
@@ -147,7 +153,7 @@ The **Bus Ticketing Management System** (Palmtec Amphibia QR) streamlines bus op
                                         ↓
                         React Frontend (Session Auth, Role-Based UI)
                                         ↓
-                          Mosambee Payment Gateway (POST)
+                          Payment Aggregator (Mosambee) Gateway (POST)
                                         ↓
                         Android APK (api/v1/ prefix, session cookie)
 ```
@@ -156,11 +162,11 @@ The **Bus Ticketing Management System** (Palmtec Amphibia QR) streamlines bus op
 
 1. **Ticket Transactions**: Devices send pipe-delimited data via GET → stored as RawDataLog → Celery parses to TransactionData
 2. **Trip/Schedule Lifecycle**: Open and close payloads merged into TripData / ScheduleData
-3. **Payment Gateway**: Mosambee POSTs UPI transaction data → stored as MosambeeTransaction
-4. **Auto-Reconciliation**: Django signal matches payments to tickets
-5. **Manager Verification**: Manual review before settlement
+3. **Payment Gateway**: Aggregator (Mosambee) POSTs UPI transaction data → stored as AggregatorTransaction
+4. **Auto-Reconciliation**: Celery task matches payments to tickets on webhook receipt, plus scheduled sweeps for pending/unmatched transactions and unresolved (ghost) records
+5. **Manager Verification**: Manual review before settlement; superadmin resolves ghost transactions/payouts with no matched company
 6. **Device Sync**: Devices fetch route, crew, vehicle, settings, and expense files built from current DB state
-7. **Session Flow**: Login → `pqr_session` cookie (Redis-backed) → auto-expire on idle → Celery sweep reconciles DB
+7. **Session Flow**: Login → `pqr_session` cookie (Redis-backed) → device-type-aware idle timeout (APK vs web) → Celery sweep reconciles DB
 
 ---
 
@@ -246,7 +252,8 @@ ALLOWED_HOSTS=localhost,127.0.0.1
 CORS_ALLOWED_ORIGINS=http://localhost:5173
 
 # Session
-SESSION_IDLE_TIMEOUT=1200   # seconds (20 min web idle timeout)
+SESSION_IDLE_TIMEOUT=1200        # seconds (20 min web idle timeout)
+SESSION_IDLE_TIMEOUT_APK=43200   # seconds (12 hr APK/mobile idle timeout)
 
 # Redis (Celery broker + session cache)
 REDIS_URL=redis://localhost:6379/0
@@ -256,11 +263,18 @@ LICENSE_SERVER_BASE_URL=http://your-license-server.com/api
 PRODUCT_REGISTRATION_ENDPOINT=/ProductRegistration
 PRODUCT_AUTH_ENDPOINT=/ProductAuthentication
 
-# Payment Gateway
-MOSAMBEE_SALT=your-mosambee-salt-key
+# Payment Aggregator
+AGGREGATOR_SALT=your-aggregator-salt-key
+
+# Email (forgot/reset password)
+EMAIL_PORT=587
+EMAIL_USE_TLS=True
+EMAIL_HOST_USER=your-smtp-username
+EMAIL_HOST_PASSWORD=your-smtp-password
+DEFAULT_FROM_EMAIL=noreply@yourdomain.com
 
 # App Info
-APP_VERSION=1.3
+APP_VERSION=1.4
 PROJECT_NAME=Bus Ticketing System
 ```
 
@@ -352,7 +366,8 @@ POST /etm-devices/{id}/reactivate
 POST /etm-devices/{id}/unmap
 POST /etm-devices/{id}/return-to-stock
 POST /etm-devices/{id}/set-palmtec-id
-POST /etm-devices/{id}/set-mosambee-tid
+POST /etm-devices/{id}/set-aggregator-tid
+POST /etm-devices/sync-aggregator-tids
 ```
 
 #### Device Sync (ETM ← Web App)
@@ -368,6 +383,7 @@ GET /device/languagedat
 GET /device/rtedat
 GET /device/currency
 GET /getEtmSetupDetails
+GET /get_company_devices        # allocated devices for the logged-in company (web download picker)
 ```
 
 #### Master Data — Transport
@@ -469,12 +485,19 @@ GET /get_all_schedule_data?from_date={date}&to_date={date}&since={timestamp}
 
 #### Settlements & Payments
 ```http
-POST /postTransactionDetails           # Mosambee webhook
-POST /postPayoutDetails                # Mosambee payout callback
+POST /postTransactionDetails           # Payment aggregator webhook (Mosambee)
+POST /postPayoutDetails                # Payment aggregator payout callback
 GET  /get_settlement_data?from_date={}&to_date={}
 GET  /get_payout_data?from_date={}&to_date={}
 POST /verify_settlement
 GET  /get_settlement_summary?from_date={}&to_date={}
+```
+
+#### Ghost Records (superadmin — unresolved-company transactions/payouts)
+```http
+GET  /ghost-transactions
+GET  /ghost-payouts
+POST /ghost-assign-company
 ```
 
 #### Failed Payloads
@@ -527,23 +550,26 @@ GET /api/v1/apk/tickets?bus_no={}&trip_no={}&route_code={}&date={}
 GET /api/v1/apk/passengers?bus_no={}&trip_no={}&route_code={}&date={}
 ```
 
-#### APK Reports (requires tier `intermediate` or above)
+#### APK Reports
 ```http
-GET /api/v1/reports/duty?bus_no={}&date={}
-GET /api/v1/reports/bus-summary?bus_no={}&from_date={}&to_date={}
-GET /api/v1/reports/payment-type?bus_no={}&from_date={}&to_date={}[&payment_mode={cash|upi}]
-GET /api/v1/reports/farewise?bus_no={}&from_date={}&to_date={}
-GET /api/v1/reports/expense?bus_no={}&from_date={}&to_date={}
+GET /api/v1/reports/duty?bus_no={}&date={}                                       # tier: intermediate+
+GET /api/v1/reports/bus-summary?bus_no={}&from_date={}&to_date={}                # tier: intermediate+
+GET /api/v1/reports/payment-type?bus_no={}&from_date={}&to_date={}[&payment_mode={cash|upi}]  # tier: intermediate+
+GET /api/v1/reports/farewise?bus_no={}&from_date={}&to_date={}                   # tier: intermediate+
+GET /api/v1/reports/expense?bus_no={}&from_date={}&to_date={}                    # tier: intermediate+
+GET /api/v1/reports/aggregator-transactions?bus_no={}&from_date={}&to_date={}    # no tier gate
 ```
 
 #### APK Master Data Download
+All endpoints below require tier `premium` when accessed from the APK (data-transfer gate; the same views are ungated for company_admin's manual downloads on the web dashboard).
 ```http
-GET /api/v1/device/getEtmVersion
+GET /api/v1/device/getEtmVersion        # no tier gate
 GET /api/v1/device/routes
 GET /api/v1/device/settings
 GET /api/v1/device/crew
 GET /api/v1/device/vehicles
 GET /api/v1/device/expenses
+GET /api/v1/device/masterdata           # bundled ZIP of all master data files
 GET /api/v1/device/routelst
 GET /api/v1/device/stagelst
 GET /api/v1/device/languagedat
@@ -655,16 +681,25 @@ bus-ticketing-system/
 │   │   ├── models/
 │   │   │   ├── auth.py              # CustomUser, UserSession, UserApprovedDevice, DevicePendingApproval
 │   │   │   ├── company.py           # Company, Depot, Dealer, ETMDevice, mappings
-│   │   │   ├── master_data.py       # BusType, Route, Stage, Fare, Vehicle, Employee, Currency, Settings
+│   │   │   ├── master_data.py       # BusType, Route, Stage, RouteStage, RouteBusType, RouteDepot, Fare, Vehicle, VehicleType, Employee, Currency, Settings
 │   │   │   ├── operations.py        # CrewAssignment, ExpenseMaster, Expense, InspectorDetails
 │   │   │   ├── transactions.py      # RawDataLog, TransactionData, TripData, ScheduleData, OdometerData, ExpenseData
-│   │   │   ├── payments.py          # MosambeeTransaction, MosambeePayoutCallback
+│   │   │   ├── payments.py          # AggregatorTransaction, AggregatorPayoutCallback (Mosambee gateway, renamed generic)
+│   │   │   ├── audit.py             # GlobalSettings, AuditLog, DeviceRejectionLog
 │   │   │   └── managers.py          # Custom QuerySet managers
-│   │   ├── authentication.py        # SessionAuthentication DRF backend (Redis + DB)
+│   │   ├── authentication.py        # SessionAuthentication DRF backend (Redis + DB, device-type-aware idle timeout)
 │   │   ├── permissions.py           # LicensePermission DRF permission class
-│   │   ├── serializers.py           # DRF serializers
-│   │   ├── signals.py               # Auto-reconciliation, cascade deactivation, route sync
-│   │   ├── tasks.py                 # Celery async tasks (payload processing, cleanup, session sweep)
+│   │   ├── serializers/             # DRF serializers, split by domain
+│   │   │   ├── auth.py
+│   │   │   ├── company.py
+│   │   │   ├── dealers.py
+│   │   │   ├── devices.py
+│   │   │   ├── executives.py
+│   │   │   ├── masterdata.py
+│   │   │   ├── payments.py
+│   │   │   └── transactions.py
+│   │   ├── signals.py               # Cascade deactivation, route/fare name sync (reconciliation moved to tasks.py)
+│   │   ├── tasks.py                 # Celery async tasks: payload processing, cleanup, session sweep, aggregator reconciliation & TID sync
 │   │   ├── urls.py                  # Web dashboard URL patterns
 │   │   ├── apk_urls.py              # APK-exclusive URL patterns (/api/v1/)
 │   │   ├── views/
@@ -674,17 +709,20 @@ bus-ticketing-system/
 │   │   │   │   ├── company.py           # Company & license management
 │   │   │   │   ├── users.py             # User CRUD
 │   │   │   │   ├── depots.py            # Depot management
-│   │   │   │   ├── dealers.py           # Dealer & mapping management
+│   │   │   │   ├── dealers.py           # Dealer & mapping management (incl. license pool)
 │   │   │   │   ├── executives.py        # Executive territory management
 │   │   │   │   ├── device_registry.py   # ETM device registration & assignment
 │   │   │   │   ├── ticket_reports.py    # Transaction, trip, schedule reports
 │   │   │   │   ├── settlements.py       # Settlement & payout management
 │   │   │   │   ├── raw_data_logs.py     # Failed payload management & retry
+│   │   │   │   ├── ghost_records.py     # Superadmin: assign company to unresolved transactions/payouts
+│   │   │   │   ├── notifications.py     # Login-time alert checks (license expiry, unmapped devices/depots)
 │   │   │   │   ├── audit_logs.py        # Audit log listing and log_action() helper
 │   │   │   │   ├── global_settings.py   # About page and global settings
 │   │   │   │   ├── masterdata/
 │   │   │   │   │   ├── transport.py     # Bus types, routes, stages, vehicles, fares
 │   │   │   │   │   ├── crew.py          # Employee types, employees, crew assignments
+│   │   │   │   │   ├── operations.py    # Expense masters, expenses, inspector details
 │   │   │   │   │   └── settings.py      # Currencies, system settings, device profiles
 │   │   │   │   └── imports/
 │   │   │   │       ├── mdb.py           # MDB file import service
@@ -692,12 +730,12 @@ bus-ticketing-system/
 │   │   │   ├── palmtec/
 │   │   │   │   └── data_post.py         # Device data ingestion (ticket, trip, schedule, odometer, expense)
 │   │   │   ├── webhooks/
-│   │   │   │   └── mosambee.py          # Mosambee payment & payout webhooks
+│   │   │   │   └── aggregator.py        # Payment aggregator webhooks (Mosambee, generic naming)
 │   │   │   ├── apk/
-│   │   │   │   ├── master_send.py       # APK/device master data file endpoints
-│   │   │   │   ├── reports.py           # APK report endpoints
+│   │   │   │   ├── master_send.py       # APK/device master data file endpoints (+ bundled ZIP)
+│   │   │   │   ├── reports.py           # APK report endpoints (incl. aggregator transactions)
 │   │   │   │   └── apk_upload.py        # DAT file uploads (odometer, expense)
-│   │   │   └── setup_data.py            # ETM initial setup data
+│   │   │   └── setup_data.py            # ETM initial setup data, APK version, company device list
 │   │   ├── migrations/              # Database versioning
 │   │   └── apps.py                  # Signal registration
 │   └── .env
@@ -705,17 +743,33 @@ bus-ticketing-system/
 ├── Frontend/
 │   ├── src/
 │   │   ├── assets/js/
-│   │   │   └── axiosConfig.js       # Axios instance (withCredentials, no refresh cycle)
+│   │   │   ├── axiosConfig.js       # Axios instance (withCredentials, no refresh cycle)
+│   │   │   ├── reportCache.js       # Client-side report response caching
+│   │   │   └── submitForm.js        # Shared form submit helper
 │   │   ├── hooks/
-│   │   │   └── useIdleTimer.js      # Idle detection, keepalive, session timeout
+│   │   │   ├── useIdleTimer.js      # Idle detection, keepalive, session timeout
+│   │   │   ├── useFilteredList.js   # Shared list search/filter logic
+│   │   │   ├── useModalForm.js      # Shared modal create/edit form logic
+│   │   │   └── usePagination.js     # Shared client-side pagination logic
+│   │   ├── lib/
+│   │   │   └── utils.js             # Shared utility helpers
+│   │   ├── layouts/
+│   │   │   └── Dashboard.jsx        # Authenticated shell layout (sidebar + outlet)
 │   │   ├── components/
-│   │   │   ├── ui/                  # Button, Card, Input, Dialog, KPI Card, Charts
+│   │   │   ├── ui/                  # Button, Card, Input, Dialog, KPI Card, Badge, Label, Separator, Skeleton, Textarea, Area/Donut Charts, State Breakdown Card
+│   │   │   ├── design/               # Shared page-building blocks (PageHeader, SectionCard, etc.)
 │   │   │   ├── ProtectedRoute.jsx   # Auth guard
+│   │   │   ├── RoleBasedHome.jsx    # Redirects to the correct dashboard per role
 │   │   │   ├── Sidebar.jsx          # Navigation sidebar
+│   │   │   ├── Modal.jsx            # Shared modal shell
+│   │   │   ├── TableSkeleton.jsx    # Loading placeholder for tables
+│   │   │   ├── ConfigureStep.jsx / FileUploadStep.jsx / ImportProgress.jsx / ImportResults.jsx  # Import wizard steps
 │   │   │   └── ...
 │   │   ├── pages/
 │   │   │   ├── auth/
-│   │   │   │   └── Login.jsx        # Includes SESSION_CONFLICT force-login flow
+│   │   │   │   ├── Login.jsx            # Includes SESSION_CONFLICT force-login flow
+│   │   │   │   ├── ForgotPassword.jsx
+│   │   │   │   └── ResetPassword.jsx
 │   │   │   ├── dashboards/
 │   │   │   │   ├── AdminHome.jsx
 │   │   │   │   ├── CompanyDashboard.jsx
@@ -729,11 +783,11 @@ bus-ticketing-system/
 │   │   │   │   ├── RouteListing.jsx
 │   │   │   │   ├── CurrencyListing.jsx
 │   │   │   │   ├── EmployeeCombined.jsx
+│   │   │   │   ├── InspectorListing.jsx
 │   │   │   │   └── VehicleCombined.jsx
 │   │   │   ├── operations/
-│   │   │   │   ├── DealerManagement.jsx
 │   │   │   │   ├── DeviceRegistry.jsx
-│   │   │   │   ├── SessionManagement.jsx
+│   │   │   │   ├── PalmtecDevicesPage.jsx   # Palmtec ID assignment + aggregator TID sync
 │   │   │   │   ├── CrewAssignmentListing.jsx
 │   │   │   │   ├── FareEditor.jsx
 │   │   │   │   ├── StageEditor.jsx
@@ -742,6 +796,7 @@ bus-ticketing-system/
 │   │   │   │   ├── TicketDataPage.jsx
 │   │   │   │   ├── TripDataPage.jsx
 │   │   │   │   ├── ScheduleDataPage.jsx
+│   │   │   │   ├── ExpenseDataPage.jsx
 │   │   │   │   └── settlements/
 │   │   │   │       ├── SettlementsLayout.jsx
 │   │   │   │       ├── TransactionPosting.jsx
@@ -751,7 +806,11 @@ bus-ticketing-system/
 │   │   │       ├── DeviceDownload.jsx
 │   │   │       ├── SettingsPage.jsx
 │   │   │       ├── FailedPayloadsPage.jsx
-│   │   │       ├── AuditLogsPage.jsx
+│   │   │       ├── GhostRecordsPage.jsx     # Superadmin: resolve unmatched transactions/payouts
+│   │   │       ├── AuditLogPage.jsx
+│   │   │       ├── SessionsPage.jsx         # Company admin session management
+│   │   │       ├── AdminSessionsPage.jsx    # Superadmin session management
+│   │   │       ├── GlobalSettingsPage.jsx   # Superadmin: support contact info
 │   │   │       └── AboutPage.jsx
 │   │   └── main.jsx                 # Router with 404 handling
 │   └── .env
@@ -819,31 +878,43 @@ bus-ticketing-system/
 - [x] Device set-mosambee-tid, reactivate, return-to-stock endpoints
 - [x] User toggle-active and capacity endpoints
 
+### ✅ Completed (v1.4 - Current)
+
+- [x] **Payment aggregator generalization**: `MosambeeTransaction`/`MosambeePayoutCallback` renamed to `AggregatorTransaction`/`AggregatorPayoutCallback`; `MOSAMBEE_SALT` → `AGGREGATOR_SALT`; `set-mosambee-tid` → `set-aggregator-tid` (data preserved via `RenameModel`/`RenameField`)
+- [x] **Reconciliation moved from Django signals to Celery**: `reconcile_aggregator_transaction` runs on webhook receipt; `scan_pending_aggregator_reconciliations` and `scan_unmatched_aggregator_transactions` run as scheduled sweeps (every 5 min); `auto_populate_aggregator_tids` runs daily
+- [x] **Ghost session fix** — device-type-aware idle timeout (`SESSION_IDLE_TIMEOUT_APK` vs `SESSION_IDLE_TIMEOUT`) applied via Redis-cached `last_seen_at`, resolved as part of the session-authentication backend
+- [x] **Stage name resolution** — `from_stage_name`/`to_stage_name` resolved via route FK in `TransactionDataSerializer`
+- [x] **Company under dealer — license pool** — dealer pool counts computed live from child companies (`devices_in_pool` etc.), decremented on company creation, restored on deletion
+- [x] **Ghost Records** — new superadmin tool (`/ghost-transactions`, `/ghost-payouts`, `/ghost-assign-company`) to manually resolve aggregator transactions/payouts with no matched company
+- [x] **Login notifications** — in-app alerts on login for license expiry (company & dealer), ETM devices missing a Palmtec ID, and depots with no route mapped
+- [x] **Device rejection logging** — `DeviceRejectionLog` records why a device request was refused
+- [x] **APK aggregator-transactions report** and **bundled master-data ZIP download** (`/api/v1/device/masterdata`)
+- [x] **Premium-tier gating for APK data-transfer endpoints** (masterdata download/upload require `premium` tier on APK only, web dashboard stays ungated)
+- [x] Serializers split into per-domain modules (`serializers/auth.py`, `company.py`, `dealers.py`, `devices.py`, `executives.py`, `masterdata.py`, `payments.py`, `transactions.py`)
+- [x] Route↔Depot and Route↔BusType master-data mappings; separate `VehicleType` model
+- [x] SMTP email configuration for password reset delivery
+
 ### 🚧 Pending
 
-- [ ] **Ghost session fix** — proper backend idle check at `/token/refresh` once `last_seen_at` heartbeat and APK-vs-web threshold are solved (see `_docs/pending-implementations.txt`)
 - [ ] **Logout delay** — HTTP/2 via nginx+gunicorn in production eliminates the HTTP/1.1 6-connection pool queue (see `_docs/pending-implementations.txt`)
 - [ ] **About page company block** — extend `GET /about` to include company name, active user count, admin names, allocated device count for company-scoped users
 - [ ] **Route code string snapshot** — store `route_code_str` alongside FK on TransactionData/TripData for deleted-route recovery
-- [ ] **Stage name resolution** — resolve `from_stage`/`to_stage` ordinals to stage names via route FK
-- [ ] **APK settlement / UPI payment data** — expose settlement and payout data via `api/v1/` endpoints for the APK
 - [ ] **Masterdata upload API expansion** — extend APK upload endpoints beyond odometer and expense DAT files as needed
-- [ ] **Company under dealer — license pool** — dealer's remaining counts pool, deduction on company creation, restoration on deletion
-- [ ] **Sync on license count reduction** — dry-run excess user display, selective deactivation flow
+- [ ] **Sync on license count reduction** — the dry-run diff exists (`sync-company-license/{id}`), but applying a reduction with selective user deactivation is still deferred in `/confirm`
 - [ ] **Server-side pagination** — trip/ticket/schedule report pages (trigger: 50+ buses or >5MB responses)
 - [ ] **Serial number reassignment** — superadmin-only, clears all active mappings with audit trail
 - [ ] **Dealer MDB import for client companies** — dealer admin triggers import on behalf of managed company
 - [ ] **Superadmin operational data access** — select a company and browse their reports/masterdata
-- [ ] **Email & push notifications** — license expiry warnings (10-day, 5-day), unmapped device/route alerts
+- [ ] **Email & push delivery for notifications** — current login notifications are in-app only; actual email/push delivery (10-day/5-day expiry warnings, unmapped device/route alerts) not yet built
 - [ ] **Real-time GPS tracking integration**
 
 ---
 
 ## 📊 Project Status
 
-**Current Version**: 1.3
+**Current Version**: 1.4
 **Status**: Active Development
-**Last Updated**: June 2026
+**Last Updated**: July 2026
 
 ---
 
@@ -921,6 +992,37 @@ bus-ticketing-system/
 - `TicketAppB/authentication.py` + `TicketAppB/permissions.py` — clean DRF separation
 - `sweep_stale_sessions` Celery task reconciles DB with Redis TTL expiry every 10 minutes
 - All 24 management views emit audit log entries via `log_action()`
+
+---
+
+## 🔧 Key Changes in v1.4
+
+### Payment Aggregator Generalization
+- **Renamed**: `MosambeeTransaction` → `AggregatorTransaction`, `MosambeePayoutCallback` → `AggregatorPayoutCallback`, `mosambee_merchant_id` → `aggregator_merchant_id`, `mosambee_tid` → `aggregator_tid`, `MOSAMBEE_SALT` → `AGGREGATOR_SALT`
+- **Preserved data**: rename handled via a hand-written migration (`RenameModel`/`RenameField`/`AlterModelTable`), existing rows kept intact
+- **Underlying gateway unchanged** (still Mosambee) — naming generalized in code/config, not a multi-gateway switch
+
+### Reconciliation: Signals → Celery
+- **Removed**: payment-to-ticket matching from Django signals
+- **Added**: `reconcile_aggregator_transaction` Celery task fired on webhook receipt, plus scheduled sweeps — `scan_pending_aggregator_reconciliations` and `scan_unmatched_aggregator_transactions` (every 5 min), `auto_populate_aggregator_tids` (daily)
+- Signals now handle only cascade deactivation and route/fare name sync
+
+### Ghost Session Fix
+- Session idle timeout is now device-type-aware: `SESSION_IDLE_TIMEOUT` (web, default 20 min) vs `SESSION_IDLE_TIMEOUT_APK` (APK, default 12 hr), tracked via a debounced `last_seen_at` write and enforced through the Redis-backed session cache
+
+### New Features
+- **Ghost Records**: superadmin UI/API to manually assign a company to aggregator transactions/payouts that arrived without a resolvable company match
+- **Login Notifications**: in-app alerts on login for license expiry (company/dealer), ETM devices missing a Palmtec ID, and depots with no route mapped
+- **Dealer License Pool**: pool counts computed live from child company records, decremented on company creation and restored on deletion
+- **Device Rejection Logging**: `DeviceRejectionLog` records refused device requests with reason
+- **APK aggregator-transactions report** and **bundled master-data ZIP download** (`/api/v1/device/masterdata`)
+- **Route↔Depot** and **Route↔BusType** master-data mappings; **VehicleType** split out as its own model
+
+### Technical Updates
+- Serializers split from a single `serializers.py` into per-domain modules under `serializers/`
+- Stage names resolved via FK in transaction serializers (`from_stage_name`/`to_stage_name`)
+- APK data-transfer endpoints (masterdata download/upload) gated to `premium` tier; the same views stay ungated on the web dashboard
+- SMTP email settings added for password-reset delivery
 
 ---
 
