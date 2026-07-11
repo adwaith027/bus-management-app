@@ -4,6 +4,7 @@ User management views — Phase 4
 Permission matrix:
   superadmin    → create: executive, dealer_admin, company_admin, production
                → view / edit / toggle all non-superadmin users
+  executive     → create: company_admin (their own created companies only)
   dealer_admin  → create: company_admin (their dealer's companies only)
                → view / edit company_admins under their dealer
   company_admin → create: company_user (own company only, auto-scoped)
@@ -24,7 +25,7 @@ from rest_framework.response import Response
 from ...models import Company, Dealer, CustomUser, AuditLog, UserRole, UserTier
 from ...serializers.auth import UserSerializer
 from ...permissions import LicensePermission
-from ..utils import _is_superadmin, _is_dealer_admin, _is_company_admin
+from ..utils import _is_superadmin, _is_executive, _is_dealer_admin, _is_company_admin
 from .audit_logs import log_action
 
 
@@ -157,6 +158,18 @@ def create_user(request):
             except Company.DoesNotExist:
                 return Response({'error': 'Company not found.'}, status=status.HTTP_404_NOT_FOUND)
 
+    elif _is_executive(requester):
+        if role != UserRole.COMPANY_ADMIN:
+            return Response({'error': 'Executive can only create company_admin users.'}, status=status.HTTP_403_FORBIDDEN)
+        if not company_id:
+            return Response({'error': 'company_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not Company.objects.filter(id=company_id, created_by=requester, is_active=True).exists():
+            return Response({'error': 'Company not found or not created by you.'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            company_instance = Company.objects.get(id=company_id)
+        except Company.DoesNotExist:
+            return Response({'error': 'Company not found.'}, status=status.HTTP_404_NOT_FOUND)
+
     elif _is_dealer_admin(requester):
         if role != UserRole.COMPANY_ADMIN:
             return Response({'error': 'Dealer admin can only create company_admin users.'}, status=status.HTTP_403_FORBIDDEN)
@@ -254,6 +267,14 @@ def get_all_users(request):
             models_Q(role=UserRole.PRODUCTION)
         ).order_by('id')
 
+    elif _is_executive(requester):
+        own_company_ids = Company.objects.filter(
+            created_by=requester, is_active=True,
+        ).values_list('id', flat=True)
+        users = CustomUser.objects.filter(
+            role=UserRole.COMPANY_ADMIN, company_id__in=own_company_ids,
+        ).order_by('id')
+
     elif _is_dealer_admin(requester):
         if not requester.dealer_id:
             return Response({'error': 'No dealer linked.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -305,6 +326,13 @@ def update_user(request, user_id):
     if _is_superadmin(requester):
         if target.role == UserRole.SUPERADMIN:
             return Response({'error': 'Cannot edit another superadmin.'}, status=status.HTTP_403_FORBIDDEN)
+
+    elif _is_executive(requester):
+        # Can only edit company_admin users of companies they created
+        if target.role != UserRole.COMPANY_ADMIN:
+            return Response({'error': 'Executive can only edit company_admin users.'}, status=status.HTTP_403_FORBIDDEN)
+        if not target.company or target.company.created_by_id != requester.id:
+            return Response({'error': 'User is not under a company you created.'}, status=status.HTTP_403_FORBIDDEN)
 
     elif _is_dealer_admin(requester):
         if not requester.dealer_id:
@@ -426,6 +454,10 @@ def toggle_user_active(request, user_id):
         if target.role == UserRole.SUPERADMIN:
             return Response({'error': 'Cannot deactivate another superadmin.'}, status=status.HTTP_403_FORBIDDEN)
 
+    elif _is_executive(requester):
+        if target.role != UserRole.COMPANY_ADMIN or not target.company or target.company.created_by_id != requester.id:
+            return Response({'error': 'Not authorized to toggle this user.'}, status=status.HTTP_403_FORBIDDEN)
+
     elif _is_dealer_admin(requester):
         if target.role != UserRole.COMPANY_ADMIN or not target.company or target.company.dealer_id != requester.dealer_id:
             return Response({'error': 'Not authorized to toggle this user.'}, status=status.HTTP_403_FORBIDDEN)
@@ -474,7 +506,11 @@ def toggle_user_active(request, user_id):
     # Kill the active session when deactivating so the token is immediately invalid
     if not new_state:
         from ...models import UserSession
-        killed = UserSession.objects.filter(user=target, is_active=True).update(is_active=False)
+        from ...authentication import kill_session
+        sessions_to_kill = list(UserSession.objects.filter(user=target, is_active=True))
+        for s in sessions_to_kill:
+            kill_session(s)
+        killed = len(sessions_to_kill)
         if killed:
             import logging
             logging.getLogger(__name__).info(
