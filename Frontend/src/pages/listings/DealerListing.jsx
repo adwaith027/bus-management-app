@@ -260,7 +260,7 @@ export default function DealerListing() {
   const resetCreate = () => setForm(EMPTY);
 
   // ── Create form completeness ──────────────────────────────────────────────
-  const sec1 = !!(form.dealer_code && form.dealer_name && form.contact_person && form.contact_number && form.email);
+  const sec1 = !!(form.dealer_code && form.dealer_name && form.contact_person && form.contact_number && form.email && form.gst_number);
   const sec2 = !!(form.address && form.state && form.district);
   const sec3 = !!(form.user_username && form.user_email && form.user_password);
   const canSubmit = sec1 && sec2 && sec3;
@@ -808,7 +808,7 @@ export default function DealerListing() {
                 { label: 'Contact Person', name: 'contact_person', required: true },
                 { label: 'Contact Number', name: 'contact_number', required: true },
                 { label: 'Email', name: 'email', type: 'email', required: true },
-                { label: 'GST Number', name: 'gst_number' },
+                { label: 'GST Number', name: 'gst_number', required: true },
               ].map(f => (
                 <div key={f.name} className="space-y-1">
                   <label className="text-sm font-medium text-slate-700">{f.label}{f.required && <span className="text-red-500 ml-0.5">*</span>}</label>
@@ -929,7 +929,7 @@ export default function DealerListing() {
                 <Field label="Email" required>
                   <input type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="dealer@company.in" className={inputCls} />
                 </Field>
-                <Field label="GST Number" hint="Optional">
+                <Field label="GST Number" required>
                   <input value={form.gst_number} onChange={e => set('gst_number', e.target.value)} placeholder="29ABCDE1234F1Z5" className={inputCls} />
                 </Field>
 
