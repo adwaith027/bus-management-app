@@ -409,10 +409,15 @@ def get_settings_file(request):
         return HttpResponse('SERIAL_NUMBER_NOT_PROVIDED', status=400)
 
     try:
-        palmtec_id = ETMDevice.objects.get(company=company, serial_number=serialnumber).palmtec_id
-        profile = SettingsProfile.objects.get(company=company, palmtec_id=palmtec_id)
+        device = ETMDevice.objects.get(company=company, serial_number=serialnumber)
     except ETMDevice.DoesNotExist:
         return HttpResponse('DEVICE_NOT_FOUND', status=404)
+
+    if not device.is_active:
+        return HttpResponse('DEVICE_INACTIVE', status=403)
+
+    try:
+        profile = SettingsProfile.objects.get(device=device)
     except SettingsProfile.DoesNotExist:
         return HttpResponse('SETTINGS_NOT_FOUND', status=404)
 
