@@ -146,6 +146,7 @@ export default function UserListing() {
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
   const currentRole = currentUser?.role;
   const isSuperadmin = currentRole === 'superadmin';
+  const isExecutive = currentRole === 'executive';
   const isDealerAdmin = currentRole === 'dealer_admin';
   const isCompanyAdmin = currentRole === 'company_admin';
 
@@ -156,6 +157,8 @@ export default function UserListing() {
         { value: 'executive',     label: 'Executive' },
         { value: 'production',    label: 'Production' },
       ]
+    : isExecutive
+    ? [{ value: 'company_admin', label: 'Customer Admin' }]
     : isDealerAdmin
     ? [{ value: 'company_admin', label: 'Customer Admin' }]
     : isCompanyAdmin
@@ -541,7 +544,10 @@ export default function UserListing() {
           </div>
         ) : (
           <div className="flex items-center gap-1 flex-wrap">
-            {['ALL', 'superadmin', 'company_admin', 'dealer_admin', 'executive', 'production', 'company_user'].map(r => (
+            {(isSuperadmin
+              ? ['ALL', 'company_admin', 'dealer_admin', 'executive', 'production']
+              : ['ALL', 'company_admin']
+            ).map(r => (
               <button
                 key={r}
                 onClick={() => setRoleFilter(r)}
@@ -666,9 +672,11 @@ export default function UserListing() {
                       <button onClick={() => openEdit(user)} className="p-1.5 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50 cursor-pointer" title="Edit user">
                         <Edit size={14} />
                       </button>
-                      <button onClick={() => openPw(user)} className="p-1.5 rounded-md text-slate-400 hover:text-violet-600 hover:bg-violet-50 cursor-pointer" title="Change password">
-                        <KeyRound size={14} />
-                      </button>
+                      {isSuperadmin && (
+                        <button onClick={() => openPw(user)} className="p-1.5 rounded-md text-slate-400 hover:text-violet-600 hover:bg-violet-50 cursor-pointer" title="Change password">
+                          <KeyRound size={14} />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -762,12 +770,14 @@ export default function UserListing() {
               >
                 <Edit size={14} />Edit
               </button>
-              <button
-                onClick={() => { closeModal(); setTimeout(() => openPw(selectedUser), 100); }}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 px-3 text-sm rounded-lg font-medium bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer transition-colors"
-              >
-                <KeyRound size={14} />Password
-              </button>
+              {isSuperadmin && (
+                <button
+                  onClick={() => { closeModal(); setTimeout(() => openPw(selectedUser), 100); }}
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 px-3 text-sm rounded-lg font-medium bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer transition-colors"
+                >
+                  <KeyRound size={14} />Password
+                </button>
+              )}
               <button
                 onClick={() => handleToggleActive(selectedUser)}
                 disabled={togglingId === selectedUser?.id}
