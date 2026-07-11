@@ -1,4 +1,5 @@
 import logging
+from django.db import IntegrityError
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -107,9 +108,15 @@ def list_profiles(request):
 @api_view(['POST'])
 def create_profile(request):
     user, company = _get_authenticated_company_admin(request)
-    serializer = SettingsProfileSerializer(data=request.data)
+    serializer = SettingsProfileSerializer(data=request.data, context={'company': company})
     if serializer.is_valid():
-        serializer.save(company=company, created_by=user)
+        try:
+            serializer.save(company=company, created_by=user)
+        except IntegrityError:
+            return Response(
+                {'message': 'This device already has a settings profile.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         return Response({'message': 'Profile created', 'data': serializer.data}, status=status.HTTP_201_CREATED)
     return Response({'message': 'Validation failed', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -129,9 +136,15 @@ def profile_detail(request, profile_id):
         profile.delete()
         return Response({'message': 'Profile deleted.'}, status=status.HTTP_200_OK)
 
-    serializer = SettingsProfileSerializer(profile, data=request.data, partial=True)
+    serializer = SettingsProfileSerializer(profile, data=request.data, partial=True, context={'company': company})
     if serializer.is_valid():
-        serializer.save(updated_by=user)
+        try:
+            serializer.save(updated_by=user)
+        except IntegrityError:
+            return Response(
+                {'message': 'This device already has a settings profile.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         return Response({'message': 'Profile updated', 'data': serializer.data}, status=status.HTTP_200_OK)
     return Response({'message': 'Validation failed', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
