@@ -58,6 +58,10 @@ def _build_dealer_registration_payload(dealer):
         "GSTNumber":             dealer.gst_number or '',
         "CustomerContactPerson": dealer.contact_person,
         "CustomerAddress":       dealer.address,
+        # Differentiates dealers on the license server — without it the server
+        # can return a stale CustomerId from an earlier registration. See
+        # build_license_registration_payload in company.py for the same field.
+        "DeviceIdentifier1":     dealer.dealer_name,
         "DeviceModel":           settings.DEVICE_MODEL,
         "DeviceType":            settings.DEVICE_TYPE,
         "ProjectName":           settings.PROJECT_NAME,
@@ -67,12 +71,15 @@ def _build_dealer_registration_payload(dealer):
 def _register_dealer_with_license_server(dealer):
     """Register dealer and return {'success', 'customer_id'} or {'success', 'error'}."""
     payload = _build_dealer_registration_payload(dealer)
+    logger.debug(f"Dealer registration payload: {payload}")
     try:
         resp = requests.post(settings.PRODUCT_REGISTRATION_URL, json=payload, timeout=30)
+        logger.debug(f"Dealer registration response [{resp.status_code}]: {resp.text}")
         resp.raise_for_status()
         data = resp.json()
         if data.get('status') == 'Success' and data.get('CustomerId'):
             return {'success': True, 'customer_id': data['CustomerId']}
+        logger.error(f"Dealer registration failed. Response data: {data}")
         return {'success': False, 'error': f"License server error: {data.get('message', 'Unknown')}"}
     except requests.exceptions.Timeout:
         return {'success': False, 'error': 'License server timeout.'}
