@@ -79,9 +79,9 @@ export default function TransactionPosting() {
 
   const [filters, setFilters] = useState({
     startDate: today(), endDate: today(),
-    verificationStatus: 'UNVERIFIED',
+    verificationStatus: 'ALL',
     reconciliationStatus: 'ALL',
-    paymentStatus: 'approved',
+    paymentStatus: 'ALL',
   });
   const [appliedFilters, setAppliedFilters] = useState({ startDate: today(), endDate: today() });
 
@@ -173,7 +173,7 @@ export default function TransactionPosting() {
 
   const resetFilters = () => {
     const t = today();
-    const reset = { startDate: t, endDate: t, verificationStatus: 'UNVERIFIED', reconciliationStatus: 'ALL', paymentStatus: 'approved' };
+    const reset = { startDate: t, endDate: t, verificationStatus: 'ALL', reconciliationStatus: 'ALL', paymentStatus: 'ALL' };
     setFilters(reset);
     setAppliedFilters({ startDate: t, endDate: t });
     fetchData(t, t, true);
