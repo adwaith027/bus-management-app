@@ -16,7 +16,7 @@ export default function DepotListing() {
   const [selected, setSelected]     = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const emptyForm = { depot_code: '', depot_name: '', address: '', city: '', state: '', zip_code: '' };
+  const emptyForm = { depot_code: '', depot_name: '', address: '' };
   const [form, setForm] = useState(emptyForm);
   const setF = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -40,8 +40,7 @@ export default function DepotListing() {
   const q = search.toLowerCase();
   const filtered = depots.filter(d =>
     d.depot_code?.toLowerCase().includes(q) ||
-    d.depot_name?.toLowerCase().includes(q) ||
-    d.city?.toLowerCase().includes(q)
+    d.depot_name?.toLowerCase().includes(q)
   );
 
   const totalCount  = depots.length;
@@ -56,7 +55,7 @@ export default function DepotListing() {
 
   const openEdit = (d) => {
     setSelected(d);
-    setForm({ depot_code: d.depot_code, depot_name: d.depot_name, address: d.address, city: d.city, state: d.state, zip_code: d.zip_code });
+    setForm({ depot_code: d.depot_code, depot_name: d.depot_name, address: d.address });
     setModalMode('edit');
     setModalOpen(true);
   };
@@ -128,7 +127,7 @@ export default function DepotListing() {
           <Search size={15} className="text-slate-400 shrink-0" />
           <input
             type="text"
-            placeholder="Search by code, name, or city…"
+            placeholder="Search by code or name…"
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="flex-1 text-sm text-slate-700 placeholder:text-slate-400 outline-none bg-transparent"
@@ -144,7 +143,7 @@ export default function DepotListing() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
-                {['ID', 'Code', 'Name', 'Location', 'Routes', 'Status', ''].map(h => (
+                {['ID', 'Code', 'Name', 'Address', 'Routes', 'Status', ''].map(h => (
                   <th key={h} className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">{h}</th>
                 ))}
               </tr>
@@ -176,10 +175,7 @@ export default function DepotListing() {
                     <span className="text-sm text-slate-700">{d.depot_name}</span>
                   </td>
                   <td className="px-5 py-3.5">
-                    <div className="text-sm">
-                      <span className="text-slate-700">{d.city}, {d.state}</span>
-                      <span className="text-slate-400 text-xs block">{d.zip_code}</span>
-                    </div>
+                    <span className="text-sm text-slate-700 line-clamp-1 max-w-xs block">{d.address}</span>
                   </td>
                   <td className="px-5 py-3.5">
                     {d.routes && d.routes.length > 0 ? (
@@ -236,13 +232,9 @@ export default function DepotListing() {
               <StatusPill status={selected.is_active ? 'active' : 'inactive'} />
             </div>
 
-            <FieldGroup title="Location" columns={3}>
+            <FieldGroup title="Location" columns={1}>
               <FieldBlock label="Address" value={selected.address} />
-              <FieldBlock label="City"    value={selected.city} />
-              <FieldBlock label="State"   value={selected.state} />
             </FieldGroup>
-
-            <FieldBlock label="Zip Code" value={selected.zip_code} />
 
             {/* Mapped Routes */}
             <div>
@@ -287,18 +279,6 @@ export default function DepotListing() {
             <FormField label="Address" required>
               <DesignTextarea value={form.address} onChange={v => setF('address', v)} placeholder="Full depot address" rows={2} />
             </FormField>
-
-            <div className="grid grid-cols-3 gap-4">
-              <FormField label="City" required>
-                <DesignInput value={form.city} onChange={v => setF('city', v)} placeholder="City" />
-              </FormField>
-              <FormField label="State" required>
-                <DesignInput value={form.state} onChange={v => setF('state', v)} placeholder="State" />
-              </FormField>
-              <FormField label="Zip Code" required>
-                <DesignInput value={form.zip_code} onChange={v => setF('zip_code', v)} placeholder="Zip" />
-              </FormField>
-            </div>
 
             {modalMode === 'create' && (
               <div className="flex items-start gap-2 rounded-lg bg-blue-50 border border-blue-100 px-3 py-2.5 text-xs text-blue-700">
