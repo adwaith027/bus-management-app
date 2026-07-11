@@ -34,6 +34,12 @@ export default function ConfigureStep({
   selectedCompanyId,
   onCompanyChange,
 
+  // Password
+  isPasswordProtected,
+  mdbPassword,
+  onPasswordProtectedChange,
+  onPasswordChange,
+
   // Actions
   onBack,
   onImport,
@@ -88,7 +94,27 @@ export default function ConfigureStep({
         </select>
       </div>
 
-      {/* ---- Password Section hidden — mdbtools does not enforce MDB passwords ---- */}
+      {/* ---- Password Section ---- */}
+      <div className="space-y-1.5">
+        <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+          <input
+            type="checkbox"
+            checked={isPasswordProtected}
+            onChange={(e) => onPasswordProtectedChange(e.target.checked)}
+            className="rounded border-slate-300 text-slate-800 focus:ring-slate-500"
+          />
+          File is password protected
+        </label>
+        {isPasswordProtected && (
+          <input
+            type="password"
+            value={mdbPassword}
+            onChange={(e) => onPasswordChange(e.target.value)}
+            placeholder="MDB database password"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-transparent transition-all"
+          />
+        )}
+      </div>
 
       {/* ---- Tables info panel ---- */}
       {/* Informational only — shows user what will be imported */}
