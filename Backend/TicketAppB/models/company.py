@@ -156,9 +156,6 @@ class Depot(models.Model):
     depot_code = models.CharField(max_length=50)
     depot_name = models.CharField(max_length=100)
     address    = models.TextField()
-    city       = models.CharField(max_length=100)
-    state      = models.CharField(max_length=100)
-    zip_code   = models.CharField(max_length=20)
 
     is_active = models.BooleanField(default=True)
 
@@ -481,6 +478,12 @@ class ETMDevice(models.Model):
             models.Index(fields=['allocation_status']),
             models.Index(fields=['is_active']),
             models.Index(fields=['company', 'is_active']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['company', 'palmtec_id'],
+                name='uniq_etmdevice_company_palmtec_id',
+            ),
         ]
 
     def __str__(self):
