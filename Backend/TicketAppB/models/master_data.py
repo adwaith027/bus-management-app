@@ -653,8 +653,8 @@ class Settings(models.Model):
 
 class SettingsProfile(models.Model):
     """
-    Named settings template that can be applied to one or more ETM devices.
-    palmtec_id is the numeric device identifier the client assigns in the profile.
+    Settings profile for exactly one ETM device (device is a OneToOneField).
+    palmtec_id mirrors device.palmtec_id at save time.
     """
 
     LANGUAGE_CHOICES = [(0, 'Malayalam'), (1, 'Tamil')]
@@ -665,8 +665,18 @@ class SettingsProfile(models.Model):
         on_delete=models.CASCADE,
         related_name='settings_profiles',
     )
+    device = models.OneToOneField(
+        'ETMDevice',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='settings_profile',
+        help_text='The device this profile is configured for. One profile per device.',
+    )
     name = models.CharField(max_length=100)
-    palmtec_id = models.PositiveIntegerField(help_text="Client-assigned device identifier (max 6 digits)")
+    palmtec_id = models.PositiveIntegerField(
+        help_text="Mirrors device.palmtec_id at save time. Not independently client-writable."
+    )
 
     # ── Passwords ────────────────────────────────────────────────────────────
     user_pwd       = models.CharField(max_length=255, null=True, blank=True)
@@ -744,7 +754,7 @@ class SettingsProfile(models.Model):
 
     class Meta:
         db_table = 'settings_profiles'
-        unique_together = [('company', 'name')]
+        unique_together = [('company', 'name'), ('company', 'palmtec_id')]
 
     def __str__(self):
         return f"{self.name} ({self.company.company_name})"
