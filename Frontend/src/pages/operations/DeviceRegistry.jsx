@@ -216,8 +216,8 @@ export default function DeviceRegistry() {
   };
 
   const handleSetPalmtecId = async () => {
+    if (!/^\d{5}$/.test(palmtecValue)) { setPalmtecError('Enter exactly 5 digits.'); return; }
     const val = parseInt(palmtecValue, 10);
-    if (!val || val <= 0) { setPalmtecError('Enter a positive integer.'); return; }
     setPalmtecBusy(true);
     setPalmtecError('');
     try {
@@ -575,11 +575,12 @@ export default function DeviceRegistry() {
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">Palmtec ID *</label>
             <input
-              type="number"
-              min="1"
+              type="text"
+              inputMode="numeric"
+              maxLength={5}
               value={palmtecValue}
-              onChange={e => setPalmtecValue(e.target.value)}
-              placeholder="Enter positive integer"
+              onChange={e => setPalmtecValue(e.target.value.replace(/\D/g, '').slice(0, 5))}
+              placeholder="Enter 5-digit ID"
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300"
             />
           </div>
