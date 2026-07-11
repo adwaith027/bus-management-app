@@ -3,7 +3,7 @@ from ..models import (
     BusType, EmployeeType, Stage, Currency,
     Employee, VehicleType, CrewAssignment, Settings,
     RouteStage, Route, RouteBusType, Fare, SettingsProfile,
-    ExpenseMaster, InspectorDetails, Expense,
+    ExpenseMaster, InspectorDetails, Expense, ETMDevice,
 )
 
 
@@ -316,12 +316,34 @@ class SettingsProfileSerializer(serializers.ModelSerializer):
     created_by = serializers.PrimaryKeyRelatedField(read_only=True)
     updated_by = serializers.PrimaryKeyRelatedField(read_only=True)
     company    = serializers.PrimaryKeyRelatedField(read_only=True)
-    palmtec_id = serializers.IntegerField(required=True, min_value=1)
+    palmtec_id = serializers.IntegerField(read_only=True)
+    device     = serializers.PrimaryKeyRelatedField(read_only=True)
+    device_id  = serializers.PrimaryKeyRelatedField(
+        source='device', queryset=ETMDevice.objects.all(), write_only=True,
+    )
+    device_serial_number = serializers.SerializerMethodField()
 
-    def validate_palmtec_id(self, value):
-        if not value:
-            raise serializers.ValidationError("Palmtec ID is required.")
-        return value
+    def get_device_serial_number(self, obj):
+        return obj.device.serial_number if obj.device_id else None
+
+    def validate_device_id(self, device):
+        company = self.context.get('company')
+        if company and device.company_id != company.id:
+            raise serializers.ValidationError("Selected device does not belong to your company.")
+        if device.allocation_status != ETMDevice.AllocationStatus.ALLOCATED:
+            raise serializers.ValidationError("Selected device is not allocated to your company.")
+        if not device.palmtec_id:
+            raise serializers.ValidationError("Selected device has no Palmtec ID assigned yet.")
+        return device
+
+    def create(self, validated_data):
+        validated_data['palmtec_id'] = validated_data['device'].palmtec_id
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if 'device' in validated_data:
+            validated_data['palmtec_id'] = validated_data['device'].palmtec_id
+        return super().update(instance, validated_data)
 
     def validate_user_pwd(self, value):
         return _validate_password_not_blank(value)
@@ -338,7 +360,7 @@ class SettingsProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model  = SettingsProfile
         fields = [
-            'id', 'name', 'company', 'palmtec_id',
+            'id', 'name', 'company', 'device', 'device_id', 'palmtec_id', 'device_serial_number',
             'user_pwd', 'master_pwd', 'supervisor_pwd', 'remove_pwd',
             'half_per', 'con_per', 'phy_per', 'round_amt', 'luggage_unit_rate',
             'main_display', 'main_display2',
