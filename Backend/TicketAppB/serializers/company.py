@@ -16,6 +16,8 @@ class CompanySerializer(serializers.ModelSerializer):
     needs_validation = serializers.ReadOnlyField()
     created_by = serializers.PrimaryKeyRelatedField(read_only=True)
     dealer = serializers.PrimaryKeyRelatedField(read_only=True)
+    gst_number = serializers.CharField(required=True, allow_blank=False, allow_null=False)
+    district = serializers.CharField(required=True, allow_blank=False, allow_null=False)
 
     class Meta:
         model = Company
@@ -121,9 +123,6 @@ class DepotSerializer(serializers.ModelSerializer):
             'depot_code',
             'depot_name',
             'address',
-            'city',
-            'state',
-            'zip_code',
             'is_active',
             'created_by',
             'routes',
