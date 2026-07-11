@@ -40,6 +40,7 @@ const ROLE_PATHS = {
   ],
   executive:     [
     '/dashboard/companies',
+    '/dashboard/users',
     '/dashboard/device-registry',
     '/dashboard/about',
   ],
