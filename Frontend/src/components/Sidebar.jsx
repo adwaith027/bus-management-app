@@ -319,6 +319,7 @@ export default function Sidebar() {
               <>
                 <SectionLabel label="Administration" isCollapsed={isCollapsed} />
                 <NavItem to="/dashboard/companies"       icon={Building2} label="Companies"       isCollapsed={isCollapsed} onClose={close} />
+                <NavItem to="/dashboard/users"           icon={Users}     label="Users"           isCollapsed={isCollapsed} onClose={close} />
                 <NavItem to="/dashboard/device-registry" icon={Cpu}       label="Device Registry" isCollapsed={isCollapsed} onClose={close} />
               </>
             )}
