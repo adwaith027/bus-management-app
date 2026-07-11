@@ -14,6 +14,8 @@ _STATES_DISTRICTS = _load_states_districts()
 
 class DealerSerializer(serializers.ModelSerializer):
     created_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    gst_number = serializers.CharField(required=True, allow_blank=False, allow_null=False)
+    district = serializers.CharField(required=True, allow_blank=False, allow_null=False)
 
     class Meta:
         model = Dealer
