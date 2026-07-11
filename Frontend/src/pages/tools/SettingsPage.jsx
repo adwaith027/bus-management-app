@@ -9,22 +9,30 @@ import { PageHeader, SectionCard, SettToggle } from '@/components/design';
 
 // ── Reusable Field Components ─────────────────────────────────────────────────
 
-const TextField = ({ label, name, value, onChange, placeholder = '', maxLength, loading = false }) => (
+const errCls = 'border-red-400 focus:ring-red-400';
+const okCls  = 'border-slate-300 focus:ring-slate-500';
+
+const TextField = ({ label, name, value, onChange, placeholder = '', maxLength, loading = false, error = false, required = true }) => (
   <div className="space-y-1.5">
-    <label className="text-sm font-semibold text-slate-700">{label}</label>
+    <label className="text-sm font-semibold text-slate-700">
+      {label}{required && <span className="text-red-500"> *</span>}
+    </label>
     {loading ? (
       <div className="w-full h-10 bg-slate-100 rounded-xl animate-pulse" />
     ) : (
-      <input
-        type="text" name={name} value={value ?? ''} onChange={onChange}
-        placeholder={placeholder} maxLength={maxLength}
-        className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-slate-500 focus:border-transparent text-sm transition-all"
-      />
+      <>
+        <input
+          type="text" name={name} value={value ?? ''} onChange={onChange}
+          placeholder={placeholder} maxLength={maxLength}
+          className={`w-full px-4 py-2.5 border rounded-xl focus:ring-2 focus:border-transparent text-sm transition-all ${error ? errCls : okCls}`}
+        />
+        {error && <p className="text-xs text-red-500">Required</p>}
+      </>
     )}
   </div>
 );
 
-const ConstrainedField = ({ label, name, value, onChange, maxLen, allowDecimal = false, loading = false }) => {
+const ConstrainedField = ({ label, name, value, onChange, maxLen, allowDecimal = false, placeholder = '', loading = false, error = false, required = true }) => {
   const handleKey = (e) => {
     const key = e.key;
     if (['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(key)) return;
@@ -46,22 +54,27 @@ const ConstrainedField = ({ label, name, value, onChange, maxLen, allowDecimal =
   };
   return (
     <div className="space-y-1.5">
-      <label className="text-sm font-semibold text-slate-700">{label}</label>
+      <label className="text-sm font-semibold text-slate-700">
+        {label}{required && <span className="text-red-500"> *</span>}
+      </label>
       {loading ? (
         <div className="w-full h-10 bg-slate-100 rounded-xl animate-pulse" />
       ) : (
-        <input
-          type="text" inputMode={allowDecimal ? 'decimal' : 'numeric'}
-          name={name} value={value ?? ''} onChange={handleChange} onKeyDown={handleKey}
-          maxLength={maxLen}
-          className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-slate-500 focus:border-transparent text-sm transition-all"
-        />
+        <>
+          <input
+            type="text" inputMode={allowDecimal ? 'decimal' : 'numeric'}
+            name={name} value={value ?? ''} onChange={handleChange} onKeyDown={handleKey}
+            maxLength={maxLen} placeholder={placeholder}
+            className={`w-full px-4 py-2.5 border rounded-xl focus:ring-2 focus:border-transparent text-sm transition-all ${error ? errCls : okCls}`}
+          />
+          {error && <p className="text-xs text-red-500">Required</p>}
+        </>
       )}
     </div>
   );
 };
 
-function DevicePalmtecSelect({ label, value, onChange, excludePalmtecIds = [] }) {
+function DevicePalmtecSelect({ label, value, onChange, excludeDeviceIds = [], error = false }) {
   const [devices, setDevices]   = useState([]);
   const [loading, setLoading]   = useState(true);
   const [open, setOpen]         = useState(false);
@@ -80,13 +93,13 @@ function DevicePalmtecSelect({ label, value, onChange, excludePalmtecIds = [] })
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const select = (palmtecId) => {
-    onChange({ target: { name: 'palmtec_id', value: palmtecId } });
+  const select = (deviceId) => {
+    onChange({ target: { name: 'device_id', value: deviceId } });
     setOpen(false);
   };
 
-  const assignedDevices = devices.filter(d => d.palmtec_id && !excludePalmtecIds.includes(String(d.palmtec_id)));
-  const displayValue   = value ? String(value) : null;
+  const assignedDevices = devices.filter(d => d.palmtec_id && !excludeDeviceIds.includes(d.id));
+  const selectedDevice = value ? devices.find(d => d.id === value) : null;
 
   return (
     <div className="space-y-1.5" ref={ref}>
@@ -98,13 +111,14 @@ function DevicePalmtecSelect({ label, value, onChange, excludePalmtecIds = [] })
           <button
             type="button"
             onClick={() => setOpen(p => !p)}
-            className="w-full flex items-center justify-between px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-slate-500 text-sm bg-white transition-all text-left"
+            className={`w-full flex items-center justify-between px-4 py-2.5 border rounded-xl focus:ring-2 text-sm bg-white transition-all text-left ${error ? errCls : okCls}`}
           >
-            <span className={displayValue ? 'text-slate-800 font-mono' : 'text-slate-400'}>
-              {displayValue ?? '— Select device —'}
+            <span className={selectedDevice ? 'text-slate-800 font-mono' : 'text-slate-400'}>
+              {selectedDevice ? `${selectedDevice.serial_number} (${selectedDevice.palmtec_id})` : '— Select device —'}
             </span>
             <ChevronDown size={16} className={`text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
           </button>
+          {error && <p className="text-xs text-red-500 mt-1">Required</p>}
 
           {open && (
             <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg max-h-52 overflow-y-auto">
@@ -119,8 +133,8 @@ function DevicePalmtecSelect({ label, value, onChange, excludePalmtecIds = [] })
               ) : assignedDevices.map(d => (
                 <div
                   key={d.id}
-                  onClick={() => select(String(d.palmtec_id))}
-                  className={`px-4 py-2.5 text-sm cursor-pointer flex items-center justify-between hover:bg-slate-50 ${String(d.palmtec_id) === displayValue ? 'bg-slate-100 font-medium' : ''}`}
+                  onClick={() => select(d.id)}
+                  className={`px-4 py-2.5 text-sm cursor-pointer flex items-center justify-between hover:bg-slate-50 ${d.id === value ? 'bg-slate-100 font-medium' : ''}`}
                 >
                   <span className="text-slate-500 font-mono text-xs">{d.serial_number}</span>
                   <span className="font-mono text-slate-800 text-xs font-semibold">{d.palmtec_id}</span>
@@ -134,17 +148,20 @@ function DevicePalmtecSelect({ label, value, onChange, excludePalmtecIds = [] })
   );
 }
 
-const SelectField = ({ label, name, value, onChange, options, loading = false }) => (
+const SelectField = ({ label, name, value, onChange, options, loading = false, error = false, required = true }) => (
   <div className="space-y-1.5">
-    <label className="text-sm font-semibold text-slate-700">{label}</label>
+    <label className="text-sm font-semibold text-slate-700">
+      {label}{required && <span className="text-red-500"> *</span>}
+    </label>
     {loading ? (
       <div className="w-full h-10 bg-slate-100 rounded-xl animate-pulse" />
     ) : (
       <div className="relative">
         <select
           name={name} value={value ?? ''} onChange={onChange}
-          className="w-full appearance-none px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-slate-500 focus:border-transparent text-sm transition-all bg-white pr-10"
+          className={`w-full appearance-none px-4 py-2.5 border rounded-xl focus:ring-2 focus:border-transparent text-sm transition-all bg-white pr-10 ${error ? errCls : okCls}`}
         >
+          <option value="" disabled>{`— Select ${label} —`}</option>
           {options.map(opt => (
             <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}
@@ -152,6 +169,7 @@ const SelectField = ({ label, name, value, onChange, options, loading = false })
         <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
       </div>
     )}
+    {error && <p className="text-xs text-red-500">Required</p>}
   </div>
 );
 
@@ -185,16 +203,18 @@ function SaveButton({ onSave, saving, loading, disabled, bottom = false }) {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
+const EMPTY_SET = new Set();
+
 const LANGUAGE_OPTIONS = [{ value: 0, label: 'Malayalam' }, { value: 1, label: 'Tamil' }];
 const FONT_OPTIONS     = [{ value: 0, label: 'Normal' },    { value: 1, label: 'Condensed' }];
 
 const EMPTY_DEVICE_FORM = {
-  palmtec_id: '',
+  device_id: '',
   user_pwd: '', master_pwd: '', supervisor_pwd: '', remove_pwd: '',
   half_per: '', con_per: '', phy_per: '', round_amt: '', luggage_unit_rate: '',
   main_display: '', main_display2: '',
   header1: '', header2: '', header3: '', footer1: '', footer2: '',
-  language_option: 0, report_font: 0,
+  language_option: '', report_font: '',
   st_fare_edit: false, st_max_amt: '', st_ratio: '', st_min_amt: '',
   st_roundoff_enable: false, st_roundoff_amt: '',
   roundoff: false, round_up: false, remove_ticket_flag: false,
@@ -215,52 +235,86 @@ const EMPTY_COMPANY_FORM = {
   st_ratio: undefined, st_min_amt: undefined, exp_enable: undefined,
 };
 
+// ── Validation ────────────────────────────────────────────────────────────────
+// Mirrors the conditional field visibility in SettingsFormFields below.
+
+function requiredFieldList(formData, isDevice) {
+  const list = [
+    ['user_pwd', 'User Password'], ['master_pwd', 'Master Password'],
+    ...(isDevice ? [['supervisor_pwd', 'Supervisor Password'], ['remove_pwd', 'Remove Password']] : []),
+    ['half_per', 'Half Fare (%)'], ['con_per', 'Concession (%)'], ['phy_per', 'PH Concession (%)'],
+    ['round_amt', 'Rounding Amount'], ['luggage_unit_rate', 'Luggage Unit Rate'],
+    ['main_display', 'Main Display Line 1'], ['main_display2', 'Main Display Line 2'],
+    ['header1', 'Header Line 1'], ['header2', 'Header Line 2'], ['header3', 'Header Line 3'],
+    ['footer1', 'Footer Line 1'], ['footer2', 'Footer Line 2'],
+    ['language_option', 'Language'], ['report_font', 'Report Font'],
+    ['stage_updation_msg', 'Stage Updation Msg'], ['default_stage', 'Default Stage'],
+  ];
+  if (!formData.st_fare_edit) {
+    list.push(['st_max_amt', 'ST Max Amount']);
+    if (isDevice) {
+      list.push(['st_ratio', 'ST Ratio'], ['st_min_amt', 'ST Min Amount']);
+    } else {
+      list.push(['st_min_con', 'ST Min Concession']);
+    }
+  }
+  if (formData.st_roundoff_enable) list.push(['st_roundoff_amt', 'Roundoff Amount (paise)']);
+  if (!isDevice) list.push(['ladies_ratio', 'Ladies Ratio (%)'], ['senior_ratio', 'Senior Citizen Ratio (%)']);
+  return list;
+}
+
+function validateRequiredFields(formData, isDevice) {
+  return requiredFieldList(formData, isDevice)
+    .filter(([name]) => formData[name] === '' || formData[name] === null || formData[name] === undefined);
+}
+
 // ── Shared Settings Form Sections ─────────────────────────────────────────────
 // Used by CompanySettingsTab and profile editor.
 
-function SettingsFormFields({ formData, onChange, loading = false, isDevice = true }) {
+function SettingsFormFields({ formData, onChange, loading = false, isDevice = true, fieldErrors = EMPTY_SET }) {
   // Helper to adapt SettToggle (no-arg callback) to the standard event-based onChange
   const tog = (name) => () =>
     onChange({ target: { name, type: 'checkbox', checked: !formData[name] } });
+  const err = (name) => fieldErrors.has(name);
 
   return (
     <div className="space-y-4">
 
       <SectionCard title="Passwords" icon={Smartphone}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <TextField label="User Password"       name="user_pwd"       value={formData.user_pwd}       onChange={onChange} loading={loading} />
-          <TextField label="Master Password"     name="master_pwd"     value={formData.master_pwd}     onChange={onChange} loading={loading} />
-          {isDevice && <TextField label="Supervisor Password" name="supervisor_pwd" value={formData.supervisor_pwd} onChange={onChange} loading={loading} />}
-          {isDevice && <TextField label="Remove Password"     name="remove_pwd"     value={formData.remove_pwd}     onChange={onChange} loading={loading} />}
+          <ConstrainedField label="User Password"       name="user_pwd"       value={formData.user_pwd}       onChange={onChange} maxLen={11} placeholder="e.g. 111111" loading={loading} error={err('user_pwd')} />
+          <ConstrainedField label="Master Password"     name="master_pwd"     value={formData.master_pwd}     onChange={onChange} maxLen={11} placeholder="e.g. 130827" loading={loading} error={err('master_pwd')} />
+          {isDevice && <ConstrainedField label="Supervisor Password" name="supervisor_pwd" value={formData.supervisor_pwd} onChange={onChange} maxLen={11} placeholder="e.g. 123456" loading={loading} error={err('supervisor_pwd')} />}
+          {isDevice && <ConstrainedField label="Remove Password"     name="remove_pwd"     value={formData.remove_pwd}     onChange={onChange} maxLen={11} placeholder="e.g. 999999" loading={loading} error={err('remove_pwd')} />}
         </div>
       </SectionCard>
 
       <SectionCard title="Fare Percentages & Amounts" icon={BadgeDollarSign}>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <ConstrainedField label="Half Fare (%)"      name="half_per"          value={formData.half_per}          onChange={onChange} maxLen={5} allowDecimal loading={loading} />
-          <ConstrainedField label="Concession (%)"     name="con_per"           value={formData.con_per}           onChange={onChange} maxLen={5} allowDecimal loading={loading} />
-          <ConstrainedField label="PH Concession (%)"  name="phy_per"           value={formData.phy_per}           onChange={onChange} maxLen={5} allowDecimal loading={loading} />
-          <ConstrainedField label="Rounding Amount"    name="round_amt"         value={formData.round_amt}         onChange={onChange} maxLen={6} allowDecimal loading={loading} />
-          <ConstrainedField label="Luggage Unit Rate"  name="luggage_unit_rate" value={formData.luggage_unit_rate} onChange={onChange} maxLen={7} allowDecimal loading={loading} />
+          <ConstrainedField label="Half Fare (%)"      name="half_per"          value={formData.half_per}          onChange={onChange} maxLen={5} allowDecimal placeholder="e.g. 50.00" loading={loading} error={err('half_per')} />
+          <ConstrainedField label="Concession (%)"     name="con_per"           value={formData.con_per}           onChange={onChange} maxLen={5} allowDecimal placeholder="e.g. 25.00" loading={loading} error={err('con_per')} />
+          <ConstrainedField label="PH Concession (%)"  name="phy_per"           value={formData.phy_per}           onChange={onChange} maxLen={5} allowDecimal placeholder="e.g. 30.00" loading={loading} error={err('phy_per')} />
+          <ConstrainedField label="Rounding Amount"    name="round_amt"         value={formData.round_amt}         onChange={onChange} maxLen={6} allowDecimal placeholder="e.g. 50.00" loading={loading} error={err('round_amt')} />
+          <ConstrainedField label="Luggage Unit Rate"  name="luggage_unit_rate" value={formData.luggage_unit_rate} onChange={onChange} maxLen={7} allowDecimal placeholder="e.g. 3.00"  loading={loading} error={err('luggage_unit_rate')} />
         </div>
       </SectionCard>
 
       <SectionCard title="Ticket Display — Headers & Footers" icon={Ticket}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <TextField label="Main Display Line 1" name="main_display"  value={formData.main_display}  onChange={onChange} loading={loading} />
-          <TextField label="Main Display Line 2" name="main_display2" value={formData.main_display2} onChange={onChange} loading={loading} />
-          <TextField label="Header Line 1"       name="header1"       value={formData.header1}       onChange={onChange} loading={loading} />
-          <TextField label="Header Line 2"       name="header2"       value={formData.header2}       onChange={onChange} loading={loading} />
-          <TextField label="Header Line 3"       name="header3"       value={formData.header3}       onChange={onChange} loading={loading} />
-          <TextField label="Footer Line 1"       name="footer1"       value={formData.footer1}       onChange={onChange} loading={loading} />
-          <TextField label="Footer Line 2"       name="footer2"       value={formData.footer2}       onChange={onChange} loading={loading} />
+          <TextField label="Main Display Line 1" name="main_display"  value={formData.main_display}  onChange={onChange} placeholder="e.g. Your Company Name" loading={loading} error={err('main_display')} />
+          <TextField label="Main Display Line 2" name="main_display2" value={formData.main_display2} onChange={onChange} placeholder="e.g. Bus Ticketing"      loading={loading} error={err('main_display2')} />
+          <TextField label="Header Line 1"       name="header1"       value={formData.header1}       onChange={onChange} placeholder="e.g. Your Transport Co."  loading={loading} error={err('header1')} />
+          <TextField label="Header Line 2"       name="header2"       value={formData.header2}       onChange={onChange} placeholder="e.g. PO Box 123 City"     loading={loading} error={err('header2')} />
+          <TextField label="Header Line 3"       name="header3"       value={formData.header3}       onChange={onChange} placeholder="e.g. District Name"      loading={loading} error={err('header3')} />
+          <TextField label="Footer Line 1"       name="footer1"       value={formData.footer1}       onChange={onChange} placeholder="e.g. Not Transferable"    loading={loading} error={err('footer1')} />
+          <TextField label="Footer Line 2"       name="footer2"       value={formData.footer2}       onChange={onChange} placeholder="e.g. Your Company Pvt Ltd" loading={loading} error={err('footer2')} />
         </div>
       </SectionCard>
 
       <SectionCard title="Language & Font" icon={Settings}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <SelectField label="Language"    name="language_option" value={formData.language_option} onChange={onChange} options={LANGUAGE_OPTIONS} loading={loading} />
-          <SelectField label="Report Font" name="report_font"     value={formData.report_font}     onChange={onChange} options={FONT_OPTIONS}     loading={loading} />
+          <SelectField label="Language"    name="language_option" value={formData.language_option} onChange={onChange} options={LANGUAGE_OPTIONS} loading={loading} error={err('language_option')} />
+          <SelectField label="Report Font" name="report_font"     value={formData.report_font}     onChange={onChange} options={FONT_OPTIONS}     loading={loading} error={err('report_font')} />
         </div>
       </SectionCard>
 
@@ -269,21 +323,21 @@ function SettingsFormFields({ formData, onChange, loading = false, isDevice = tr
           <SettToggle label="ST Fare Edit" checked={!!formData.st_fare_edit} onChange={tog('st_fare_edit')} />
           {!formData.st_fare_edit && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pl-1 pt-1 border-l-2 border-slate-200">
-              <ConstrainedField label="ST Max Amount" name="st_max_amt" value={formData.st_max_amt} onChange={onChange} maxLen={isDevice ? 5 : 10} allowDecimal loading={loading} />
+              <ConstrainedField label="ST Max Amount" name="st_max_amt" value={formData.st_max_amt} onChange={onChange} maxLen={isDevice ? 5 : 10} allowDecimal placeholder="e.g. 0" loading={loading} error={err('st_max_amt')} />
               {isDevice ? (
                 <>
-                  <ConstrainedField label="ST Ratio"      name="st_ratio"   value={formData.st_ratio}   onChange={onChange} maxLen={2} loading={loading} />
-                  <ConstrainedField label="ST Min Amount" name="st_min_amt" value={formData.st_min_amt} onChange={onChange} maxLen={6} allowDecimal loading={loading} />
+                  <ConstrainedField label="ST Ratio"      name="st_ratio"   value={formData.st_ratio}   onChange={onChange} maxLen={2} placeholder="e.g. 0" loading={loading} error={err('st_ratio')} />
+                  <ConstrainedField label="ST Min Amount" name="st_min_amt" value={formData.st_min_amt} onChange={onChange} maxLen={6} allowDecimal placeholder="e.g. 0" loading={loading} error={err('st_min_amt')} />
                 </>
               ) : (
-                <ConstrainedField label="ST Min Concession" name="st_min_con" value={formData.st_min_con} onChange={onChange} maxLen={10} allowDecimal loading={loading} />
+                <ConstrainedField label="ST Min Concession" name="st_min_con" value={formData.st_min_con} onChange={onChange} maxLen={10} allowDecimal placeholder="e.g. 0" loading={loading} error={err('st_min_con')} />
               )}
             </div>
           )}
           <SettToggle label="ST Roundoff" checked={!!formData.st_roundoff_enable} onChange={tog('st_roundoff_enable')} />
           {formData.st_roundoff_enable && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pl-1 pt-1 border-l-2 border-slate-200">
-              <ConstrainedField label="Roundoff Amount (paise)" name="st_roundoff_amt" value={formData.st_roundoff_amt} onChange={onChange} maxLen={3} allowDecimal loading={loading} />
+              <ConstrainedField label="Roundoff Amount (paise)" name="st_roundoff_amt" value={formData.st_roundoff_amt} onChange={onChange} maxLen={3} allowDecimal placeholder="e.g. 0" loading={loading} error={err('st_roundoff_amt')} />
             </div>
           )}
         </div>
@@ -314,8 +368,8 @@ function SettingsFormFields({ formData, onChange, loading = false, isDevice = tr
       {!isDevice && (
         <SectionCard title="ETM Concession & Display" icon={BadgeDollarSign}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <ConstrainedField label="Ladies Ratio (%)"       name="ladies_ratio" value={formData.ladies_ratio} onChange={onChange} maxLen={3} loading={loading} />
-            <ConstrainedField label="Senior Citizen Ratio (%)" name="senior_ratio" value={formData.senior_ratio} onChange={onChange} maxLen={3} loading={loading} />
+            <ConstrainedField label="Ladies Ratio (%)"       name="ladies_ratio" value={formData.ladies_ratio} onChange={onChange} maxLen={3} placeholder="e.g. 0" loading={loading} error={err('ladies_ratio')} />
+            <ConstrainedField label="Senior Citizen Ratio (%)" name="senior_ratio" value={formData.senior_ratio} onChange={onChange} maxLen={3} placeholder="e.g. 0" loading={loading} error={err('senior_ratio')} />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
             <SettToggle label="Big Font on ETM" checked={!!formData.big_font}      onChange={tog('big_font')} />
@@ -326,8 +380,8 @@ function SettingsFormFields({ formData, onChange, loading = false, isDevice = tr
 
       <SectionCard title="Other Settings" icon={Settings}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <ConstrainedField label="Stage Updation Msg" name="stage_updation_msg" value={formData.stage_updation_msg} onChange={onChange} maxLen={3} loading={loading} />
-          <ConstrainedField label="Default Stage"      name="default_stage"      value={formData.default_stage}      onChange={onChange} maxLen={4} loading={loading} />
+          <ConstrainedField label="Stage Updation Msg" name="stage_updation_msg" value={formData.stage_updation_msg} onChange={onChange} maxLen={3} placeholder="e.g. 0" loading={loading} error={err('stage_updation_msg')} />
+          <ConstrainedField label="Default Stage"      name="default_stage"      value={formData.default_stage}      onChange={onChange} maxLen={4} placeholder="e.g. 1" loading={loading} error={err('default_stage')} />
         </div>
       </SectionCard>
 
@@ -338,9 +392,10 @@ function SettingsFormFields({ formData, onChange, loading = false, isDevice = tr
 // ── Company Settings Tab ──────────────────────────────────────────────────────
 
 function CompanySettingsTab({ setHeaderAction }) {
-  const [formData, setFormData] = useState(EMPTY_COMPANY_FORM);
-  const [loading, setLoading]   = useState(true);
-  const [saving, setSaving]     = useState(false);
+  const [formData, setFormData]       = useState(EMPTY_COMPANY_FORM);
+  const [loading, setLoading]         = useState(true);
+  const [saving, setSaving]           = useState(false);
+  const [fieldErrors, setFieldErrors] = useState(EMPTY_SET);
 
   useEffect(() => {
     api.get(`${BASE_URL}/masterdata/settings`)
@@ -352,9 +407,17 @@ function CompanySettingsTab({ setHeaderAction }) {
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
+    setFieldErrors(prev => { if (!prev.has(name)) return prev; const n = new Set(prev); n.delete(name); return n; });
   };
 
   const handleSave = useCallback(async () => {
+    const missing = validateRequiredFields(formData, false);
+    if (missing.length) {
+      setFieldErrors(new Set(missing.map(([n]) => n)));
+      window.alert(`Please fill in the following required field(s): ${missing.map(([, label]) => label).join(', ')}`);
+      return false;
+    }
+    setFieldErrors(EMPTY_SET);
     setSaving(true);
     try {
       const res = await api.put(`${BASE_URL}/masterdata/settings`, formData);
@@ -380,7 +443,7 @@ function CompanySettingsTab({ setHeaderAction }) {
 
   return (
     <div className="space-y-6">
-      <SettingsFormFields formData={formData} onChange={handleChange} loading={loading} isDevice={false} />
+      <SettingsFormFields formData={formData} onChange={handleChange} loading={loading} isDevice={false} fieldErrors={fieldErrors} />
       <div className="flex justify-end pt-2">
         <SaveButton onSave={handleSave} saving={saving} loading={loading} disabled={false} bottom />
       </div>
@@ -397,6 +460,7 @@ function ProfilesTab({ setHeaderAction }) {
   const [formData, setFormData]       = useState({ ...EMPTY_DEVICE_FORM, name: '' });
   const [saving, setSaving]           = useState(false);
   const [deleting, setDeleting]       = useState(null);
+  const [fieldErrors, setFieldErrors] = useState(EMPTY_SET);
 
   const fetchProfiles = () => {
     setLoadingList(true);
@@ -410,6 +474,7 @@ function ProfilesTab({ setHeaderAction }) {
 
   const openNew = useCallback(async () => {
     setFormData({ ...EMPTY_DEVICE_FORM, name: '' });
+    setFieldErrors(EMPTY_SET);
     setEditingId('new');
     try {
       const res = await api.get(`${BASE_URL}/masterdata/settings`);
@@ -437,18 +502,27 @@ function ProfilesTab({ setHeaderAction }) {
   useEffect(() => () => setHeaderAction(null), [setHeaderAction]);
 
   const openEdit = (profile) => {
-    setFormData({ ...EMPTY_DEVICE_FORM, ...profile });
+    setFormData({ ...EMPTY_DEVICE_FORM, ...profile, device_id: profile.device });
+    setFieldErrors(EMPTY_SET);
     setEditingId(profile.id);
   };
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
+    setFieldErrors(prev => { if (!prev.has(name)) return prev; const n = new Set(prev); n.delete(name); return n; });
   };
 
   const handleSave = async () => {
-    if (!formData.name?.trim()) { window.alert('Profile name is required.'); return false; }
-    if (!formData.palmtec_id)   { window.alert('Palmtec ID is required. Select a device.'); return false; }
+    const missing = validateRequiredFields(formData, true);
+    if (!formData.name?.trim()) missing.unshift(['name', 'Profile Name']);
+    if (!formData.device_id)    missing.push(['device_id', 'Device']);
+    if (missing.length) {
+      setFieldErrors(new Set(missing.map(([n]) => n)));
+      window.alert(`Please fill in the following required field(s): ${missing.map(([, label]) => label).join(', ')}`);
+      return false;
+    }
+    setFieldErrors(EMPTY_SET);
     setSaving(true);
     try {
       let res;
@@ -506,18 +580,20 @@ function ProfilesTab({ setHeaderAction }) {
             value={formData.name}
             onChange={handleChange}
             placeholder="e.g. City Route Default"
+            error={fieldErrors.has('name')}
           />
           <DevicePalmtecSelect
-            label="Palmtec ID"
-            value={formData.palmtec_id}
+            label="Device"
+            value={formData.device_id}
             onChange={handleChange}
-            excludePalmtecIds={profiles
+            excludeDeviceIds={profiles
               .filter(p => editingId === 'new' || p.id !== editingId)
-              .map(p => String(p.palmtec_id))}
+              .map(p => p.device)}
+            error={fieldErrors.has('device_id')}
           />
         </div>
 
-        <SettingsFormFields formData={formData} onChange={handleChange} isDevice />
+        <SettingsFormFields formData={formData} onChange={handleChange} isDevice fieldErrors={fieldErrors} />
 
         <div className="flex justify-end pt-2 gap-3">
           <button
@@ -559,6 +635,7 @@ function ProfilesTab({ setHeaderAction }) {
                 <div className="min-w-0">
                   <p className="font-semibold text-sm text-slate-800 truncate">{p.name}</p>
                   <p className="text-xs text-slate-500 mt-0.5">
+                    {p.device_serial_number ? `${p.device_serial_number} · ` : ''}
                     Half fare {p.half_per}% · Lang {p.language_option === 0 ? 'Malayalam' : 'Tamil'}
                   </p>
                 </div>
