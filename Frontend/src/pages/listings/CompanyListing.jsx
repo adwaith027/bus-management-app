@@ -298,7 +298,7 @@ export default function CompanyListing() {
   };
 
   // ── Create form completeness ──────────────────────────────────────────────
-  const sec1 = !!(form.company_name && form.company_email && form.contact_person && form.contact_number);
+  const sec1 = !!(form.company_name && form.company_email && form.contact_person && form.contact_number && form.gst_number);
   const sec2 = !!(form.address && form.state && form.district);
   const sec3 = !!(form.user_username && form.user_email && form.user_password);
   // Pool validation errors (dealer_admin create only)
@@ -874,7 +874,7 @@ export default function CompanyListing() {
                 { label: 'Email',          name: 'company_email',  type: 'email', required: true },
                 { label: 'Contact Person', name: 'contact_person', required: true },
                 { label: 'Contact Number', name: 'contact_number', required: true },
-                { label: 'GST Number',           name: 'gst_number' },
+                { label: 'GST Number',           name: 'gst_number', required: true },
                 { label: 'Payment Aggregator Merchant ID', name: 'aggregator_merchant_id' },
               ].map(f => (
                 <div key={f.name} className="space-y-1.5">
@@ -1112,7 +1112,7 @@ export default function CompanyListing() {
                         className="flex-1 px-3 py-2 border border-slate-300 rounded-r-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white" />
                     </div>
                   </Field>
-                  <Field label="GST Number" hint="Optional" span={1}>
+                  <Field label="GST Number" required span={1}>
                     <input value={form.gst_number} onChange={e => set('gst_number', e.target.value)} placeholder="29ABCDE1234F1Z5" className={inputCls} />
                   </Field>
                   <Field label="Payment Aggregator Merchant ID" hint="Optional" span={1}>
