@@ -387,6 +387,8 @@ class MdbImportService:
     @staticmethod
     def _to_bool(val):
         """Convert MDB integer flag (0/1 or "0"/"1" or "0.0") to Python bool"""
+        if isinstance(val, bool):
+            return val
         try:
             return bool(int(float(str(val or 0))))
         except (ValueError, TypeError):
@@ -419,12 +421,17 @@ class MdbImportService:
     @staticmethod
     def _parse_date(val):
         """
-        Safely parse a date string from MDB export.
-        mdbtools exports dates in various formats like "01/15/2024" or "2024-01-15".
+        Safely parse a date value from MDB export.
+        mdbtools (Linux) yields strings like "01/15/2024" or "2024-01-15".
+        pyodbc (Windows) yields native datetime/date objects directly.
         Returns a date object or raises ValueError if unparseable.
         Non-nullable DateField — so we raise on empty, caller must handle.
         """
-        from datetime import datetime
+        from datetime import datetime, date
+        if isinstance(val, datetime):
+            return val.date()
+        if isinstance(val, date):
+            return val
         raw = str(val or "").strip()
         if not raw:
             raise ValueError("Empty date value")
@@ -439,12 +446,17 @@ class MdbImportService:
     @staticmethod
     def _parse_time(val):
         """
-        Safely parse a time string from MDB export.
-        mdbtools exports times like "08:30:00" or "08:30:00 AM".
+        Safely parse a time value from MDB export.
+        mdbtools (Linux) yields strings like "08:30:00" or "08:30:00 AM".
+        pyodbc (Windows) yields native datetime/time objects directly.
         Returns a time object or raises ValueError if unparseable.
         Non-nullable TimeField — so we raise on empty, caller must handle.
         """
-        from datetime import datetime
+        from datetime import datetime, time as time_type
+        if isinstance(val, datetime):
+            return val.time()
+        if isinstance(val, time_type):
+            return val
         raw = str(val or "").strip()
         if not raw:
             raise ValueError("Empty time value")
@@ -1345,13 +1357,6 @@ class MdbReader:
 
     @staticmethod
     def read_all_tables(mdb_path, password=None):
-        if sys.platform == 'win32':
-            raise MdbReadError(
-                'Windows server detected. mdb-export (mdbtools) is not available on Windows. '
-                'MDB import requires a Linux server with mdbtools installed. '
-                'Contact support to enable Windows-compatible import (pyodbc).'
-            )
-
         tables_to_read = [
             'bustype',
             'EMPLOYEETYPE',
@@ -1384,6 +1389,13 @@ class MdbReader:
 
     @staticmethod
     def _read_table(mdb_path, table_name, password=None):
+        if sys.platform == 'win32':
+            return MdbReader._read_table_pyodbc(mdb_path, table_name, password)
+        return MdbReader._read_table_mdbtools(mdb_path, table_name, password)
+
+    @staticmethod
+    def _read_table_mdbtools(mdb_path, table_name, password=None):
+        """Linux path: shells out to mdb-export (mdbtools)."""
         cmd = ['mdb-export', mdb_path, table_name]
 
         env = os.environ.copy()
@@ -1413,4 +1425,71 @@ class MdbReader:
             return []
 
         reader = csv.DictReader(io.StringIO(result.stdout))
-        return list(reader)
+        return [
+            {k: MdbReader._strip_control_chars(v) for k, v in row.items()}
+            for row in reader
+        ]
+
+    @staticmethod
+    def _strip_control_chars(value):
+        """mdb-export leaks NUL/control bytes from fixed-length Jet text field
+        padding; these survive str.strip() (not whitespace) and render as an
+        invisible tofu glyph in the UI."""
+        if not isinstance(value, str):
+            return value
+        return ''.join(ch for ch in value if ch == '\t' or ch >= ' ')
+
+    @staticmethod
+    def _read_table_pyodbc(mdb_path, table_name, password=None):
+        """
+        Windows path: reads via ODBC using the Microsoft Access Database
+        Engine driver. Bitness of the driver must match the Python
+        interpreter (32-bit vs 64-bit) — install "Microsoft Access Database
+        Engine 2016 Redistributable" matching the server's Python build.
+        Returns native Python types (int, float, Decimal, datetime, date,
+        time, str, None) — callers already normalize these via str()/
+        isinstance() so no CSV-string conversion is needed here.
+        """
+        try:
+            import pyodbc
+        except ImportError:
+            raise MdbReadError(
+                "pyodbc not installed. Run: pip install pyodbc"
+            )
+
+        conn_str = (
+            r"DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};"
+            f"DBQ={mdb_path};"
+        )
+        if password:
+            conn_str += f"PWD={password};"
+
+        try:
+            conn = pyodbc.connect(conn_str, timeout=30)
+        except pyodbc.Error as e:
+            msg = str(e).lower()
+            if 'password' in msg or 'not a valid password' in msg or 'permission' in msg:
+                raise MdbPasswordError()
+            if 'data source name not found' in msg or 'im002' in msg:
+                raise MdbReadError(
+                    "Microsoft Access Database Engine driver not installed, or its "
+                    "bitness (32/64-bit) doesn't match this Python install. "
+                    "Install the matching 'Access Database Engine Redistributable'."
+                )
+            raise MdbReadError(f"Failed to open MDB file: {e}")
+
+        try:
+            cursor = conn.cursor()
+            try:
+                cursor.execute(f"SELECT * FROM [{table_name}]")
+            except pyodbc.Error as e:
+                msg = str(e).lower()
+                if 'password' in msg or 'permission' in msg:
+                    raise MdbPasswordError()
+                raise MdbReadError(f"query failed for '{table_name}': {e}")
+
+            columns = [col[0] for col in cursor.description]
+            rows = [dict(zip(columns, record)) for record in cursor.fetchall()]
+            return rows
+        finally:
+            conn.close()
