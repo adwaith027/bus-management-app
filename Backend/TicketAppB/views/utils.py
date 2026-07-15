@@ -34,7 +34,19 @@ _TIER_ERROR = {"error": "This report requires Intermediate tier or above."}
 _PREMIUM_TIER_ERROR = {"error": "This feature requires Premium tier or above."}
 
 def _meets_tier(user, minimum: str) -> bool:
-    """True if user's tier is >= minimum. Non-company roles are always allowed."""
+    """
+    True if user's tier is >= minimum. Non-company roles are always allowed.
+
+    This gate runs at the plain Django path() level, outside the wrapped
+    view's own @api_view/@permission_classes — so request.user here is set by
+    Django's built-in AuthenticationMiddleware, not by this project's custom
+    cookie-based DRF SessionAuthentication. For a request with no valid Django
+    session that's always AnonymousUser, which has no .role. Let those through
+    so the inner view's IsAuthenticated permission can reject them with a
+    proper 401 instead of crashing here with an AttributeError.
+    """
+    if not getattr(user, 'is_authenticated', False):
+        return True
     if user.role not in (UserRole.COMPANY_ADMIN, UserRole.COMPANY_USER):
         return True
     return _TIER_ORDER.get(user.tier or 'basic', 0) >= _TIER_ORDER.get(minimum, 0)
