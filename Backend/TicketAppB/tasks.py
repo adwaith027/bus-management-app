@@ -1700,17 +1700,82 @@ def reconcile_aggregator_transaction(self, transaction_id):
         ).first()
 
         # Tier 2: device-side write-back failed/dropped, but aggregator's posting
-        # still arrived. narration == bqrMerchantId; first 6 chars = ticket_number.
-        if not ticket and txn.narration and len(txn.narration) >= 6:
+        # still arrived. narration == bqrMerchantId, packed by device firmware
+        # (create_bqrMerchantId): [0:6]=ticket_number ASCII, [6:10]=date hex
+        # (d16 = (yearOffset<<9)|(month<<5)|day, yearOffset=Y-2000), [10:14]=time
+        # hex (t16 = (hour<<11)|(minute<<5)|(second/2)), [-5:]=palmtec_id.
+        # yearOffset can decode as 0 (device RTC year not set) even though
+        # month/day/time are correct, so year is trusted only if it decodes
+        # plausibly; otherwise assume the payment's own year.
+        if not ticket and txn.narration and len(txn.narration) >= 14:
             try:
                 ticket_number = str(int(txn.narration[:6]))
             except ValueError:
                 ticket_number = None
-            if ticket_number:
-                ticket = TransactionData.objects.filter(
-                    ticket_number=ticket_number,
-                    company_code=company,
-                ).first()
+            try:
+                palmtec_id = str(int(txn.narration[-5:]))
+            except ValueError:
+                palmtec_id = None
+
+            def _seconds(t):
+                return t.hour * 3600 + t.minute * 60 + t.second
+
+            if ticket_number and palmtec_id:
+                # Tier 2a: exact date/time decoded straight off the device's own
+                # narration — deterministic, not a proximity guess.
+                decoded_date = decoded_time = None
+                try:
+                    d16 = int(txn.narration[6:10], 16)
+                    t16 = int(txn.narration[10:14], 16)
+                    year_offset = d16 >> 9
+                    month = (d16 >> 5) & 0xF
+                    day = d16 & 0x1F
+                    hour = t16 >> 11
+                    minute = (t16 >> 5) & 0x3F
+                    second = (t16 & 0x1F) * 2
+                    year = 2000 + year_offset if year_offset else txn.transaction_date.year
+                    decoded_date = date(year, month, day)
+                    decoded_time = time(hour, minute, second)
+                except ValueError:
+                    decoded_date = decoded_time = None
+
+                if decoded_date and decoded_time:
+                    target_seconds = _seconds(decoded_time)
+                    exact_candidates = [
+                        t for t in TransactionData.objects.filter(
+                            ticket_number=ticket_number,
+                            palmtec_id=palmtec_id,
+                            company_code=company,
+                            ticket_date=decoded_date,
+                        )
+                        # ±1s to absorb the seconds/2 truncation on the way in.
+                        if abs(_seconds(t.ticket_time) - target_seconds) <= 1
+                    ]
+                    if len(exact_candidates) == 1:
+                        ticket = exact_candidates[0]
+
+                # Tier 2b: narration didn't decode cleanly (older/other firmware) —
+                # pin to device + payment day, disambiguate by closest ticket_time.
+                if not ticket:
+                    candidates = list(TransactionData.objects.filter(
+                        ticket_number=ticket_number,
+                        palmtec_id=palmtec_id,
+                        company_code=company,
+                        ticket_date=txn.transaction_date,
+                    ))
+                    if len(candidates) == 1:
+                        ticket = candidates[0]
+                    elif len(candidates) > 1:
+                        txn_seconds = _seconds(txn.transaction_time)
+                        closest = min(
+                            candidates,
+                            key=lambda t: abs(_seconds(t.ticket_time) - txn_seconds),
+                        )
+                        # Only accept if unambiguously closest and within a sane
+                        # window — payment is expected within minutes of issuance.
+                        gap = abs(_seconds(closest.ticket_time) - txn_seconds)
+                        if gap <= 1800:
+                            ticket = closest
 
         if not ticket:
             _fail(
