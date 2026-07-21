@@ -208,7 +208,7 @@ def _validate_device(log, palmtec_id_raw, company):
     device = ETMDevice.objects.filter(
         palmtec_id=palmtec_id,
         company=company,
-        allocation_status=ETMDevice.Al.locationStatus.ALLOCATED,
+        allocation_status=ETMDevice.AllocationStatus.ALLOCATED,
     ).first()
 
     if device is None:
